@@ -191,10 +191,13 @@ function loginView() {
 function workFigure(w, i, showArtist) {
   const meta = [showArtist ? w.artist : null, w.date || w.year, w.medium]
     .filter(Boolean).join(" · ");
+  const dim = (w.width && w.height)
+    ? '<span class="wdim">' + w.width + " × " + w.height + "</span>"
+    : "";
   return (
     '<figure class="work" data-i="' + i + '" data-id="' + w.id + '">' +
-      '<img src="/thumb/' + w.id + '" loading="lazy" alt="">' +
-      '<span class="checkmark" aria-hidden="true"></span>' +
+      '<div class="wimg"><img src="/thumb/' + w.id + '" loading="lazy" alt="">' +
+      '<span class="checkmark" aria-hidden="true"></span>' + dim + "</div>" +
       '<figcaption><div class="wt">' + esc(w.title) + "</div>" +
       (meta ? '<div class="wm">' + esc(meta) + "</div>" : "") +
       "</figcaption></figure>"
@@ -445,6 +448,8 @@ async function artistView(name) {
     wireDisclosure("rel-toggle", "rel-strip");
     if (isOwner()) { wireRename(name); wireRepoint(name); }
     bindWorks(works, false, () => artistView(name), browseCtx());
+    const g = document.getElementById("grid");
+    if (g) g.classList.add("show-dims");   // dimension pills only on the artist page
   } catch (e) { errbox(e); }
 }
 

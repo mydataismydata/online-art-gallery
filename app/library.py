@@ -10,15 +10,39 @@ import time
 from collections import Counter, OrderedDict
 from pathlib import Path
 
+from PIL import Image
+
 from . import config
 from .names import (safe_name, era_from, parse_year, clean_title_text,
                     artist_sort_key, strip_diacritics)
+
+# The gallery is built around enormous images; don't let Pillow refuse to read them.
+Image.MAX_IMAGE_PIXELS = None
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 _lock = threading.RLock()
 _state = {"scanned_at": 0.0, "works": [], "by_id": {}, "src_ids": set()}
 _TTL = 2.0
+
+# Cache each file's (width, height) so repeated scans don't re-open images.
+# Keyed by rel path -> (mtime_int, (w, h) | None).
+_dim_cache = {}
+
+
+def _image_dims(path, rel, mtime):
+    m = int(mtime)
+    cached = _dim_cache.get(rel)
+    if cached and cached[0] == m:
+        return cached[1]
+    dims = None
+    try:
+        with Image.open(str(path)) as im:
+            dims = im.size  # read from the header; no full decode
+    except Exception:
+        dims = None
+    _dim_cache[rel] = (m, dims)
+    return dims
 
 _MARKER_RE = re.compile(r"\s*\[([a-z]+)-([^\]\s]+)\]\s*$")
 
@@ -64,9 +88,12 @@ def _work_from_file(path, artist_dir_name):
     date_text = meta.get("date") or f_date
     year = meta.get("year") or parse_year(date_text)
     st = path.stat()
+    dims = _image_dims(path, rel, st.st_mtime)
     return {
         "id": wid,
         "rel": rel,
+        "width": dims[0] if dims else None,
+        "height": dims[1] if dims else None,
         "artist": meta.get("artist") or artist_dir_name,
         "title": title,
         "date": date_text,
