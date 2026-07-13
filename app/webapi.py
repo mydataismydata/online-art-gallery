@@ -284,6 +284,22 @@ def api_artist_rename():
     return jsonify({"moved": moved, "errors": errors, "to": to})
 
 
+# Set an artist's representative thumbnail to one of their works (owner only).
+@bp.post("/api/artist/cover")
+@auth.require_role("owner")
+def api_artist_cover():
+    data = request.get_json(silent=True) or {}
+    artist = (data.get("artist") or "").strip()
+    wid = (data.get("work_id") or "").strip()
+    if not artist or not wid:
+        return jsonify({"error": "artist and work_id are required."}), 400
+    w = library.get(wid)
+    if not w or (w.get("artist") or "").strip().casefold() != artist.casefold():
+        return jsonify({"error": "That work isn't one of this artist's."}), 400
+    artistinfo.set_cover(artist, wid)
+    return jsonify({"ok": True, "cover": wid})
+
+
 @bp.post("/api/works/delete")
 @auth.require_role("owner")
 def api_works_delete():

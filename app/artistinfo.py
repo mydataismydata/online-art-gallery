@@ -26,7 +26,7 @@ _ARTIST_OCCUPATIONS = {
 }
 
 FIELDS = ("name", "born", "died", "birthplace", "nationality", "movements",
-          "description", "wikidata_id", "wikipedia_url", "source", "updated")
+          "description", "wikidata_id", "wikipedia_url", "source", "updated", "cover")
 
 
 def _path(name):
@@ -45,10 +45,29 @@ def load(name):
 
 def save(name, data):
     clean = {k: data.get(k) for k in FIELDS if data.get(k) not in (None, "", [])}
+    # 'cover' is managed separately (set_cover); a bio/Wikidata save carries no
+    # cover, so keep any existing one rather than dropping the chosen thumbnail.
+    if not clean.get("cover"):
+        existing = load(name)
+        if existing and existing.get("cover"):
+            clean["cover"] = existing["cover"]
     clean["name"] = name
     clean["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
     _path(name).write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
     return clean
+
+
+def set_cover(name, work_id):
+    """Set (or clear, when work_id is falsy) the artist's representative thumbnail.
+    Written directly so existing bio fields are preserved untouched."""
+    data = load(name) or {"name": name}
+    if work_id:
+        data["cover"] = work_id
+    else:
+        data.pop("cover", None)
+    data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    _path(name).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return data
 
 
 def normalize_manual(payload):

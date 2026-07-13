@@ -171,6 +171,17 @@ def query_works(artist=None, era=None, medium=None, style=None, q=None):
     return out
 
 
+def cover_id(name, ws):
+    """The representative thumbnail for an artist's works: the owner-chosen cover
+    (set from the artist page) when it still exists, otherwise the first work."""
+    from . import artistinfo  # local import avoids an import cycle at module load
+    meta = artistinfo.load(name)
+    chosen = meta.get("cover") if meta else None
+    if chosen and any(w["id"] == chosen for w in ws):
+        return chosen
+    return ws[0]["id"]
+
+
 def artists():
     groups = OrderedDict()
     for w in all_works():
@@ -181,7 +192,7 @@ def artists():
         out.append({
             "name": name,
             "count": len(ws),
-            "cover": ws[0]["id"],
+            "cover": cover_id(name, ws),
             "year_min": min(years) if years else None,
             "year_max": max(years) if years else None,
         })

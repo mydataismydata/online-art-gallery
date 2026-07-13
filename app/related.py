@@ -80,7 +80,7 @@ def related_artists(name, limit=8):
         out.append({
             "name": other,
             "count": len(ws),
-            "cover": ws[0]["id"],
+            "cover": library.cover_id(other, ws),
             "score": score,
             "why": " · ".join(why[:2]),
         })

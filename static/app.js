@@ -207,12 +207,14 @@ function workFigure(w, i, showArtist) {
 /* The available Select-mode actions depend on role + page. On museum grids a
    curator can collect and an owner can also delete; on a collection they own an
    editor can remove. Visitors get no toolbar at all (the grid stays view-only). */
-function browseCtx() {
+function browseCtx(opts) {
+  opts = opts || {};
   const actions = [];
   if (canCurate()) actions.push("collect");
   if (isOwner()) actions.push("metadata");
+  if (isOwner() && opts.artist) actions.push("setcover");  // artist pages only
   if (isOwner()) actions.push("delete");
-  return { actions };
+  return { actions, artist: opts.artist };
 }
 function collectionCtx(c) {
   return c.can_edit ? { actions: ["uncollect"], collectionId: c.id } : { actions: [] };
@@ -277,6 +279,9 @@ function renderSelCtl(works, rerender, ctx) {
     html += '<button id="selcollect" class="toolbtn"' + (n ? "" : " disabled") + ">Add to collection" + tag + "</button>";
   if (ctx.actions.includes("metadata"))
     html += '<button id="selmeta" class="toolbtn"' + (n ? "" : " disabled") + ">Find metadata" + tag + "</button>";
+  if (ctx.actions.includes("setcover"))
+    html += '<button id="selcover" class="toolbtn"' + (n === 1 ? "" : " disabled") +
+      ' title="Pick exactly one work">Set as thumbnail</button>';
   if (ctx.actions.includes("uncollect"))
     html += '<button id="seluncollect" class="danger"' + (n ? "" : " disabled") + ">Remove" + tag + "</button>";
   if (ctx.actions.includes("delete"))
@@ -297,6 +302,24 @@ function renderSelCtl(works, rerender, ctx) {
   if (del) del.addEventListener("click", () => deleteSelection(rerender));
   const meta = $("#selmeta");
   if (meta) meta.addEventListener("click", () => findSelectionMetadata(works, rerender));
+  const cover = $("#selcover");
+  if (cover) cover.addEventListener("click", () => setArtistCover(ctx.artist, rerender));
+}
+
+/* "Set as thumbnail": make the one selected work the artist's representative
+   cover on the Artists grid. Enabled only when exactly one work is selected. */
+async function setArtistCover(artist, rerender) {
+  const ids = Array.from(SEL.ids);
+  if (ids.length !== 1 || !artist) return;
+  try {
+    await api("/api/artist/cover", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist: artist, work_id: ids[0] }),
+    });
+    resetSel();
+    toast("Thumbnail set for " + artist + ".");
+    if (rerender) rerender();
+  } catch (e) { alert(e.message); }
 }
 
 /* "Find metadata": for each selected work, search the web and fill any missing
@@ -472,12 +495,12 @@ async function artistView(name) {
       (span ? " · " + span : "") + addMore + "</p>" +
       '<div id="biobar" hidden></div></div>' +
       relatedDisclosureHtml(relResp.related) +
-      worksSection(works, false, browseCtx());
+      worksSection(works, false, browseCtx({ artist: name }));
     renderBio(name, infoResp.info);
     wireDisclosure("bio-toggle", "biobar");
     wireDisclosure("rel-toggle", "rel-strip");
     if (isOwner()) { wireRename(name); wireRepoint(name); }
-    bindWorks(works, false, () => artistView(name), browseCtx());
+    bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
     const g = document.getElementById("grid");
     if (g) g.classList.add("show-dims");   // dimension pills only on the artist page
   } catch (e) { errbox(e); }
