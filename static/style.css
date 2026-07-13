@@ -416,7 +416,7 @@ img { display: block; }
   color: var(--text); border-radius: 5px; padding: 10px 13px; font-size: 14.5px;
   cursor: pointer; font-family: var(--serif);
 }
-.addmenu-item:hover { border-color: var(--accent); color: var(--accent); }
+.addmenu-item:hover, .addmenu-item.active { border-color: var(--accent); color: var(--accent); }
 .addmenu-item .tiny { float: right; }
 
 /* ---------- repoint-to-artist picker ---------- */

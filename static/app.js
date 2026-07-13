@@ -1401,15 +1401,84 @@ $("#vclose").addEventListener("click", (e) => { e.stopPropagation(); closeViewer
 
 document.addEventListener("keydown", (e) => {
   if (!viewer.classList.contains("open")) return;
+  if (document.querySelector(".modal-backdrop")) return;  // a chooser/dialog is up — it owns the keys
   if (e.key === "ArrowRight") showWork(V.i + 1);
   else if (e.key === "ArrowLeft") showWork(V.i - 1);
   else if (e.key === "Escape") closeViewer();
+  else if (e.key === "c" || e.key === "C") collectHotkey();
   else if (e.key === "f" || e.key === "F") {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else if (viewer.requestFullscreen)
       viewer.requestFullscreen().then(() => { V.wasFullscreen = true; }).catch(() => {});
   }
 });
+
+/* ---- hotkey "c": add the painting on screen to a collection ---- */
+function collectHotkey() {
+  if (!canCurate()) { toast("Only curators and owners can build collections."); return; }
+  const work = V.list[V.i];
+  if (work) addWorkToCollection(work);
+}
+
+async function addWorkToCollection(work) {
+  let mine;
+  try { mine = (await api("/api/collections")).collections.filter((c) => c.can_edit); }
+  catch (e) { toast(e.message); return; }
+
+  const addOne = async (cid) => {
+    try {
+      const r = await api("/api/collection/" + encodeURIComponent(cid) + "/works", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [work.id] }),
+      });
+      toast("Added to “" + r.collection.title + "”.");
+    } catch (e) { toast(e.message); }
+  };
+
+  if (!mine.length) newCollectionDialog((col) => addOne(col.id));  // none yet: make one, then add
+  else if (mine.length === 1) addOne(mine[0].id);                 // exactly one: straight in
+  else openCollectPicker(mine, work, addOne);                     // several: keyboard picker
+}
+
+/* Keyboard-navigable collection chooser: ↑/↓ move, Enter adds, Esc cancels.
+   Uses capture-phase keys so it beats the viewer's own arrow/Escape handler. */
+function openCollectPicker(collections, work, addOne) {
+  const wrap = document.createElement("div");
+  wrap.className = "modal-backdrop";
+  wrap.innerHTML =
+    '<div class="modal collect-picker"><h2>Add to collection</h2>' +
+    '<p class="rp-sub">“' + esc(work.title || "This work") +
+    '” — ↑ / ↓ to choose, Enter to add, Esc to cancel.</p>' +
+    '<div class="addmenu-list">' +
+    collections.map((c, i) =>
+      '<button class="addmenu-item cp-row' + (i === 0 ? " active" : "") + '">' +
+      esc(c.title) + ' <span class="tiny">' + c.count + "</span></button>").join("") +
+    "</div></div>";
+  document.body.appendChild(wrap);
+
+  const rows = Array.from(wrap.querySelectorAll(".cp-row"));
+  let idx = 0;
+  const paint = () => rows.forEach((r, i) => {
+    r.classList.toggle("active", i === idx);
+    if (i === idx) r.scrollIntoView({ block: "nearest" });
+  });
+  const close = () => { document.removeEventListener("keydown", onKey, true); wrap.remove(); };
+  const choose = (i) => { close(); addOne(collections[i].id); };
+
+  function onKey(e) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      idx = e.key === "ArrowDown" ? Math.min(rows.length - 1, idx + 1) : Math.max(0, idx - 1);
+      paint(); e.preventDefault(); e.stopPropagation();
+    } else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); choose(idx); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+  }
+  document.addEventListener("keydown", onKey, true);
+  rows.forEach((r, i) => {
+    r.addEventListener("mouseenter", () => { idx = i; paint(); });
+    r.addEventListener("click", () => choose(i));
+  });
+  wrap.addEventListener("mousedown", (e) => { if (e.target === wrap) close(); });
+}
 
 viewer.addEventListener("pointermove", wake);
 
