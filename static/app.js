@@ -421,8 +421,9 @@ async function artistView(name) {
     const span = years.length
       ? Math.min.apply(null, years) + (years.length > 1 ? "–" + Math.max.apply(null, years) : "")
       : "";
-    const renameBtn = isOwner()
-      ? '<button class="linkbtn" id="rename-btn" title="Rename this artist. Rename to another artist’s exact name to merge them.">rename</button>'
+    const ownerBtns = isOwner()
+      ? '<button class="linkbtn" id="rename-btn" title="Edit this artist’s name.">edit</button>' +
+        '<button class="linkbtn" id="repoint-btn" title="Merge this artist into another artist already in your library — fixes the same painter appearing under different name spellings.">repoint to artist</button>'
       : "";
     const addMore = isOwner()
       ? ' <a class="inline-add" href="#/add/' + encodeURIComponent(name) + '">+ Add more from this artist</a>'
@@ -433,7 +434,7 @@ async function artistView(name) {
     app.innerHTML =
       '<div class="pagehead"><a class="back" href="#/">← All artists</a>' +
       '<div class="artist-title" id="artist-title"><h1>' + esc(name) + "</h1>" +
-      renameBtn + bioToggle + "</div>" +
+      ownerBtns + bioToggle + "</div>" +
       '<p class="sub">' + works.length + (works.length === 1 ? " work" : " works") +
       (span ? " · " + span : "") + addMore + "</p>" +
       '<div id="biobar" hidden></div></div>' +
@@ -442,7 +443,7 @@ async function artistView(name) {
     renderBio(name, infoResp.info);
     wireDisclosure("bio-toggle", "biobar");
     wireDisclosure("rel-toggle", "rel-strip");
-    if (isOwner()) wireRename(name);
+    if (isOwner()) { wireRename(name); wireRepoint(name); }
     bindWorks(works, false, () => artistView(name), browseCtx());
   } catch (e) { errbox(e); }
 }
@@ -613,6 +614,89 @@ function wireRename(name) {
       if (e.key === "Enter") { e.preventDefault(); submit(); }
       else if (e.key === "Escape") artistView(name);
     });
+  });
+}
+
+/* Repoint: merge this artist into another already in the library. Picks a target
+   from the existing artists, then reuses /api/artist/rename (which merges when the
+   target already exists) so name variants of one painter collapse into one. */
+function wireRepoint(name) {
+  const btn = $("#repoint-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    let artists;
+    try {
+      const d = await api("/api/artists");
+      const key = name.trim().toLowerCase();
+      artists = (d.artists || []).filter((a) => a.name.trim().toLowerCase() !== key);
+    } catch (e) { toast(e.message); return; }
+    if (!artists.length) { toast("There are no other artists to repoint to yet."); return; }
+
+    const m = modal("");
+    const inner = m.el.querySelector(".modal");
+
+    const rowsHtml = (list) =>
+      list.length
+        ? list.map((a) =>
+            '<button class="addmenu-item repoint-row" data-name="' + esc(a.name) + '">' +
+            esc(a.name) + '<span class="tiny">' + a.count +
+            (a.count === 1 ? " work" : " works") + "</span></button>").join("")
+        : '<p class="rp-sub">No matches.</p>';
+
+    function renderPicker() {
+      inner.innerHTML =
+        "<h2>Repoint “" + esc(name) + "”</h2>" +
+        '<p class="rp-sub">Move every work by “' + esc(name) + "” under another artist already in " +
+        "your library — they take on that artist’s exact name. Use it to merge the same painter " +
+        "when their name is spelled differently across works.</p>" +
+        '<input id="rp-search" class="rp-search" placeholder="Filter artists…" autocomplete="off">' +
+        '<div id="rp-list" class="addmenu-list">' + rowsHtml(artists) + "</div>" +
+        '<div class="modal-actions"><button class="linkbtn" id="rp-close">cancel</button></div>';
+      const search = inner.querySelector("#rp-search");
+      const listEl = inner.querySelector("#rp-list");
+      search.focus();
+      search.addEventListener("input", () => {
+        const q = search.value.trim().toLowerCase();
+        listEl.innerHTML = rowsHtml(q ? artists.filter((a) => a.name.toLowerCase().includes(q)) : artists);
+      });
+      inner.querySelector("#rp-close").addEventListener("click", m.close);
+      listEl.addEventListener("click", (e) => {
+        const row = e.target.closest(".repoint-row");
+        if (row) renderConfirm(row.getAttribute("data-name"));
+      });
+    }
+
+    function renderConfirm(target) {
+      inner.innerHTML =
+        "<h2>Repoint into “" + esc(target) + "”?</h2>" +
+        '<p class="rp-sub">All works by “' + esc(name) + "” will be moved into “" + esc(target) +
+        "” and renamed to match. You can reverse this later by repointing back.</p>" +
+        '<div class="modal-actions">' +
+        '<button class="toolbtn" id="rp-go">Repoint</button>' +
+        '<button class="linkbtn" id="rp-back">back</button>' +
+        '<span id="rp-msg" class="bio-msg"></span></div>';
+      inner.querySelector("#rp-back").addEventListener("click", renderPicker);
+      const go = inner.querySelector("#rp-go");
+      go.addEventListener("click", async () => {
+        go.disabled = true;
+        inner.querySelector("#rp-msg").textContent = "Repointing…";
+        try {
+          const r = await api("/api/artist/rename", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ from: [name], to: target }),
+          });
+          m.close();
+          const n = r.moved || 0;
+          toast("Moved " + n + (n === 1 ? " work into “" : " works into “") + target + "”");
+          location.hash = "#/artist/" + encodeURIComponent(target);
+        } catch (e) {
+          inner.querySelector("#rp-msg").textContent = e.message;
+          go.disabled = false;
+        }
+      });
+    }
+
+    renderPicker();
   });
 }
 

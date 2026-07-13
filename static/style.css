@@ -419,6 +419,16 @@ img { display: block; }
 .addmenu-item:hover { border-color: var(--accent); color: var(--accent); }
 .addmenu-item .tiny { float: right; }
 
+/* ---------- repoint-to-artist picker ---------- */
+.rp-sub { color: var(--dim); font-size: 13.5px; line-height: 1.5; margin: 0 0 14px; }
+.rp-search {
+  width: 100%; box-sizing: border-box; margin-bottom: 12px;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 5px; padding: 9px 12px; font-size: 14px;
+}
+.rp-search:focus { outline: none; border-color: var(--accent); }
+.modal-actions { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+
 /* ---------- toast ---------- */
 #toast {
   position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 20px); z-index: 300;
