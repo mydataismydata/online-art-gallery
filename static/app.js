@@ -1026,10 +1026,11 @@ let fieldKeys = ["title", "artist", "date", "year", "medium", "style", "image", 
 async function settingsView() {
   setNav("settings");
   try {
-    const [srcData, usersData, builtinData] = await Promise.all([
+    const [srcData, usersData, builtinData, aiData] = await Promise.all([
       api("/api/custom_sources"),
       api("/api/users"),
       api("/api/sources/builtin"),
+      api("/api/ai/config"),
     ]);
     if (srcData.field_keys) fieldKeys = srcData.field_keys;
     const presets = srcData.presets || [];
@@ -1037,6 +1038,7 @@ async function settingsView() {
       '<div class="pagehead"><h1>Settings</h1></div>' +
       usersPanelHtml() +
       displayPanelHtml() +
+      aiPanelHtml(aiData) +
       builtinSourcesHtml(builtinData.sources || []) +
       '<section class="settings-sources"><div class="pagehead" style="margin:32px 0 12px">' +
       '<h2 class="sec">Download sources</h2>' +
@@ -1050,10 +1052,65 @@ async function settingsView() {
     wireAddUser();
     const pc = document.getElementById("opt-placards");
     if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+    wireAiPanel(aiData);
     renderSourceList(srcData.sources || []);
     wireSourceForm(presets);
     wireBuiltinSources();
   } catch (e) { errbox(e); }
+}
+
+/* ---------- Auto-fill (AI) configuration ---------- */
+
+function aiKeyStateHtml(cfg) {
+  if (!cfg.has_key) return "No key set yet.";
+  return "A key is set" + (cfg.key_hint ? " (" + esc(cfg.key_hint) + ")" : "") +
+    (cfg.key_from_env ? ", from the environment" : "") + ".";
+}
+
+function aiPanelHtml(cfg) {
+  const opts = (cfg.known_models || []).map((mm) => '<option value="' + esc(mm) + '">').join("");
+  return (
+    '<section class="aipanel"><div class="pagehead" style="margin:32px 0 12px">' +
+    '<h2 class="sec">Auto-fill</h2>' +
+    "<p class=\"sub\">The placard editor's <b>Auto fill</b> button researches a painting and fills " +
+    "in its details. It calls an OpenAI-compatible chat API (<code>" + esc(cfg.endpoint || "") + "</code>). " +
+    "Date, medium and genre may draw on Wikipedia; the description is required to come from a " +
+    "primary source.</p></div>" +
+    '<form class="dlform aiform" id="aiform">' +
+    "<label>Model</label>" +
+    '<input id="ai-model" list="ai-models" autocomplete="off" placeholder="' + esc(cfg.default_model || "arya") + '">' +
+    '<datalist id="ai-models">' + opts + "</datalist>" +
+    "<label>API key</label>" +
+    '<input id="ai-key" type="password" autocomplete="off" placeholder="' +
+    (cfg.has_key ? "leave blank to keep current" : "paste your API key") + '">' +
+    '<p class="tiny aikeystate">' + aiKeyStateHtml(cfg) + "</p>" +
+    "<button type=\"submit\">Save</button>" +
+    '<p class="formmsg" id="ai-msg"></p></form></section>'
+  );
+}
+
+function wireAiPanel(cfg) {
+  const model = $("#ai-model");
+  if (model) model.value = cfg.model || "";
+  const form = $("#aiform");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = $("#ai-msg"); msg.className = "formmsg";
+    const body = { model: $("#ai-model").value };
+    const key = $("#ai-key").value.trim();
+    if (key) body.api_key = key;
+    try {
+      const r = await api("/api/ai/config", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      $("#ai-key").value = "";
+      $("#ai-key").placeholder = r.has_key ? "leave blank to keep current" : "paste your API key";
+      const st = $(".aikeystate"); if (st) st.innerHTML = aiKeyStateHtml(r);
+      msg.className = "formmsg ok"; msg.textContent = "Saved.";
+    } catch (err) { msg.className = "formmsg err"; msg.textContent = err.message; }
+  });
 }
 
 /* ---------- built-in source configuration (owner oversight) ---------- */
@@ -1571,19 +1628,21 @@ function syncPlacard() {
 }
 
 /* Owner-only: edit a work's placard details, saved to its sidecar.
-   The research pane browses via the server's /research/page proxy — search
-   engines can't be iframed directly and cross-origin selections are unreadable,
-   so pages are re-served same-origin with a selection reporter injected
-   (app/research.py). Selecting text on a page fills the armed form field. */
+   "Auto fill" (Settings → Auto-fill configures the model + key) asks the AI to
+   research this painting and populate the fields; the owner reviews and saves. */
 function editWorkDialog(w) {
   const m = modal(
     "<h2>Edit placard</h2>" +
-    '<div class="ewwrap">' +
     '<form class="authform" id="ewform">' +
+    '<div class="ew-autobar">' +
+    '<button type="button" class="toolbtn" id="ew-auto">Auto fill</button>' +
+    '<span class="tiny ew-autohint">Researches this painting and fills the fields below — review before saving.</span>' +
+    '<span class="formmsg" id="ew-auto-msg"></span></div>' +
     "<label>Title<input id=\"ew-title\" autocomplete=\"off\"></label>" +
     "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
     "<label>Date <span class=\"tiny\">optional</span><input id=\"ew-date\" autocomplete=\"off\"></label>" +
     "<label>Medium <span class=\"tiny\">optional</span><input id=\"ew-medium\" autocomplete=\"off\"></label>" +
+    "<label>Genre / School <span class=\"tiny\">optional</span><input id=\"ew-style\" autocomplete=\"off\"></label>" +
     "<label>Description</label>" +
     '<div class="fmtbar">' +
     '<button type="button" class="fmtbtn" data-cmd="bold" title="Bold"><b>B</b></button>' +
@@ -1599,38 +1658,12 @@ function editWorkDialog(w) {
     '<div class="richtext" id="ew-desc" contenteditable="true"></div>' +
     '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
     '<button type="button" class="linkbtn" id="ew-cancel">cancel</button>' +
-    '<span class="formmsg err" id="ew-msg"></span></div></form>' +
-    '<div class="ewresearch">' +
-    '<div class="rs-bar"><input id="rs-q" autocomplete="off" placeholder="Search the web…">' +
-    '<button type="button" class="toolbtn" id="rs-go">Search</button>' +
-    '<button type="button" class="linkbtn" id="rs-wiki" title="Search Wikipedia instead">Wikipedia</button></div>' +
-    '<div class="rs-targets" id="rs-targets"><span>Selections fill:</span></div>' +
-    '<iframe id="rs-frame" title="Research"></iframe>' +
-    '<p class="rs-tip tiny">Select text on the page and it lands in the armed field — ' +
-    "Description appends, the others replace.</p>" +
-    "</div></div>");
+    '<span class="formmsg err" id="ew-msg"></span></div></form>');
   m.el.querySelector(".modal").classList.add("modal-wide");
   const q = (id) => m.el.querySelector(id);
-
-  /* ---- research pane ---- */
-  const FIELDS = [["title", "#ew-title"], ["artist", "#ew-artist"], ["date", "#ew-date"],
-                  ["medium", "#ew-medium"], ["description", "#ew-desc"]];
-  let armed = "description";
-  const targets = q("#rs-targets");
-  FIELDS.forEach(([k]) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "rs-pill" + (k === armed ? " armed" : "");
-    b.textContent = k;
-    b.addEventListener("click", () => {
-      armed = k;
-      targets.querySelectorAll(".rs-pill").forEach((p) => p.classList.toggle("armed", p === b));
-    });
-    targets.appendChild(b);
-  });
+  const ed = q("#ew-desc");
 
   /* ---- format bar (description) ---- */
-  const ed = q("#ew-desc");
   try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
   m.el.querySelectorAll(".fmtbtn").forEach((b) => {
     b.addEventListener("mousedown", (e) => e.preventDefault());  // keep the text selection
@@ -1644,52 +1677,48 @@ function editWorkDialog(w) {
     if (sizeSel.value) { ed.focus(); document.execCommand("fontSize", false, sizeSel.value); sizeSel.value = ""; }
   });
 
-  const frame = q("#rs-frame");
-  const browseTo = (url) => { frame.src = "/research/page?url=" + encodeURIComponent(url); };
-  const doSearch = (engine) => {
-    const term = q("#rs-q").value.trim();
-    if (term) browseTo(engine + encodeURIComponent(term));
-  };
-  const DDG = "https://html.duckduckgo.com/html/?q=";
-  const WIKI = "https://en.wikipedia.org/w/index.php?search=";
-  q("#rs-q").value = ('"' + (w.title || "") + '" ' + (w.artist || "")).trim();
-  q("#rs-go").addEventListener("click", () => doSearch(DDG));
-  q("#rs-wiki").addEventListener("click", () => doSearch(WIKI));
-  q("#rs-q").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); doSearch(DDG); }
-  });
-  doSearch(DDG);  // kick off the initial search for this work
-
-  function onSelection(e) {
-    if (e.origin !== location.origin || !e.data || e.data.type !== "placard-selection") return;
-    if (!document.body.contains(m.el)) { window.removeEventListener("message", onSelection); return; }
-    const t = (e.data.text || "").trim();
-    if (!t) return;
-    const el = q(FIELDS.find((f) => f[0] === armed)[1]);
-    if (armed === "description") {
-      const chunk = esc(t).replace(/\n/g, "<br>");   // selections arrive as plain text
-      el.innerHTML = el.textContent.trim()
-        ? el.innerHTML.replace(/(<br\s*\/?>\s*)+$/i, "") + "<br><br>" + chunk
-        : chunk;
-    } else {
-      el.value = t.replace(/\s*\n\s*/g, " ");        // single-line fields
-    }
-    el.classList.add("justfilled");
-    setTimeout(() => el.classList.remove("justfilled"), 700);
-  }
-  window.addEventListener("message", onSelection);
-  const closeAll = () => { window.removeEventListener("message", onSelection); m.close(); };
+  /* ---- current values ---- */
   q("#ew-title").value = w.title || "";
   q("#ew-artist").value = w.artist || "";
   q("#ew-date").value = w.date || (w.year ? String(w.year) : "");
   q("#ew-medium").value = w.medium || "";
+  q("#ew-style").value = w.style || "";
   ed.innerHTML = richDescHtml(w.description || "");   // legacy plain text gets its \n as <br>
-  q("#ew-cancel").addEventListener("click", closeAll);
+
+  const flash = (el) => { el.classList.add("justfilled"); setTimeout(() => el.classList.remove("justfilled"), 900); };
+
+  /* ---- Auto fill: research the work and populate the form (owner reviews, then Saves) ---- */
+  q("#ew-auto").addEventListener("click", async () => {
+    const btn = q("#ew-auto"), msg = q("#ew-auto-msg"), label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Researching…";
+    msg.className = "formmsg"; msg.textContent = "";
+    try {
+      const r = await api("/api/work/" + encodeURIComponent(w.id) + "/autofill", { method: "POST" });
+      const f = r.fields || {};
+      const set = (id, v) => { if (v) { const el = q(id); el.value = v; flash(el); } };
+      set("#ew-title", f.title); set("#ew-artist", f.artist); set("#ew-date", f.date);
+      set("#ew-medium", f.medium); set("#ew-style", f.style);
+      if (f.description) {
+        ed.innerHTML = esc(f.description).replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>");
+        flash(ed);
+      }
+      const names = Object.keys(f);
+      msg.className = "formmsg ok";
+      msg.textContent = names.length
+        ? "Filled " + names.join(", ") + ". Review, then Save."
+        : "Nothing found for this one.";
+    } catch (e) {
+      msg.className = "formmsg err"; msg.textContent = e.message;
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
+
+  q("#ew-cancel").addEventListener("click", () => m.close());
   q("#ewform").addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = {
       title: q("#ew-title").value, artist: q("#ew-artist").value,
       date: q("#ew-date").value, medium: q("#ew-medium").value,
+      style: q("#ew-style").value,
       description: ed.textContent.trim() ? sanitizeRich(ed.innerHTML) : "",
     };
     try {
@@ -1697,7 +1726,7 @@ function editWorkDialog(w) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      closeAll();
+      m.close();
       if (r.work) { V.list[V.i] = r.work; vcap.innerHTML = caption(r.work); syncPlacard(); }
       viewerFlash("✓ Saved");
     } catch (err) { q("#ew-msg").textContent = err.message; }

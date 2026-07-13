@@ -22,6 +22,8 @@ DATA_DIR = Path(os.environ.get("GALLERY_DATA", str(ROOT / "data")))
 USERS_FILE = DATA_DIR / "users.json"
 COLLECTIONS_DIR = DATA_DIR / "collections"   # one <id>.json per collection
 SECRET_KEY_FILE = DATA_DIR / "secret_key"    # persisted so sessions survive restarts
+# Auto-fill (owner-set model + API key for the placard editor's AI lookup).
+AI_CONFIG_FILE = DATA_DIR / "ai_config.json"
 
 for _d in (LIBRARY_DIR, THUMB_DIR, TMP_DIR, TRASH_DIR, ARTIST_META_DIR,
            DATA_DIR, COLLECTIONS_DIR):

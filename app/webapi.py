@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
-from . import config, library, thumbs, artistinfo, auth, collections, related, research, metadata
+from . import config, library, thumbs, artistinfo, auth, collections, related, metadata, ai
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
                                 list_builtin_configs, set_builtin_config, reset_builtin_config)
@@ -340,18 +340,6 @@ def api_artist_save():
     return jsonify({"info": saved})
 
 
-# The placard editor's research pane browses through this proxy — see
-# app/research.py for why an ordinary iframe can't do the job.
-@bp.get("/research/page")
-@auth.require_role("owner")
-def api_research_page():
-    page, err = research.fetch_page(request.args.get("url", ""))
-    if err:
-        page = research.error_page(err)
-    return page, 200, {"Content-Type": "text/html; charset=utf-8",
-                       "Cache-Control": "no-store"}
-
-
 # Batch metadata lookup: search the web and fill a work's field(s). Owner-only;
 # the frontend calls it once per selected work so each request stays quick.
 @bp.post("/api/work/<wid>/find_metadata")
@@ -373,7 +361,7 @@ def api_work_find_metadata(wid):
 @auth.require_role("owner")
 def api_work_update(wid):
     data = request.get_json(silent=True) or {}
-    fields = {k: data[k] for k in ("title", "artist", "date", "medium", "description") if k in data}
+    fields = {k: data[k] for k in ("title", "artist", "date", "medium", "style", "description") if k in data}
     try:
         w = library.update_work(wid, fields)
     except KeyError:
@@ -381,6 +369,36 @@ def api_work_update(wid):
     if not w:
         return jsonify({"error": "update failed"}), 500
     return jsonify({"work": w})
+
+
+# ---------------- Auto-fill (AI metadata lookup — owner only) ----------------
+
+@bp.get("/api/ai/config")
+@auth.require_role("owner")
+def api_ai_config():
+    return jsonify(ai.public_config())
+
+
+@bp.post("/api/ai/config")
+@auth.require_role("owner")
+def api_ai_config_save():
+    data = request.get_json(silent=True) or {}
+    return jsonify(ai.set_config(model=data.get("model"), api_key=data.get("api_key")))
+
+
+# Research one work via the configured model and return the fields it found. Does
+# NOT save — the editor populates the form so the owner can review before saving.
+@bp.post("/api/work/<wid>/autofill")
+@auth.require_role("owner")
+def api_work_autofill(wid):
+    w = library.scan()["by_id"].get(wid)
+    if not w:
+        abort(404)
+    try:
+        fields = ai.autofill(w)
+    except ai.AIError as e:
+        return jsonify({"error": str(e)}), 502
+    return jsonify({"fields": fields})
 
 
 # ---------------- custom sources (Settings — owner only) ----------------

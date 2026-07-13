@@ -352,6 +352,8 @@ def update_work(wid, fields):
         data["year"] = parse_year(d)
     if "medium" in fields:
         data["medium"] = _clean(fields.get("medium")) or None
+    if "style" in fields:
+        data["style"] = _clean(fields.get("style")) or None
     if "description" in fields:
         desc = fields.get("description")
         data["description"] = desc.strip() if isinstance(desc, str) and desc.strip() else None
