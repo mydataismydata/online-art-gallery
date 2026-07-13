@@ -302,7 +302,8 @@ img { display: block; }
 #viewer.open { display: block; }
 #vstage { position: absolute; inset: 0; display: flex; overflow: hidden; }
 #vimg { margin: auto; user-select: none; -webkit-user-drag: none; transition: opacity .15s; }
-#viewer.fit #vimg { width: 100%; height: 100%; object-fit: contain; cursor: zoom-in; }
+/* scale-down: fit large paintings to the screen, but never enlarge a small one past 100% */
+#viewer.fit #vimg { width: 100%; height: 100%; object-fit: scale-down; cursor: zoom-in; }
 #viewer.actual #vstage { overflow: auto; scrollbar-width: none; }
 #viewer.actual #vstage::-webkit-scrollbar { display: none; }
 #viewer.actual #vimg { width: auto; height: auto; max-width: none; max-height: none; cursor: grab; }
