@@ -1305,7 +1305,8 @@ function modal(html) {
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
   wrap.innerHTML = '<div class="modal">' + html + "</div>";
-  document.body.appendChild(wrap);
+  // In true fullscreen only the fullscreen element renders, so parent there.
+  (document.fullscreenElement || document.body).appendChild(wrap);
   function onKey(e) { if (e.key === "Escape") close(); }
   function close() { wrap.remove(); document.removeEventListener("keydown", onKey); }
   wrap.addEventListener("mousedown", (e) => { if (e.target === wrap) close(); });
@@ -1413,6 +1414,18 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* Brief confirmation drawn INSIDE the viewer, so it shows over the painting and
+   even in true fullscreen (where page-level toasts aren't rendered). */
+let vflashTimer = null;
+function viewerFlash(msg) {
+  let f = document.getElementById("vflash");
+  if (!f) { f = document.createElement("div"); f.id = "vflash"; viewer.appendChild(f); }
+  f.textContent = msg;
+  f.classList.add("show");
+  clearTimeout(vflashTimer);
+  vflashTimer = setTimeout(() => f.classList.remove("show"), 2000);
+}
+
 /* ---- hotkey "c": add the painting on screen to a collection ---- */
 function collectHotkey() {
   if (!canCurate()) { toast("Only curators and owners can build collections."); return; }
@@ -1431,8 +1444,8 @@ async function addWorkToCollection(work) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [work.id] }),
       });
-      toast("Added to “" + r.collection.title + "”.");
-    } catch (e) { toast(e.message); }
+      viewerFlash("✓ Added to “" + r.collection.title + "”");
+    } catch (e) { viewerFlash("⚠ " + e.message); }
   };
 
   if (!mine.length) newCollectionDialog((col) => addOne(col.id));  // none yet: make one, then add
@@ -1454,7 +1467,7 @@ function openCollectPicker(collections, work, addOne) {
       '<button class="addmenu-item cp-row' + (i === 0 ? " active" : "") + '">' +
       esc(c.title) + ' <span class="tiny">' + c.count + "</span></button>").join("") +
     "</div></div>";
-  document.body.appendChild(wrap);
+  (document.fullscreenElement || document.body).appendChild(wrap);
 
   const rows = Array.from(wrap.querySelectorAll(".cp-row"));
   let idx = 0;

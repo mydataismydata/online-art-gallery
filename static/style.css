@@ -347,6 +347,15 @@ img { display: block; }
 #vcap a { pointer-events: auto; color: var(--accent); }
 #viewer.idle #vcap, #viewer.idle .vnav, #viewer.idle #vclose, #viewer.idle #vcount { opacity: 0; pointer-events: none; }
 #viewer.idle #vstage { cursor: none; }
+/* in-viewer confirmation flash (collection add) — shows over the image and in fullscreen */
+#vflash {
+  position: absolute; left: 50%; bottom: 92px; transform: translate(-50%, 10px);
+  z-index: 6; background: rgba(18,18,18,.94); border: 1px solid var(--accent);
+  color: #fff; padding: 11px 20px; border-radius: 7px; font-size: 14.5px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease;
+}
+#vflash.show { opacity: 1; transform: translate(-50%, 0); }
 
 @media (max-width: 640px) {
   #topbar { padding: 14px 18px 12px; flex-wrap: wrap; gap: 8px; }
