@@ -1005,6 +1005,7 @@ async function settingsView() {
     app.innerHTML =
       '<div class="pagehead"><h1>Settings</h1></div>' +
       usersPanelHtml() +
+      displayPanelHtml() +
       '<section class="settings-sources"><div class="pagehead" style="margin:32px 0 12px">' +
       '<h2 class="sec">Download sources</h2>' +
       '<p class="sub">Add JSON-API museum sources to scan for works. The built-in sources ' +
@@ -1015,9 +1016,25 @@ async function settingsView() {
       "<div>" + sourceFormHtml(presets) + "</div></div></section>";
     renderUsers(usersData.users);
     wireAddUser();
+    const pc = document.getElementById("opt-placards");
+    if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
     renderSourceList(srcData.sources || []);
     wireSourceForm(presets);
   } catch (e) { errbox(e); }
+}
+
+/* ---------- display options ---------- */
+
+function displayPanelHtml() {
+  return (
+    '<section class="displaypanel"><div class="pagehead" style="margin-bottom:12px">' +
+    '<h2 class="sec">Display</h2></div>' +
+    '<label class="optrow"><input type="checkbox" id="opt-placards">' +
+    "<span>Show placards in the viewer</span></label>" +
+    '<p class="sub optnote">A museum-style label — piece name, artist, date and description — ' +
+    "shown over each painting in fullscreen. Toggle any time with the <kbd>p</kbd> key while " +
+    "viewing a work.</p></section>"
+  );
 }
 
 /* ---------- users ---------- */
@@ -1355,6 +1372,78 @@ function setFit(fit) {
   viewer.classList.toggle("actual", !fit);
 }
 
+/* ---------- placards (museum wall labels shown in the viewer) ---------- */
+function placardsOn() { return localStorage.getItem("placards") === "1"; }
+function setPlacards(on) { localStorage.setItem("placards", on ? "1" : "0"); }
+
+function placardHtml(w) {
+  const date = w.date || (w.year ? String(w.year) : "");
+  const desc = w.description
+    ? '<div class="pl-desc">' + esc(w.description) + "</div>"
+    : (isOwner() ? '<div class="pl-desc pl-empty">No description yet.</div>' : "");
+  const edit = isOwner() ? '<button class="pl-edit" id="pl-edit" type="button">Edit</button>' : "";
+  return '<div class="pl-card">' +
+    '<div class="pl-artist">' + esc(w.artist || "Unknown artist") + "</div>" +
+    '<div class="pl-title"><span class="pl-name">' + esc(w.title) + "</span>" +
+    (date ? '<span class="pl-date">, ' + esc(date) + "</span>" : "") + "</div>" +
+    (w.medium ? '<div class="pl-medium">' + esc(w.medium) + "</div>" : "") +
+    desc + edit + "</div>";
+}
+
+function syncPlacard() {
+  const on = placardsOn();
+  viewer.classList.toggle("placards", on);
+  const el = document.getElementById("placard");
+  if (!el) return;
+  if (on && viewer.classList.contains("open") && V.list[V.i]) {
+    el.innerHTML = placardHtml(V.list[V.i]);
+    el.hidden = false;
+    const eb = document.getElementById("pl-edit");
+    if (eb) eb.addEventListener("click", () => editWorkDialog(V.list[V.i]));
+  } else {
+    el.hidden = true;
+  }
+}
+
+/* Owner-only: edit a work's placard details, saved to its sidecar. */
+function editWorkDialog(w) {
+  const m = modal(
+    "<h2>Edit placard</h2>" +
+    '<form class="authform" id="ewform">' +
+    "<label>Title<input id=\"ew-title\" autocomplete=\"off\"></label>" +
+    "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
+    "<label>Date <span class=\"tiny\">optional</span><input id=\"ew-date\" autocomplete=\"off\"></label>" +
+    "<label>Medium <span class=\"tiny\">optional</span><input id=\"ew-medium\" autocomplete=\"off\"></label>" +
+    "<label>Description<textarea id=\"ew-desc\" rows=\"6\"></textarea></label>" +
+    '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
+    '<button type="button" class="linkbtn" id="ew-cancel">cancel</button>' +
+    '<span class="formmsg err" id="ew-msg"></span></div></form>');
+  const q = (id) => m.el.querySelector(id);
+  q("#ew-title").value = w.title || "";
+  q("#ew-artist").value = w.artist || "";
+  q("#ew-date").value = w.date || (w.year ? String(w.year) : "");
+  q("#ew-medium").value = w.medium || "";
+  q("#ew-desc").value = w.description || "";
+  q("#ew-cancel").addEventListener("click", m.close);
+  q("#ewform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {
+      title: q("#ew-title").value, artist: q("#ew-artist").value,
+      date: q("#ew-date").value, medium: q("#ew-medium").value,
+      description: q("#ew-desc").value,
+    };
+    try {
+      const r = await api("/api/work/" + encodeURIComponent(w.id), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      m.close();
+      if (r.work) { V.list[V.i] = r.work; vcap.innerHTML = caption(r.work); syncPlacard(); }
+      viewerFlash("✓ Saved");
+    } catch (err) { q("#ew-msg").textContent = err.message; }
+  });
+}
+
 function showWork(i) {
   const n = V.list.length;
   V.i = ((i % n) + n) % n;
@@ -1363,6 +1452,7 @@ function showWork(i) {
   setFit(true);
   vimg.src = "/img/" + w.id;
   vcap.innerHTML = caption(w);
+  syncPlacard();
   vcount.textContent = n > 1 ? (V.i + 1) + " / " + n : "";
   if (n > 1) {
     [V.i + 1, V.i - 1].forEach((k) => {
@@ -1412,6 +1502,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowLeft") showWork(V.i - 1);
   else if (e.key === "Escape") closeViewer();
   else if (e.key === "c" || e.key === "C") collectHotkey();
+  else if (e.key === "p" || e.key === "P") { setPlacards(!placardsOn()); syncPlacard(); }
   else if (e.key === "f" || e.key === "F") {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else if (viewer.requestFullscreen)

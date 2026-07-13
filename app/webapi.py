@@ -339,6 +339,20 @@ def api_artist_save():
     return jsonify({"info": saved})
 
 
+@bp.post("/api/work/<wid>")
+@auth.require_role("owner")
+def api_work_update(wid):
+    data = request.get_json(silent=True) or {}
+    fields = {k: data[k] for k in ("title", "artist", "date", "medium", "description") if k in data}
+    try:
+        w = library.update_work(wid, fields)
+    except KeyError:
+        abort(404)
+    if not w:
+        return jsonify({"error": "update failed"}), 500
+    return jsonify({"work": w})
+
+
 # ---------------- custom sources (Settings — owner only) ----------------
 
 @bp.get("/api/custom_sources")

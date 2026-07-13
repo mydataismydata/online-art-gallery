@@ -101,6 +101,7 @@ def _work_from_file(path, artist_dir_name):
         "era": era_from(year, date_text),
         "medium": meta.get("medium"),
         "style": meta.get("style"),
+        "description": meta.get("description"),
         "type": meta.get("type") or "painting",
         "source": meta.get("source") or f_source,
         "source_id": str(meta.get("source_id")) if meta.get("source_id") is not None else f_sid,
@@ -319,6 +320,75 @@ def rename_artist(sources, target):
             pass
     invalidate()
     return moved, errors
+
+
+def update_work(wid, fields):
+    """Edit one work's sidecar metadata (title/artist/date/medium/description).
+    If the artist changed, relocate the image + sidecar into the new artist's
+    folder (which changes the work's id). Returns the updated work dict."""
+    st = scan(force=True)
+    w = st["by_id"].get(wid)
+    if not w:
+        raise KeyError("work not found")
+    src = config.LIBRARY_DIR / w["rel"]
+    if not src.exists():
+        raise KeyError("file missing")
+    sc = Path(str(src) + ".json")
+    data = {}
+    if sc.exists():
+        try:
+            data = json.loads(sc.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+
+    def _clean(v):
+        return re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v
+
+    if "title" in fields:
+        data["title"] = _clean(fields["title"]) or data.get("title") or w["title"]
+    if "date" in fields:
+        d = _clean(fields.get("date")) or None
+        data["date"] = d
+        data["year"] = parse_year(d)
+    if "medium" in fields:
+        data["medium"] = _clean(fields.get("medium")) or None
+    if "description" in fields:
+        desc = fields.get("description")
+        data["description"] = desc.strip() if isinstance(desc, str) and desc.strip() else None
+
+    dest = src
+    new_artist = _clean(fields.get("artist")) if "artist" in fields else None
+    if new_artist and new_artist.casefold() != (w["artist"] or "").strip().casefold():
+        data["artist"] = new_artist
+        folder = config.LIBRARY_DIR / safe_name(new_artist, 80)
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / src.name
+        n = 2
+        while dest.exists() and dest.resolve() != src.resolve():
+            dest = folder / ("%s (%d)%s" % (src.stem, n, src.suffix))
+            n += 1
+        old_parent = src.parent
+        shutil.move(str(src), str(dest))
+        if sc.exists():
+            try:
+                sc.unlink()
+            except Exception:
+                pass
+        try:
+            if old_parent != folder and old_parent.exists() and not any(old_parent.iterdir()):
+                old_parent.rmdir()
+        except Exception:
+            pass
+    elif new_artist:
+        data["artist"] = new_artist
+
+    Path(str(dest) + ".json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    invalidate()
+    st2 = scan(force=True)
+    new_rel = dest.relative_to(config.LIBRARY_DIR).as_posix()
+    new_id = hashlib.sha1(new_rel.encode("utf-8")).hexdigest()[:16]
+    return st2["by_id"].get(new_id)
 
 
 def save_work(artist, meta, tmp_path):
