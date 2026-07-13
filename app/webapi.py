@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
-from . import config, library, thumbs, artistinfo, auth, collections, related
+from . import config, library, thumbs, artistinfo, auth, collections, related, research
 from .downloads import manager
 from .downloads.sources import get_source, list_sources, custom
 
@@ -337,6 +337,18 @@ def api_artist_save():
         return jsonify({"error": "name required"}), 400
     saved = artistinfo.save(name, artistinfo.normalize_manual(data))
     return jsonify({"info": saved})
+
+
+# The placard editor's research pane browses through this proxy — see
+# app/research.py for why an ordinary iframe can't do the job.
+@bp.get("/research/page")
+@auth.require_role("owner")
+def api_research_page():
+    page, err = research.fetch_page(request.args.get("url", ""))
+    if err:
+        page = research.error_page(err)
+    return page, 200, {"Content-Type": "text/html; charset=utf-8",
+                       "Cache-Control": "no-store"}
 
 
 @bp.post("/api/work/<wid>")

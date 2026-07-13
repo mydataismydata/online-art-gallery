@@ -1405,26 +1405,88 @@ function syncPlacard() {
   }
 }
 
-/* Owner-only: edit a work's placard details, saved to its sidecar. */
+/* Owner-only: edit a work's placard details, saved to its sidecar.
+   The research pane browses via the server's /research/page proxy — search
+   engines can't be iframed directly and cross-origin selections are unreadable,
+   so pages are re-served same-origin with a selection reporter injected
+   (app/research.py). Selecting text on a page fills the armed form field. */
 function editWorkDialog(w) {
   const m = modal(
     "<h2>Edit placard</h2>" +
+    '<div class="ewwrap">' +
     '<form class="authform" id="ewform">' +
     "<label>Title<input id=\"ew-title\" autocomplete=\"off\"></label>" +
     "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
     "<label>Date <span class=\"tiny\">optional</span><input id=\"ew-date\" autocomplete=\"off\"></label>" +
     "<label>Medium <span class=\"tiny\">optional</span><input id=\"ew-medium\" autocomplete=\"off\"></label>" +
-    "<label>Description<textarea id=\"ew-desc\" rows=\"6\"></textarea></label>" +
+    "<label>Description<textarea id=\"ew-desc\" rows=\"8\"></textarea></label>" +
     '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
     '<button type="button" class="linkbtn" id="ew-cancel">cancel</button>' +
-    '<span class="formmsg err" id="ew-msg"></span></div></form>');
+    '<span class="formmsg err" id="ew-msg"></span></div></form>' +
+    '<div class="ewresearch">' +
+    '<div class="rs-bar"><input id="rs-q" autocomplete="off" placeholder="Search the web…">' +
+    '<button type="button" class="toolbtn" id="rs-go">Search</button>' +
+    '<button type="button" class="linkbtn" id="rs-wiki" title="Search Wikipedia instead">Wikipedia</button></div>' +
+    '<div class="rs-targets" id="rs-targets"><span>Selections fill:</span></div>' +
+    '<iframe id="rs-frame" title="Research"></iframe>' +
+    '<p class="rs-tip tiny">Select text on the page and it lands in the armed field — ' +
+    "Description appends, the others replace.</p>" +
+    "</div></div>");
+  m.el.querySelector(".modal").classList.add("modal-wide");
   const q = (id) => m.el.querySelector(id);
+
+  /* ---- research pane ---- */
+  const FIELDS = [["title", "#ew-title"], ["artist", "#ew-artist"], ["date", "#ew-date"],
+                  ["medium", "#ew-medium"], ["description", "#ew-desc"]];
+  let armed = "description";
+  const targets = q("#rs-targets");
+  FIELDS.forEach(([k]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rs-pill" + (k === armed ? " armed" : "");
+    b.textContent = k;
+    b.addEventListener("click", () => {
+      armed = k;
+      targets.querySelectorAll(".rs-pill").forEach((p) => p.classList.toggle("armed", p === b));
+    });
+    targets.appendChild(b);
+  });
+
+  const frame = q("#rs-frame");
+  const browseTo = (url) => { frame.src = "/research/page?url=" + encodeURIComponent(url); };
+  const doSearch = (engine) => {
+    const term = q("#rs-q").value.trim();
+    if (term) browseTo(engine + encodeURIComponent(term));
+  };
+  const DDG = "https://html.duckduckgo.com/html/?q=";
+  const WIKI = "https://en.wikipedia.org/w/index.php?search=";
+  q("#rs-q").value = ('"' + (w.title || "") + '" ' + (w.artist || "")).trim();
+  q("#rs-go").addEventListener("click", () => doSearch(DDG));
+  q("#rs-wiki").addEventListener("click", () => doSearch(WIKI));
+  q("#rs-q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); doSearch(DDG); }
+  });
+  doSearch(DDG);  // kick off the initial search for this work
+
+  function onSelection(e) {
+    if (e.origin !== location.origin || !e.data || e.data.type !== "placard-selection") return;
+    if (!document.body.contains(m.el)) { window.removeEventListener("message", onSelection); return; }
+    const t = (e.data.text || "").trim();
+    if (!t) return;
+    const el = q(FIELDS.find((f) => f[0] === armed)[1]);
+    if (armed === "description" && el.value.trim()) el.value = el.value.replace(/\s+$/, "") + "\n\n" + t;
+    else el.value = t;
+    el.classList.add("justfilled");
+    setTimeout(() => el.classList.remove("justfilled"), 700);
+  }
+  window.addEventListener("message", onSelection);
+  const closeAll = () => { window.removeEventListener("message", onSelection); m.close(); };
   q("#ew-title").value = w.title || "";
   q("#ew-artist").value = w.artist || "";
   q("#ew-date").value = w.date || (w.year ? String(w.year) : "");
   q("#ew-medium").value = w.medium || "";
   q("#ew-desc").value = w.description || "";
-  q("#ew-cancel").addEventListener("click", m.close);
+  q("#ew-cancel").addEventListener("click", closeAll);
   q("#ewform").addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = {
@@ -1437,7 +1499,7 @@ function editWorkDialog(w) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      m.close();
+      closeAll();
       if (r.work) { V.list[V.i] = r.work; vcap.innerHTML = caption(r.work); syncPlacard(); }
       viewerFlash("✓ Saved");
     } catch (err) { q("#ew-msg").textContent = err.message; }
