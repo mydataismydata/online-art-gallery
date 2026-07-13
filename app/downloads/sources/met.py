@@ -42,7 +42,10 @@ def run(job):
 
         if not obj.get("isPublicDomain"):
             continue
-        if "painting" not in (obj.get("classification") or "").lower():
+        # The Met leaves `classification` blank on many paintings but sets
+        # objectName to "Painting" — so check both, or we reject everything.
+        kind = ((obj.get("classification") or "") + " " + (obj.get("objectName") or "")).lower()
+        if "painting" not in kind:
             continue
         artist = obj.get("artistDisplayName") or ""
         if not name_match(job.query, artist):
