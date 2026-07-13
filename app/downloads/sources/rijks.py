@@ -19,6 +19,7 @@ import requests
 from ... import library
 from ...names import name_match, normalize_comma_name, parse_year, unshout
 from ..util import session, download_to_tmp, request_with_retries
+from . import tuning
 
 
 def _clean_name(s):
@@ -38,6 +39,15 @@ SEARCH = "https://data.rijksmuseum.nl/search/collection"
 LD_JSON = "application/ld+json"
 AAT_ENGLISH = "300388277"
 _MAX_PAGES = 60  # safety net: 60 * 100 = 6000 objects
+
+ENDPOINTS = (("Search", SEARCH),)
+CONFIG = [
+    {"key": "search_type", "label": "Search type filter", "type": "text", "default": "painting",
+     "help": "Sent to the Rijksmuseum `type` search filter, e.g. painting or drawing. "
+             "Blank searches all object types."},
+    {"key": "max_pages", "label": "Max result pages (100 each)", "type": "int", "default": 60, "min": 1, "max": 100,
+     "help": "Safety cap on how many pages of linked-data results to resolve."},
+]
 
 
 def _getj(sess, url):
@@ -140,13 +150,15 @@ def _image_url(sess, obj):
 
 def run(job):
     sess = session()
+    cfg = tuning.effective(ID, CONFIG)
     q = job.query.strip()
     max_items = job.opts.get("max_items")
     actor_cache = {}
 
-    url = "%s?creator=%s&type=painting&imageAvailable=true" % (SEARCH, quote(q))
+    type_q = ("&type=%s" % quote(cfg["search_type"])) if cfg["search_type"] else ""
+    url = "%s?creator=%s%s&imageAvailable=true" % (SEARCH, quote(q), type_q)
     pages = 0
-    while url and pages < _MAX_PAGES:
+    while url and pages < cfg["max_pages"]:
         if job.cancelled:
             return
         try:

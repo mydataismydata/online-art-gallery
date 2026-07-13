@@ -437,6 +437,23 @@ img { display: block; }
 .optnote { margin-top: 6px; max-width: 620px; }
 kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-size: 12px; font-family: monospace; }
 
+/* ---------- built-in source configuration ---------- */
+.bsrc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+.bsrc { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 16px 18px; }
+.bsrc h3 { font-family: var(--serif); font-weight: 400; font-size: 18px; margin: 0 0 8px; }
+.bsrc-eps { margin-bottom: 14px; }
+.bsrc-ep { font-size: 11.5px; color: var(--dim); }
+.bsrc-ep code { word-break: break-all; }
+.bsrc-field { margin-bottom: 13px; }
+.bsrc-field > label { display: block; font-size: 13px; color: var(--dim); margin-bottom: 4px; }
+.bsrc-field input[type=text], .bsrc-field input[type=number], .bsrc-field select {
+  width: 100%; box-sizing: border-box; background: var(--panel2); border: 1px solid var(--line);
+  color: var(--text); border-radius: 5px; padding: 7px 10px; font-size: 13.5px;
+}
+.bsrc-field input:focus, .bsrc-field select:focus { outline: none; border-color: var(--accent); }
+.bsrc-bool .optrow { font-size: 13.5px; }
+.bsrc-help { color: var(--dim); font-size: 11.5px; line-height: 1.4; margin: 5px 0 0; }
+
 @media (max-width: 640px) {
   #topbar { padding: 14px 18px 12px; flex-wrap: wrap; gap: 8px; }
   #app { padding: 20px 18px 60px; }

@@ -11,6 +11,7 @@ import time
 from ... import library, artistinfo
 from ...names import parse_year
 from ..util import session, fetch_json, download_to_tmp
+from . import tuning
 
 ID = "wikidata"
 LABEL = "Wikidata / Wikimedia Commons"
@@ -22,6 +23,12 @@ PLACEHOLDER = "Artist name, e.g. Claude Monet"
 
 WDQS = "https://query.wikidata.org/sparql"
 _LIMIT = 500  # per-artist cap on works pulled from SPARQL
+
+ENDPOINTS = (("SPARQL endpoint", WDQS),)
+CONFIG = [
+    {"key": "max_works", "label": "Max works per artist", "type": "int", "default": 500, "min": 10, "max": 2000,
+     "help": "Upper bound on how many of an artist's paintings the SPARQL query returns."},
+]
 
 # Paintings (Q3305213 or a subclass) by the given creator that have an image.
 # GROUP BY collapses the extra rows that the optional material values would create.
@@ -46,6 +53,8 @@ def _val(row, key):
 
 def run(job):
     sess = session()
+    cfg = tuning.effective(ID, CONFIG)
+    limit = cfg["max_works"]
     job.log("Identifying \"%s\" on Wikidata…" % job.query)
     qid, label = artistinfo.resolve_qid(job.query)
     if not qid:
@@ -54,12 +63,12 @@ def run(job):
     artist = label or job.query
     job.log("Matched %s (%s); querying their paintings…" % (artist, qid))
 
-    query = _SPARQL % {"qid": qid, "limit": _LIMIT}
+    query = _SPARQL % {"qid": qid, "limit": limit}
     data = fetch_json(sess, WDQS, {"query": query, "format": "json"}, timeout=90)
     rows = (data.get("results") or {}).get("bindings") or []
     job.log("Wikidata lists %d painting%s with an image%s."
             % (len(rows), "" if len(rows) == 1 else "s",
-               " (capped)" if len(rows) >= _LIMIT else ""))
+               " (capped)" if len(rows) >= limit else ""))
 
     max_items = job.opts.get("max_items")
     for row in rows:

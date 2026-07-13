@@ -4,7 +4,8 @@ from flask import Blueprint, abort, jsonify, request, send_file
 
 from . import config, library, thumbs, artistinfo, auth, collections, related, research
 from .downloads import manager
-from .downloads.sources import get_source, list_sources, custom
+from .downloads.sources import (get_source, list_sources, custom,
+                                list_builtin_configs, set_builtin_config, reset_builtin_config)
 
 bp = Blueprint("api", __name__)
 
@@ -444,6 +445,34 @@ def thumb(wid):
 @auth.require_role("owner")
 def api_sources():
     return jsonify({"sources": list_sources()})
+
+
+# Built-in source configuration — owner oversight over how each searches/filters.
+@bp.get("/api/sources/builtin")
+@auth.require_role("owner")
+def api_sources_builtin():
+    return jsonify({"sources": list_builtin_configs()})
+
+
+@bp.post("/api/sources/builtin/<sid>")
+@auth.require_role("owner")
+def api_sources_builtin_save(sid):
+    data = request.get_json(silent=True) or {}
+    try:
+        cfg = set_builtin_config(sid, data.get("values") or {})
+    except KeyError:
+        abort(404)
+    return jsonify({"source": cfg})
+
+
+@bp.post("/api/sources/builtin/<sid>/reset")
+@auth.require_role("owner")
+def api_sources_builtin_reset(sid):
+    try:
+        cfg = reset_builtin_config(sid)
+    except KeyError:
+        abort(404)
+    return jsonify({"source": cfg})
 
 
 @bp.get("/api/downloads")

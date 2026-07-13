@@ -996,9 +996,10 @@ let fieldKeys = ["title", "artist", "date", "year", "medium", "style", "image", 
 async function settingsView() {
   setNav("settings");
   try {
-    const [srcData, usersData] = await Promise.all([
+    const [srcData, usersData, builtinData] = await Promise.all([
       api("/api/custom_sources"),
       api("/api/users"),
+      api("/api/sources/builtin"),
     ]);
     if (srcData.field_keys) fieldKeys = srcData.field_keys;
     const presets = srcData.presets || [];
@@ -1006,6 +1007,7 @@ async function settingsView() {
       '<div class="pagehead"><h1>Settings</h1></div>' +
       usersPanelHtml() +
       displayPanelHtml() +
+      builtinSourcesHtml(builtinData.sources || []) +
       '<section class="settings-sources"><div class="pagehead" style="margin:32px 0 12px">' +
       '<h2 class="sec">Download sources</h2>' +
       '<p class="sub">Add JSON-API museum sources to scan for works. The built-in sources ' +
@@ -1020,7 +1022,94 @@ async function settingsView() {
     if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
     renderSourceList(srcData.sources || []);
     wireSourceForm(presets);
+    wireBuiltinSources();
   } catch (e) { errbox(e); }
+}
+
+/* ---------- built-in source configuration (owner oversight) ---------- */
+
+function builtinSourcesHtml(configs) {
+  const cards = configs.map((c) => {
+    const eps = c.endpoints.map((e) =>
+      '<div class="bsrc-ep"><span>' + esc(e.label) + "</span> <code>" + esc(e.url) + "</code></div>").join("");
+    const fields = c.params.map((p) => {
+      if (p.type === "bool") {
+        return '<div class="bsrc-field bsrc-bool"><label class="optrow">' +
+          '<input type="checkbox" data-key="' + esc(p.key) + '"' + (p.value ? " checked" : "") + ">" +
+          "<span>" + esc(p.label) + "</span></label>" +
+          (p.help ? '<p class="bsrc-help">' + esc(p.help) + "</p>" : "") + "</div>";
+      }
+      let ctrl;
+      if (p.type === "int") {
+        ctrl = '<input type="number" data-key="' + esc(p.key) + '" value="' + esc(String(p.value)) + '"' +
+          (p.min != null ? ' min="' + p.min + '"' : "") + (p.max != null ? ' max="' + p.max + '"' : "") + ">";
+      } else if (p.type === "select") {
+        ctrl = '<select data-key="' + esc(p.key) + '">' + (p.options || []).map((o) =>
+          "<option" + (o === p.value ? " selected" : "") + ">" + esc(o) + "</option>").join("") + "</select>";
+      } else {
+        ctrl = '<input type="text" data-key="' + esc(p.key) + '" value="' + esc(String(p.value)) + '">';
+      }
+      return '<div class="bsrc-field"><label>' + esc(p.label) + "</label>" + ctrl +
+        (p.help ? '<p class="bsrc-help">' + esc(p.help) + "</p>" : "") + "</div>";
+    }).join("");
+    return '<div class="bsrc" data-id="' + esc(c.id) + '">' +
+      "<h3>" + esc(c.label) + "</h3>" +
+      (eps ? '<div class="bsrc-eps">' + eps + "</div>" : "") +
+      '<div class="bsrc-fields">' + fields + "</div>" +
+      '<div class="bf-actions"><button type="button" class="toolbtn" data-save="' + esc(c.id) + '">Save</button>' +
+      '<button type="button" class="linkbtn" data-reset="' + esc(c.id) + '">Reset to defaults</button>' +
+      '<span class="formmsg" data-msg="' + esc(c.id) + '"></span></div></div>';
+  }).join("");
+  return '<section class="builtinsources"><div class="pagehead" style="margin:32px 0 12px">' +
+    '<h2 class="sec">Built-in sources</h2>' +
+    '<p class="sub">How each bundled museum source searches and filters. Endpoints are fixed; the ' +
+    "knobs below are yours to tune and are saved as overrides.</p></div>" +
+    '<div class="bsrc-grid">' + cards + "</div></section>";
+}
+
+function applyBuiltinValues(card, cfg) {
+  const byKey = {};
+  cfg.params.forEach((p) => { byKey[p.key] = p; });
+  card.querySelectorAll("[data-key]").forEach((el) => {
+    const p = byKey[el.dataset.key];
+    if (!p) return;
+    if (el.type === "checkbox") el.checked = !!p.value;
+    else el.value = String(p.value);
+  });
+}
+
+function wireBuiltinSources() {
+  document.querySelectorAll(".bsrc [data-save]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".bsrc"), id = btn.getAttribute("data-save");
+      const values = {};
+      card.querySelectorAll("[data-key]").forEach((el) => {
+        values[el.dataset.key] = el.type === "checkbox" ? el.checked : el.value;
+      });
+      const msg = card.querySelector("[data-msg]");
+      msg.className = "formmsg";
+      try {
+        const r = await api("/api/sources/builtin/" + encodeURIComponent(id), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ values: values }),
+        });
+        applyBuiltinValues(card, r.source);
+        msg.className = "formmsg ok"; msg.textContent = "Saved.";
+      } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
+    });
+  });
+  document.querySelectorAll(".bsrc [data-reset]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".bsrc"), id = btn.getAttribute("data-reset");
+      const msg = card.querySelector("[data-msg]");
+      msg.className = "formmsg";
+      try {
+        const r = await api("/api/sources/builtin/" + encodeURIComponent(id) + "/reset", { method: "POST" });
+        applyBuiltinValues(card, r.source);
+        msg.className = "formmsg ok"; msg.textContent = "Reset to defaults.";
+      } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
+    });
+  });
 }
 
 /* ---------- display options ---------- */

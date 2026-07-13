@@ -5,6 +5,7 @@ import time
 from ... import library
 from ...names import name_match, parse_year
 from ..util import session, fetch_json, download_to_tmp
+from . import tuning
 
 ID = "met"
 LABEL = "The Met (Open Access)"
@@ -14,9 +15,22 @@ PLACEHOLDER = "Artist name, e.g. Johannes Vermeer"
 
 BASE = "https://collectionapi.metmuseum.org/public/collection/v1"
 
+ENDPOINTS = (("Search", BASE + "/search"), ("Object", BASE + "/objects/{id}"))
+CONFIG = [
+    {"key": "type_keywords", "label": "Accepted object types", "type": "text", "default": "painting",
+     "help": "Comma-separated keywords, matched as substrings against each object's "
+             "classification and objectName. Blank accepts every type."},
+    {"key": "public_domain_only", "label": "Public-domain (CC0) only", "type": "bool", "default": True,
+     "help": "Skip anything the Met doesn't flag as public domain."},
+    {"key": "max_scan", "label": "Max objects to scan", "type": "int", "default": 4000, "min": 100, "max": 20000,
+     "help": "Search can return thousands of ids; each is fetched one at a time, so this caps the work."},
+]
+
 
 def run(job):
     sess = session()
+    cfg = tuning.effective(ID, CONFIG)
+    keywords = [k.strip().lower() for k in cfg["type_keywords"].split(",") if k.strip()]
     data = fetch_json(sess, BASE + "/search", {
         "artistOrCulture": "true",
         "hasImages": "true",
@@ -24,9 +38,9 @@ def run(job):
     })
     ids = data.get("objectIDs") or []
     job.log("Met search returned %d objects; checking each for public-domain paintings…" % len(ids))
-    if len(ids) > 4000:
-        job.log("Capping scan at the first 4000 objects.")
-        ids = ids[:4000]
+    if len(ids) > cfg["max_scan"]:
+        job.log("Capping scan at the first %d objects." % cfg["max_scan"])
+        ids = ids[:cfg["max_scan"]]
 
     max_items = job.opts.get("max_items")
     for i, oid in enumerate(ids):
@@ -40,12 +54,12 @@ def run(job):
             continue
         time.sleep(0.1)
 
-        if not obj.get("isPublicDomain"):
+        if cfg["public_domain_only"] and not obj.get("isPublicDomain"):
             continue
         # The Met leaves `classification` blank on many paintings but sets
         # objectName to "Painting" — so check both, or we reject everything.
         kind = ((obj.get("classification") or "") + " " + (obj.get("objectName") or "")).lower()
-        if "painting" not in kind:
+        if keywords and not any(k in kind for k in keywords):
             continue
         artist = obj.get("artistDisplayName") or ""
         if not name_match(job.query, artist):

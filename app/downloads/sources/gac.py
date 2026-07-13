@@ -19,6 +19,7 @@ import uuid
 from ... import config, library
 from ...names import name_match, normalize_comma_name, parse_year, strip_diacritics, unshout
 from ..util import session
+from . import tuning
 
 ID = "gac"
 LABEL = "Google Arts & Culture (dezoomify-rs)"
@@ -37,6 +38,14 @@ MAX_PX_DEFAULT = 12000
 HINT = HINT % MAX_PX_DEFAULT
 
 GAC = "https://artsandculture.google.com"
+
+ENDPOINTS = (("Site", GAC), ("Entity search", GAC + "/search/entity"))
+CONFIG = [
+    {"key": "max_px_default", "label": "Default max pixels per side", "type": "int", "default": MAX_PX_DEFAULT,
+     "min": 1000, "max": 60000,
+     "help": "Used when Max size is left blank on the download form. Higher means gigapixel "
+             "detail at the cost of minutes of CPU and huge files. JPEG can't exceed 65,535."},
+]
 
 
 def find_binary():
@@ -189,7 +198,8 @@ def run(job):
 
     max_items = job.opts.get("max_items")
     # JPEG cannot encode a side over 65535px; stay safely under it.
-    max_px = min(job.opts.get("max_px") or MAX_PX_DEFAULT, 60000)
+    cfg = tuning.effective(ID, CONFIG)
+    max_px = min(job.opts.get("max_px") or cfg["max_px_default"], 60000)
 
     for path in assets:
         if job.cancelled:

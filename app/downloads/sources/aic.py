@@ -5,6 +5,7 @@ import time
 from ... import library
 from ...names import name_match
 from ..util import session, fetch_json, download_to_tmp
+from . import tuning
 
 ID = "aic"
 LABEL = "Art Institute of Chicago"
@@ -20,18 +21,32 @@ FIELDS = ("id,title,image_id,artist_title,date_display,date_start,"
 # the smaller ones are graceful fallbacks.
 SIZES = ("full", "3000,", "1686,", "843,")
 
+ENDPOINTS = (("Search", API), ("IIIF images", IIIF))
+CONFIG = [
+    {"key": "type_keywords", "label": "Accepted artwork types", "type": "text", "default": "painting",
+     "help": "Comma-separated keywords, matched as substrings against each work's "
+             "artwork_type_title (e.g. 'painting', 'drawing'). Blank accepts every type."},
+    {"key": "public_domain_only", "label": "Public-domain (CC0) only", "type": "bool", "default": True,
+     "help": "Skip works the Art Institute doesn't flag as public domain."},
+    {"key": "max_pages", "label": "Max result pages (100 each)", "type": "int", "default": 10, "min": 1, "max": 50,
+     "help": "How many pages of search results to walk."},
+]
+
 
 def run(job):
     sess = session()
+    cfg = tuning.effective(ID, CONFIG)
+    keywords = [k.strip().lower() for k in cfg["type_keywords"].split(",") if k.strip()]
+    max_pages = cfg["max_pages"]
     max_items = job.opts.get("max_items")
     page, total_pages = 1, 1
-    while page <= total_pages and page <= 10:
+    while page <= total_pages and page <= max_pages:
         if job.cancelled:
             return
         data = fetch_json(sess, API, {
             "q": job.query, "fields": FIELDS, "limit": 100, "page": page,
         })
-        total_pages = min((data.get("pagination") or {}).get("total_pages") or 1, 10)
+        total_pages = min((data.get("pagination") or {}).get("total_pages") or 1, max_pages)
         rows = data.get("data") or []
         if page == 1:
             job.log("AIC search returned %d results; filtering to public-domain paintings…"
@@ -39,9 +54,12 @@ def run(job):
         for row in rows:
             if job.cancelled:
                 return
-            if not row.get("is_public_domain") or not row.get("image_id"):
+            if not row.get("image_id"):
                 continue
-            if (row.get("artwork_type_title") or "").lower() != "painting":
+            if cfg["public_domain_only"] and not row.get("is_public_domain"):
+                continue
+            atype = (row.get("artwork_type_title") or "").lower()
+            if keywords and not any(k in atype for k in keywords):
                 continue
             artist = row.get("artist_title") or ""
             if not name_match(job.query, artist):

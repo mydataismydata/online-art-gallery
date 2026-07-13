@@ -10,6 +10,7 @@ import time
 from ... import library
 from ...names import name_match, normalize_comma_name, parse_year, unshout
 from ..util import session, fetch_json, download_to_tmp
+from . import tuning
 
 ID = "vam"
 LABEL = "Victoria & Albert Museum"
@@ -22,9 +23,16 @@ SEARCH = "https://api.vam.ac.uk/v2/objects/search"
 _MAX_PAGES = 40                      # 40 * 100 = up to 4000 candidates
 # IIIF sizes to try, largest first; the base url already ends in '/'.
 SIZES = ("full", "!3000,3000", "!2048,2048", "!1024,1024")
-# object types we treat as fine art worth importing
-_FINE_ART = ("painting", "watercolour", "watercolor", "drawing",
-             "gouache", "pastel", "miniature", "tempera")
+
+ENDPOINTS = (("Search", SEARCH),)
+CONFIG = [
+    {"key": "fine_art_types", "label": "Accepted object types", "type": "text",
+     "default": "painting, watercolour, watercolor, drawing, gouache, pastel, miniature, tempera",
+     "help": "Comma-separated keywords, matched as substrings against each record's "
+             "objectType. Blank accepts every object type."},
+    {"key": "max_pages", "label": "Max result pages (100 each)", "type": "int", "default": 40, "min": 1, "max": 100,
+     "help": "How many pages of search results to walk."},
+]
 
 
 def _clean_maker(name):
@@ -33,17 +41,15 @@ def _clean_maker(name):
     return unshout(normalize_comma_name(name.strip()))
 
 
-def _is_fine_art(object_type):
-    ot = (object_type or "").lower()
-    return any(k in ot for k in _FINE_ART)
-
-
 def run(job):
     sess = session()
+    cfg = tuning.effective(ID, CONFIG)
+    fine_art = [k.strip().lower() for k in cfg["fine_art_types"].split(",") if k.strip()]
+    max_pages = cfg["max_pages"]
     max_items = job.opts.get("max_items")
     page, pages = 1, 1
     announced = False
-    while page <= pages and page <= _MAX_PAGES:
+    while page <= pages and page <= max_pages:
         if job.cancelled:
             return
         data = fetch_json(sess, SEARCH, {
@@ -51,7 +57,7 @@ def run(job):
             "images_exist": 1,  # relevance is the default order; passing order_by=relevance 422s
         })
         info = data.get("info") or {}
-        pages = min(info.get("pages") or 1, _MAX_PAGES)
+        pages = min(info.get("pages") or 1, max_pages)
         records = data.get("records") or []
         if not announced:
             job.log("V&A returned %d records with images; keeping fine art by the maker…"
@@ -63,7 +69,8 @@ def run(job):
         for rec in records:
             if job.cancelled:
                 return
-            if not _is_fine_art(rec.get("objectType")):
+            otype = (rec.get("objectType") or "").lower()
+            if fine_art and not any(k in otype for k in fine_art):
                 continue
             maker = _clean_maker((rec.get("_primaryMaker") or {}).get("name"))
             if not maker or not name_match(job.query, maker):

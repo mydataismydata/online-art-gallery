@@ -1,6 +1,30 @@
-from . import gac, met, aic, cleveland, rijks, wikidata, vam, custom
+from . import gac, met, aic, cleveland, rijks, wikidata, vam, custom, tuning
 
 _BUILTIN = (gac, met, aic, cleveland, rijks, wikidata, vam)
+
+
+def list_builtin_configs():
+    """Public config view of every built-in source that declares tunable knobs."""
+    return [tuning.describe(m) for m in _BUILTIN if getattr(m, "CONFIG", None)]
+
+
+def _builtin(source_id):
+    for m in _BUILTIN:
+        if m.ID == source_id and getattr(m, "CONFIG", None):
+            return m
+    raise KeyError(source_id)
+
+
+def set_builtin_config(source_id, values):
+    m = _builtin(source_id)
+    tuning.set_overrides(source_id, values, m.CONFIG)
+    return tuning.describe(m)
+
+
+def reset_builtin_config(source_id):
+    m = _builtin(source_id)
+    tuning.reset(source_id)
+    return tuning.describe(m)
 
 
 def _all_modules():
