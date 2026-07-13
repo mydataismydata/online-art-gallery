@@ -210,6 +210,7 @@ function workFigure(w, i, showArtist) {
 function browseCtx() {
   const actions = [];
   if (canCurate()) actions.push("collect");
+  if (isOwner()) actions.push("metadata");
   if (isOwner()) actions.push("delete");
   return { actions };
 }
@@ -274,6 +275,8 @@ function renderSelCtl(works, rerender, ctx) {
   let html = '<button id="selall" class="linkbtn">' + (all ? "Select none" : "Select all") + "</button>";
   if (ctx.actions.includes("collect"))
     html += '<button id="selcollect" class="toolbtn"' + (n ? "" : " disabled") + ">Add to collection" + tag + "</button>";
+  if (ctx.actions.includes("metadata"))
+    html += '<button id="selmeta" class="toolbtn"' + (n ? "" : " disabled") + ">Find metadata" + tag + "</button>";
   if (ctx.actions.includes("uncollect"))
     html += '<button id="seluncollect" class="danger"' + (n ? "" : " disabled") + ">Remove" + tag + "</button>";
   if (ctx.actions.includes("delete"))
@@ -292,6 +295,33 @@ function renderSelCtl(works, rerender, ctx) {
   if (unc) unc.addEventListener("click", () => removeSelectionFromCollection(ctx.collectionId, rerender));
   const del = $("#seldel");
   if (del) del.addEventListener("click", () => deleteSelection(rerender));
+  const meta = $("#selmeta");
+  if (meta) meta.addEventListener("click", () => findSelectionMetadata(works, rerender));
+}
+
+/* "Find metadata": for each selected work, search the web and fill any missing
+   fields (medium for now). Runs one work at a time so each request stays quick
+   and we can show live progress; skips works that already have the field. */
+async function findSelectionMetadata(works, rerender) {
+  const ids = Array.from(SEL.ids);
+  if (!ids.length) return;
+  const total = ids.length;
+  let done = 0, filled = 0;
+  toast("Finding metadata… 0/" + total);
+  for (const id of ids) {
+    try {
+      const r = await api("/api/work/" + encodeURIComponent(id) + "/find_metadata", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: ["medium"] }),
+      });
+      if (r.found && r.found.medium) filled++;
+    } catch (e) { /* keep going through the batch */ }
+    done++;
+    toast("Finding metadata… " + done + "/" + total + " · " + filled + " filled");
+  }
+  toast("Filled medium on " + filled + " of " + total + " work" + (total === 1 ? "" : "s") + ".");
+  resetSel();
+  if (rerender) rerender();
 }
 
 async function deleteSelection(rerender) {

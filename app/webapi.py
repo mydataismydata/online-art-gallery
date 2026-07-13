@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
-from . import config, library, thumbs, artistinfo, auth, collections, related, research
+from . import config, library, thumbs, artistinfo, auth, collections, related, research, metadata
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
                                 list_builtin_configs, set_builtin_config, reset_builtin_config)
@@ -350,6 +350,23 @@ def api_research_page():
         page = research.error_page(err)
     return page, 200, {"Content-Type": "text/html; charset=utf-8",
                        "Cache-Control": "no-store"}
+
+
+# Batch metadata lookup: search the web and fill a work's field(s). Owner-only;
+# the frontend calls it once per selected work so each request stays quick.
+@bp.post("/api/work/<wid>/find_metadata")
+@auth.require_role("owner")
+def api_work_find_metadata(wid):
+    data = request.get_json(silent=True) or {}
+    fields = data.get("fields") or ["medium"]
+    overwrite = bool(data.get("overwrite"))
+    w = library.scan()["by_id"].get(wid)
+    if not w:
+        abort(404)
+    want = [f for f in fields if overwrite or not w.get(f)]  # don't clobber existing values
+    found = metadata.find_fields(w, want) if want else {}
+    out = library.update_work(wid, found) if found else w
+    return jsonify({"work": out, "found": found})
 
 
 @bp.post("/api/work/<wid>")
