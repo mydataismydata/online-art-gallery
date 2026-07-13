@@ -153,13 +153,14 @@ the **Add artist** source list like any built-in. Definitions are stored in
 
 The Google Arts & Culture source shells out to
 [dezoomify-rs](https://github.com/lovasoa/dezoomify-rs). Windows: `dezoomify-rs.exe`
-already sits next to `serve.py`. On the Ubuntu server:
+already sits next to `serve.py`. On the Ubuntu server it's fetched automatically by
+`deploy/install.sh` (and `deploy/update.sh`); to place it on its own:
 
 ```bash
-wget https://github.com/lovasoa/dezoomify-rs/releases/latest/download/dezoomify-rs.linux -O dezoomify-rs \
-  && chmod +x dezoomify-rs        # keep it next to serve.py, or put it on PATH,
-                                  # or point DEZOOMIFY_RS=/path/to/it
+sudo bash deploy/fetch-dezoomify.sh        # -> /opt/gallery/dezoomify-rs
 ```
+
+The app looks for the binary next to `serve.py`, on `PATH`, or at `$DEZOOMIFY_RS`.
 
 ## Running on the Ubuntu server (systemd + Tailscale)
 

@@ -29,12 +29,21 @@ Two independent layers of control, which is exactly what you want:
 
 ## Part 1 — Install the app
 
-SSH into the Ubuntu box, then:
+SSH into the Ubuntu box. The fastest path is the bundled installer — it does
+everything in this section (packages, service user, clone, virtualenv,
+**dezoomify-rs**, and the systemd service), and is idempotent, so it doubles as a
+repair/upgrade tool:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mydataismydata/online-art-gallery/main/deploy/install.sh | sudo bash
+```
+
+Prefer to run it by hand? The same steps, explicitly:
 
 ```bash
 # System packages
 sudo apt update
-sudo apt install -y python3-venv python3-pip git wget
+sudo apt install -y python3-venv python3-pip git curl
 
 # A dedicated, unprivileged service account (no login shell)
 sudo useradd --system --shell /usr/sbin/nologin gallery
@@ -49,13 +58,12 @@ sudo -u gallery python3 -m venv /opt/gallery/.venv
 sudo -u gallery /opt/gallery/.venv/bin/pip install -r /opt/gallery/requirements.txt
 ```
 
-**dezoomify-rs** (only needed for the Google Arts & Culture source — the Linux build,
-not the Windows `.exe` in the repo, which is git-ignored):
+**dezoomify-rs** — the helper the Google Arts & Culture source shells out to. The
+installer above already fetches it; the manual step below is the same thing (the
+Linux x86_64 build; the Windows `.exe` in the repo is git-ignored):
 
 ```bash
-sudo -u gallery wget -O /opt/gallery/dezoomify-rs \
-  https://github.com/lovasoa/dezoomify-rs/releases/latest/download/dezoomify-rs.linux
-sudo chmod +x /opt/gallery/dezoomify-rs
+sudo bash /opt/gallery/deploy/fetch-dezoomify.sh
 ```
 
 **Install the service:**
@@ -193,12 +201,13 @@ sudo tailscale up --advertise-tags=tag:gallery
 ## Updating to a new version
 
 ```bash
-sudo -u gallery git -C /opt/gallery pull
-sudo -u gallery /opt/gallery/.venv/bin/pip install -r /opt/gallery/requirements.txt
-sudo systemctl restart gallery
+sudo bash /opt/gallery/deploy/update.sh
 ```
 
-Your library and accounts are untouched — they live in `/var/lib/gallery`.
+That pulls the latest code, refreshes Python deps, makes sure `dezoomify-rs` is
+present, and restarts the service. Your library and accounts are untouched — they
+live in `/var/lib/gallery`. (Add `FORCE_DEZOOMIFY=1` before the command to also
+re-download the newest dezoomify-rs.)
 
 ## Backups
 
