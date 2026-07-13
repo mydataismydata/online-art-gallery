@@ -1376,10 +1376,56 @@ function setFit(fit) {
 function placardsOn() { return localStorage.getItem("placards") === "1"; }
 function setPlacards(on) { localStorage.setItem("placards", on ? "1" : "0"); }
 
+/* Rich descriptions: the placard editor's format bar produces a small set of
+   tags (b/i/u, <font face|size>, line-break divs). Everything else — including
+   whatever gets pasted in — is stripped by this DOM-based allowlist, applied
+   both before saving and before rendering. Legacy plain-text descriptions
+   render with their line breaks intact. */
+const RICH_TAGS = { B: 1, I: 1, U: 1, EM: 1, STRONG: 1, BR: 1, DIV: 1, P: 1, FONT: 1 };
+const RICH_FONTS = { "Georgia": 1, "Arial": 1, "Courier New": 1 };
+const RICH_SIZES = { "2": 1, "3": 1, "5": 1 };
+
+function sanitizeRich(html) {
+  // Parse into a <template>: its content is INERT — images don't load and
+  // event handlers never fire while we scrub. A live div would execute
+  // side effects (e.g. <img onerror=…>) during the innerHTML parse itself.
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html || "";
+  const root = tpl.content;
+  (function scrub(node) {
+    let c = node.firstChild;
+    while (c) {
+      const next = c.nextSibling;
+      if (c.nodeType === 3) { c = next; continue; }
+      if (c.nodeType !== 1 || !RICH_TAGS[c.tagName]) {
+        const first = c.firstChild;          // unwrap: keep the children, drop the node
+        while (c.firstChild) node.insertBefore(c.firstChild, c);
+        node.removeChild(c);
+        c = first || next;
+        continue;
+      }
+      Array.from(c.attributes).forEach((a) => {
+        const keep = c.tagName === "FONT" &&
+          ((a.name === "face" && RICH_FONTS[a.value]) ||
+           (a.name === "size" && RICH_SIZES[a.value]));
+        if (!keep) c.removeAttribute(a.name);
+      });
+      scrub(c);
+      c = next;
+    }
+  })(root);
+  return tpl.innerHTML;
+}
+
+const RICH_RE = /<\s*(b|i|u|em|strong|br|div|p|font)[\s>/]/i;
+function richDescHtml(d) {
+  return RICH_RE.test(d) ? sanitizeRich(d) : esc(d).replace(/\n/g, "<br>");
+}
+
 function placardHtml(w) {
   const date = w.date || (w.year ? String(w.year) : "");
   const desc = w.description
-    ? '<div class="pl-desc">' + esc(w.description) + "</div>"
+    ? '<div class="pl-desc">' + richDescHtml(w.description) + "</div>"
     : (isOwner() ? '<div class="pl-desc pl-empty">No description yet.</div>' : "");
   const edit = isOwner() ? '<button class="pl-edit" id="pl-edit" type="button">Edit</button>' : "";
   return '<div class="pl-card">' +
@@ -1419,7 +1465,19 @@ function editWorkDialog(w) {
     "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
     "<label>Date <span class=\"tiny\">optional</span><input id=\"ew-date\" autocomplete=\"off\"></label>" +
     "<label>Medium <span class=\"tiny\">optional</span><input id=\"ew-medium\" autocomplete=\"off\"></label>" +
-    "<label>Description<textarea id=\"ew-desc\" rows=\"8\"></textarea></label>" +
+    "<label>Description</label>" +
+    '<div class="fmtbar">' +
+    '<button type="button" class="fmtbtn" data-cmd="bold" title="Bold"><b>B</b></button>' +
+    '<button type="button" class="fmtbtn" data-cmd="italic" title="Italic"><i>I</i></button>' +
+    '<button type="button" class="fmtbtn" data-cmd="underline" title="Underline"><u>U</u></button>' +
+    '<select id="fmt-font" title="Font"><option value="">Font</option>' +
+    '<option value="Georgia">Serif</option><option value="Arial">Sans</option>' +
+    '<option value="Courier New">Mono</option></select>' +
+    '<select id="fmt-size" title="Size"><option value="">Size</option>' +
+    '<option value="2">Small</option><option value="3">Normal</option>' +
+    '<option value="5">Large</option></select>' +
+    "</div>" +
+    '<div class="richtext" id="ew-desc" contenteditable="true"></div>' +
     '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
     '<button type="button" class="linkbtn" id="ew-cancel">cancel</button>' +
     '<span class="formmsg err" id="ew-msg"></span></div></form>' +
@@ -1452,6 +1510,21 @@ function editWorkDialog(w) {
     targets.appendChild(b);
   });
 
+  /* ---- format bar (description) ---- */
+  const ed = q("#ew-desc");
+  try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
+  m.el.querySelectorAll(".fmtbtn").forEach((b) => {
+    b.addEventListener("mousedown", (e) => e.preventDefault());  // keep the text selection
+    b.addEventListener("click", () => { ed.focus(); document.execCommand(b.dataset.cmd); });
+  });
+  const fontSel = q("#fmt-font"), sizeSel = q("#fmt-size");
+  fontSel.addEventListener("change", () => {
+    if (fontSel.value) { ed.focus(); document.execCommand("fontName", false, fontSel.value); fontSel.value = ""; }
+  });
+  sizeSel.addEventListener("change", () => {
+    if (sizeSel.value) { ed.focus(); document.execCommand("fontSize", false, sizeSel.value); sizeSel.value = ""; }
+  });
+
   const frame = q("#rs-frame");
   const browseTo = (url) => { frame.src = "/research/page?url=" + encodeURIComponent(url); };
   const doSearch = (engine) => {
@@ -1474,8 +1547,14 @@ function editWorkDialog(w) {
     const t = (e.data.text || "").trim();
     if (!t) return;
     const el = q(FIELDS.find((f) => f[0] === armed)[1]);
-    if (armed === "description" && el.value.trim()) el.value = el.value.replace(/\s+$/, "") + "\n\n" + t;
-    else el.value = t;
+    if (armed === "description") {
+      const chunk = esc(t).replace(/\n/g, "<br>");   // selections arrive as plain text
+      el.innerHTML = el.textContent.trim()
+        ? el.innerHTML.replace(/(<br\s*\/?>\s*)+$/i, "") + "<br><br>" + chunk
+        : chunk;
+    } else {
+      el.value = t.replace(/\s*\n\s*/g, " ");        // single-line fields
+    }
     el.classList.add("justfilled");
     setTimeout(() => el.classList.remove("justfilled"), 700);
   }
@@ -1485,14 +1564,14 @@ function editWorkDialog(w) {
   q("#ew-artist").value = w.artist || "";
   q("#ew-date").value = w.date || (w.year ? String(w.year) : "");
   q("#ew-medium").value = w.medium || "";
-  q("#ew-desc").value = w.description || "";
+  ed.innerHTML = richDescHtml(w.description || "");   // legacy plain text gets its \n as <br>
   q("#ew-cancel").addEventListener("click", closeAll);
   q("#ewform").addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = {
       title: q("#ew-title").value, artist: q("#ew-artist").value,
       date: q("#ew-date").value, medium: q("#ew-medium").value,
-      description: q("#ew-desc").value,
+      description: ed.textContent.trim() ? sanitizeRich(ed.innerHTML) : "",
     };
     try {
       const r = await api("/api/work/" + encodeURIComponent(w.id), {

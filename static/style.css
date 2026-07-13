@@ -409,6 +409,27 @@ img { display: block; }
 #rs-frame { width: 100%; height: 54vh; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
 .rs-tip { color: var(--dim); margin: 0; }
 #ewform .justfilled { outline: 2px solid var(--accent); }
+/* mini format bar + rich description editor */
+.fmtbar { display: flex; gap: 6px; align-items: center; margin: 6px 0 8px; }
+.fmtbtn {
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 4px; width: 30px; height: 28px; cursor: pointer; font-size: 13px;
+}
+.fmtbtn:hover { border-color: var(--accent); color: var(--accent); }
+.fmtbar select {
+  background: var(--panel2); border: 1px solid var(--line); color: var(--text);
+  border-radius: 4px; height: 28px; font-size: 12.5px;
+}
+.richtext {
+  min-height: 150px; max-height: 280px; overflow: auto;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 5px;
+  padding: 10px 12px; font-size: 14px; line-height: 1.5;
+}
+.richtext:focus { outline: none; border-color: var(--accent); }
+/* the three size steps, relative to wherever they render (placard or editor) */
+.pl-desc font[size="2"], .richtext font[size="2"] { font-size: .85em; }
+.pl-desc font[size="3"], .richtext font[size="3"] { font-size: 1em; }
+.pl-desc font[size="5"], .richtext font[size="5"] { font-size: 1.35em; }
 
 /* ---------- settings: display options ---------- */
 .optrow { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 15px; }

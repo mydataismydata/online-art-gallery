@@ -37,7 +37,8 @@ _SNIPPET = """
     if (!sel || sel.rangeCount === 0) return;
     var s = "";
     for (var i = 0; i < sel.rangeCount; i++) s += sel.getRangeAt(i).toString();
-    s = s.replace(/\\s+/g, " ").trim();
+    // collapse runs of spaces but KEEP line breaks — they carry the formatting
+    s = s.replace(/[ \\t\\r]+/g, " ").replace(/ ?\\n ?/g, "\\n").replace(/\\n{3,}/g, "\\n\\n").trim();
     if (s) parent.postMessage({ type: "placard-selection", text: s }, window.location.origin);
   }
   // Synchronous on purpose: the selection is final by mouseup, and setTimeout
