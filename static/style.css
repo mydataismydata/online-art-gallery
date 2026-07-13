@@ -388,7 +388,9 @@ img { display: block; }
 }
 .pl-edit:hover { background: #443c30; }
 /* ---------- placard editor: research pane ---------- */
-.modal-wide { max-width: min(1080px, 94vw); }
+/* .modal.modal-wide (two classes) so it outranks .modal's max-width regardless
+   of where each rule sits in this file. */
+.modal.modal-wide { max-width: min(1080px, 94vw); }
 .ewwrap { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 920px) { .ewwrap { grid-template-columns: 1fr; } }
 .ewresearch { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
