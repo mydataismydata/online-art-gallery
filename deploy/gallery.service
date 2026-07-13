@@ -1,0 +1,59 @@
+# The Gallery — systemd unit.
+#
+#   sudo cp deploy/gallery.service /etc/systemd/system/gallery.service
+#   sudo nano /etc/systemd/system/gallery.service      # edit the marked lines
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now gallery
+#   journalctl -u gallery -f                            # watch the log
+#
+# Assumes the code is at /opt/gallery and all mutable data lives under
+# /var/lib/gallery (so `git pull` in /opt/gallery never touches your library or
+# accounts). See DEPLOY.md for the one-time setup that creates these.
+
+[Unit]
+Description=The Gallery (self-hosted art gallery)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gallery
+Group=gallery
+WorkingDirectory=/opt/gallery
+
+# ── Data lives OUTSIDE the code tree ──────────────────────────────────────
+# Everything the app writes is redirected under /var/lib/gallery.
+Environment=GALLERY_DATA=/var/lib/gallery/data
+Environment=GALLERY_LIBRARY=/var/lib/gallery/library
+Environment=GALLERY_CACHE=/var/lib/gallery/cache
+Environment=GALLERY_TRASH=/var/lib/gallery/trash
+Environment=GALLERY_SOURCES=/var/lib/gallery/custom_sources.json
+Environment=DEZOOMIFY_RS=/opt/gallery/dezoomify-rs
+
+# ── Bind address ──────────────────────────────────────────────────────────
+# Default: listen only on loopback and let `tailscale serve` put HTTPS in
+# front of it (tailnet-only, valid cert). See DEPLOY.md § "HTTPS".
+ExecStart=/opt/gallery/.venv/bin/python serve.py --host 127.0.0.1 --port 8000
+#
+# Simpler alternative — reach it directly at http://<this-box>:8000 over the
+# tailnet (no `tailscale serve` needed). Comment the line above and use:
+# ExecStart=/opt/gallery/.venv/bin/python serve.py --host 0.0.0.0 --port 8000
+# NOTE: 0.0.0.0 also exposes port 8000 on any LAN/public interface this box
+# has (still behind the login wall). Fine behind home NAT; otherwise firewall
+# the port off non-tailscale interfaces, or keep the 127.0.0.1 + serve setup.
+
+Restart=on-failure
+RestartSec=3
+
+# ── Hardening ─────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/gallery
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

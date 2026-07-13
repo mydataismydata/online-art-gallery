@@ -1,0 +1,328 @@
+"""The library: a folder tree of images (library/<Artist>/<work>.jpg) plus optional
+JSON sidecars (<work>.jpg.json) carrying metadata. Everything is rescanned from disk
+with a short TTL, so files copied in by hand show up automatically."""
+import hashlib
+import json
+import re
+import shutil
+import threading
+import time
+from collections import Counter, OrderedDict
+from pathlib import Path
+
+from . import config
+from .names import (safe_name, era_from, parse_year, clean_title_text,
+                    artist_sort_key, strip_diacritics)
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+_lock = threading.RLock()
+_state = {"scanned_at": 0.0, "works": [], "by_id": {}, "src_ids": set()}
+_TTL = 2.0
+
+_MARKER_RE = re.compile(r"\s*\[([a-z]+)-([^\]\s]+)\]\s*$")
+
+
+def invalidate():
+    with _lock:
+        _state["scanned_at"] = 0.0
+
+
+def _parse_stem(stem):
+    """Parse 'Title (1875) [met-123]' or 'Title; 1875' -> (title, date, source, source_id)."""
+    source = source_id = None
+    m = _MARKER_RE.search(stem)
+    if m:
+        source, source_id = m.group(1), m.group(2)
+        stem = stem[: m.start()].rstrip()
+    title, date_text = stem, None
+    if ";" in stem:
+        parts = [p.strip() for p in stem.split(";")]
+        title = parts[0]
+        rest = "; ".join(p for p in parts[1:] if p)
+        date_text = rest or None
+    else:
+        m2 = re.search(r"\((\d{4}[^)]*)\)\s*$", stem)
+        if m2:
+            title = stem[: m2.start()].strip()
+            date_text = m2.group(1)
+    return clean_title_text(title), date_text, source, source_id
+
+
+def _work_from_file(path, artist_dir_name):
+    rel = path.relative_to(config.LIBRARY_DIR).as_posix()
+    wid = hashlib.sha1(rel.encode("utf-8")).hexdigest()[:16]
+    meta = {}
+    sidecar = Path(str(path) + ".json")
+    if sidecar.exists():
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    f_title, f_date, f_source, f_sid = _parse_stem(path.stem)
+    title = meta.get("title") or f_title or path.stem
+    date_text = meta.get("date") or f_date
+    year = meta.get("year") or parse_year(date_text)
+    st = path.stat()
+    return {
+        "id": wid,
+        "rel": rel,
+        "artist": meta.get("artist") or artist_dir_name,
+        "title": title,
+        "date": date_text,
+        "year": year,
+        "era": era_from(year, date_text),
+        "medium": meta.get("medium"),
+        "style": meta.get("style"),
+        "type": meta.get("type") or "painting",
+        "source": meta.get("source") or f_source,
+        "source_id": str(meta.get("source_id")) if meta.get("source_id") is not None else f_sid,
+        "source_url": meta.get("source_url"),
+        "mtime": st.st_mtime,
+        "size": st.st_size,
+    }
+
+
+def scan(force=False):
+    with _lock:
+        if not force and time.time() - _state["scanned_at"] < _TTL:
+            return _state
+        works = []
+        root = config.LIBRARY_DIR
+        if root.exists():
+            for artist_dir in sorted(root.iterdir()):
+                if not artist_dir.is_dir() or artist_dir.name.startswith("."):
+                    continue
+                for f in sorted(artist_dir.rglob("*")):
+                    if f.is_file() and f.suffix.lower() in IMAGE_EXTS:
+                        try:
+                            works.append(_work_from_file(f, artist_dir.name))
+                        except Exception as e:
+                            print("scan: skipping %s (%s)" % (f, e), flush=True)
+        works.sort(key=lambda w: (artist_sort_key(w["artist"]), w["year"] or 9999, w["title"].casefold()))
+        _state["works"] = works
+        _state["by_id"] = {w["id"]: w for w in works}
+        _state["src_ids"] = {
+            "%s-%s" % (w["source"], w["source_id"])
+            for w in works
+            if w["source"] and w["source_id"]
+        }
+        _state["scanned_at"] = time.time()
+        return _state
+
+
+def get(wid):
+    return scan()["by_id"].get(wid)
+
+
+def all_works():
+    return scan()["works"]
+
+
+def _matches(value, wanted):
+    if wanted is None:
+        return True
+    have = (value or "Unknown").strip().casefold()
+    return have == wanted.strip().casefold()
+
+
+def query_works(artist=None, era=None, medium=None, style=None, q=None):
+    out = []
+    for w in all_works():
+        if artist is not None and w["artist"].casefold() != artist.casefold():
+            continue
+        if not _matches(w["era"], era):
+            continue
+        if not _matches(w["medium"], medium):
+            continue
+        if not _matches(w["style"], style):
+            continue
+        if q and q.casefold() not in (w["title"] + " " + w["artist"]).casefold():
+            continue
+        out.append(w)
+    return out
+
+
+def artists():
+    groups = OrderedDict()
+    for w in all_works():
+        groups.setdefault(w["artist"], []).append(w)
+    out = []
+    for name, ws in groups.items():
+        years = [w["year"] for w in ws if w["year"]]
+        out.append({
+            "name": name,
+            "count": len(ws),
+            "cover": ws[0]["id"],
+            "year_min": min(years) if years else None,
+            "year_max": max(years) if years else None,
+        })
+    # plain A-Z on the displayed name ("Arthur Streeton" under A, not S)
+    out.sort(key=lambda a: strip_diacritics(a["name"]).casefold())
+    return out
+
+
+def _era_sort_key(pair):
+    m = re.match(r"(\d+)", pair["value"])
+    return (int(m.group(1)) if m else 999, pair["value"])
+
+
+def facets():
+    result = {}
+    for key in ("era", "medium", "style"):
+        counter = Counter()
+        display = {}
+        for w in all_works():
+            v = (w.get(key) or "Unknown").strip()
+            cf = v.casefold()
+            # variants differing only in case count together; show the capitalized one
+            if cf not in display or (display[cf][:1].islower() and v[:1].isupper()):
+                display[cf] = v
+            counter[cf] += 1
+        items = [{"value": display[cf], "count": n} for cf, n in counter.items()]
+        if key == "era":
+            items.sort(key=_era_sort_key)
+        else:
+            items.sort(key=lambda p: (-p["count"], p["value"].casefold()))
+        result[key] = items
+    return result
+
+
+def source_exists(source, source_id):
+    """True if a work with this source marker is already in the library."""
+    return ("%s-%s" % (source, source_id)) in scan()["src_ids"]
+
+
+def _trash_work(w):
+    """Move a work's image and sidecar into the trash dir, preserving the artist
+    subfolder and stamping the name so nothing collides. Returns the new image path."""
+    src = config.LIBRARY_DIR / w["rel"]
+    rel = Path(w["rel"])
+    dest_dir = config.TRASH_DIR / rel.parent
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest = dest_dir / ("%s  %s" % (stamp, rel.name))
+    n = 2
+    while dest.exists():
+        dest = dest_dir / ("%s  %s  (%d)%s" % (stamp, rel.stem, n, rel.suffix))
+        n += 1
+    shutil.move(str(src), str(dest))
+    sidecar = Path(str(src) + ".json")
+    if sidecar.exists():
+        shutil.move(str(sidecar), str(dest) + ".json")
+    return dest
+
+
+def delete_works(ids):
+    """Move the given works to the trash. Returns (deleted_ids, errors)."""
+    st = scan()
+    deleted, errors = [], []
+    for wid in ids:
+        w = st["by_id"].get(wid)
+        if not w:
+            errors.append({"id": wid, "error": "not found"})
+            continue
+        try:
+            dest = _trash_work(w)
+            deleted.append(wid)
+            print("trashed %s -> %s" % (w["rel"], dest), flush=True)
+        except Exception as e:
+            errors.append({"id": wid, "error": str(e)})
+    if deleted:
+        invalidate()
+    return deleted, errors
+
+
+def _set_sidecar_artist(image_path, artist):
+    """Write artist into a work's sidecar, creating the sidecar if absent so the
+    work groups by metadata rather than by whatever folder it happens to sit in."""
+    sc = Path(str(image_path) + ".json")
+    data = {}
+    if sc.exists():
+        try:
+            data = json.loads(sc.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+    data["artist"] = artist
+    sc.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def rename_artist(sources, target):
+    """Consolidate every work whose artist matches one of `sources` under the
+    canonical `target`: relocate its image + sidecar into target's folder and set
+    the sidecar's artist field. Renaming to an existing artist thus merges them.
+    Returns (moved, errors)."""
+    target = re.sub(r"\s+", " ", target or "").strip()
+    if not target:
+        raise ValueError("target name required")
+    src_set = {re.sub(r"\s+", " ", s).strip().casefold() for s in sources}
+    src_set.discard("")
+    src_set.discard(target.casefold())  # nothing to do for works already canonical
+    target_folder = config.LIBRARY_DIR / safe_name(target, 80)
+    target_folder.mkdir(parents=True, exist_ok=True)
+
+    st = scan(force=True)
+    moved, errors, touched = 0, [], set()
+    for w in list(st["works"]):
+        if w["artist"].strip().casefold() not in src_set:
+            continue
+        src = config.LIBRARY_DIR / w["rel"]
+        touched.add(src.parent)
+        try:
+            dest = target_folder / src.name
+            if dest.resolve() != src.resolve():
+                n = 2
+                while dest.exists():
+                    dest = target_folder / ("%s (%d)%s" % (src.stem, n, src.suffix))
+                    n += 1
+                shutil.move(str(src), str(dest))
+                sc = Path(str(src) + ".json")
+                if sc.exists():
+                    shutil.move(str(sc), str(dest) + ".json")
+            _set_sidecar_artist(dest, target)
+            moved += 1
+        except Exception as e:
+            errors.append({"rel": w["rel"], "error": str(e)})
+
+    for d in touched:  # tidy up now-empty source folders
+        try:
+            if d != target_folder and d.exists() and not any(d.iterdir()):
+                d.rmdir()
+        except Exception:
+            pass
+    invalidate()
+    return moved, errors
+
+
+def save_work(artist, meta, tmp_path):
+    """Move a downloaded temp file into the library and write its sidecar.
+    Returns the final path."""
+    artist_name = re.sub(r"\s+", " ", artist or "").strip() or "Unknown Artist"
+    folder = config.LIBRARY_DIR / safe_name(artist_name, 80)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    ext = Path(str(tmp_path)).suffix.lower() or ".jpg"
+    if ext == ".jpeg":
+        ext = ".jpg"
+    bits = meta.get("title") or "Untitled"
+    if meta.get("year"):
+        bits += " (%s)" % meta["year"]
+    if meta.get("source") and meta.get("source_id") is not None:
+        bits += " [%s-%s]" % (meta["source"], meta["source_id"])
+    path = folder / (safe_name(bits) + ext)
+    n = 2
+    while path.exists():
+        path = folder / (safe_name(bits) + " (%d)%s" % (n, ext))
+        n += 1
+
+    shutil.move(str(tmp_path), str(path))
+    sidecar = dict(meta)
+    sidecar["artist"] = artist_name
+    sidecar["saved"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    Path(str(path) + ".json").write_text(
+        json.dumps(sidecar, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    with _lock:
+        if meta.get("source") and meta.get("source_id") is not None:
+            _state["src_ids"].add("%s-%s" % (meta["source"], meta["source_id"]))
+    return path

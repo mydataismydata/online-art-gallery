@@ -1,0 +1,36 @@
+// Example Tailscale ACL — "external curators may reach ONLY the gallery box."
+//
+// Use this ONLY if you add curators as MEMBERS of your tailnet. If you instead
+// SHARE the single gallery machine with them (Machines -> gallery -> Share...),
+// you do NOT need any of this — a shared node is already the only thing a shared
+// user can reach. Sharing is simpler; see DEPLOY.md § "Inviting curators".
+//
+// Paste into the Tailscale admin console -> Access controls, adapting the emails.
+// The key idea: DELETE the default allow-all rule, tag the gallery box, and grant
+// the curators group access to tag:gallery and nothing else.
+{
+  "tagOwners": {
+    "tag:gallery": ["autogroup:admin"],
+  },
+
+  "groups": {
+    // Your own accounts — full run of the tailnet.
+    "group:owners": ["you@example.com"],
+    // Invited curators — restricted to the gallery below.
+    "group:curators": ["alice@example.com", "bob@example.com"],
+  },
+
+  "acls": [
+    // Owners: everything (this REPLACES the default {"action":"accept",
+    // "src":["*"], "dst":["*:*"]} rule, which you must remove).
+    { "action": "accept", "src": ["group:owners"], "dst": ["*:*"] },
+
+    // Curators: the gallery box only, only on the web port(s). They cannot
+    // even see your other machines.
+    {
+      "action": "accept",
+      "src": ["group:curators"],
+      "dst": ["tag:gallery:80", "tag:gallery:443", "tag:gallery:8000"],
+    },
+  ],
+}

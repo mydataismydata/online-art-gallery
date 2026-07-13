@@ -1,0 +1,4 @@
+flask>=2.2
+waitress>=2.1
+pillow>=9.0
+requests>=2.28

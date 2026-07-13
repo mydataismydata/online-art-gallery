@@ -1,0 +1,26 @@
+# ── Python ───────────────────────────────────────────────
+.venv/
+__pycache__/
+*.pyc
+
+# ── Runtime data: NEVER commit (password hashes + session secret) ──
+data/
+
+# ── User content & caches (machine-local, often large) ───
+library/
+cache/
+trash/
+custom_sources.json
+
+# ── Sample art (not shipped; ~900 MB of images) ──────────
+.samples/
+
+# ── Platform binary: fetched per-OS, not vendored ────────
+dezoomify-rs
+dezoomify-rs.exe
+
+# ── Local editor / tooling config ────────────────────────
+.claude/
+.idea/
+.vscode/
+*.log
