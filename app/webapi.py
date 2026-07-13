@@ -383,11 +383,15 @@ def img(wid):
     w = library.get(wid)
     if not w:
         abort(404)
-    path = config.LIBRARY_DIR / w["rel"]
-    if not path.exists():
+    if not (config.LIBRARY_DIR / w["rel"]).exists():
         abort(404)
+    # Non-web formats (e.g. a TIFF a museum served with a .jpg name) are converted
+    # to a cached JPEG so the browser can display them; web formats serve as-is.
+    path = thumbs.display_for(w)
+    converted = str(path).endswith(".disp.jpg")
     return send_file(
         str(path),
+        mimetype="image/jpeg" if converted else None,
         conditional=True,
         max_age=3600,
         download_name=os.path.basename(w["rel"]),
