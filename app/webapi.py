@@ -458,6 +458,15 @@ def api_works_autofill_batch():
     return jsonify(out)
 
 
+# Library totals + app version for the Settings header (owner only).
+@bp.get("/api/stats")
+@auth.require_role("owner")
+def api_stats():
+    s = library.stats()
+    s["version"] = config.VERSION
+    return jsonify(s)
+
+
 # ---------------- custom sources (Settings — owner only) ----------------
 
 @bp.get("/api/custom_sources")

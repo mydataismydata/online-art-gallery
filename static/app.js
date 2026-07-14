@@ -1100,21 +1100,48 @@ async function refreshJobs() {
 
 let fieldKeys = ["title", "artist", "date", "year", "medium", "style", "image", "id"];
 
+function fmtBytes(n) {
+  if (n == null) return "—";
+  n = Number(n);
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 || n >= 100 ? Math.round(n) : n.toFixed(1)) + " " + u[i];
+}
+
+/* Settings page header: title on the left, app version + library totals on the
+   right, the version aligned with the "Settings" heading. */
+function settingsHeadHtml(s) {
+  s = s || {};
+  const a = s.artists || 0, im = s.images || 0;
+  const stats = [
+    a + (a === 1 ? " artist" : " artists"),
+    im + (im === 1 ? " image" : " images"),
+    fmtBytes(s.images_bytes || 0) + " of images",
+    s.disk_free != null ? fmtBytes(s.disk_free) + " free" : "",
+  ].filter(Boolean);
+  return '<div class="pagehead settings-head"><h1>Settings</h1>' +
+    '<div class="settings-meta"><div class="app-version">v' + esc(s.version || "?") + "</div>" +
+    '<div class="app-stats">' + stats.map((r) => "<span>" + esc(r) + "</span>").join("") +
+    "</div></div></div>";
+}
+
 async function settingsView() {
   setNav("settings");
   try {
-    const [srcData, usersData, builtinData, aiData] = await Promise.all([
+    const [srcData, usersData, builtinData, aiData, statsData] = await Promise.all([
       api("/api/custom_sources"),
       api("/api/users"),
       api("/api/sources/builtin"),
       api("/api/ai/config"),
+      api("/api/stats"),
     ]);
     if (srcData.field_keys) fieldKeys = srcData.field_keys;
     const presets = srcData.presets || [];
     app.innerHTML =
-      '<div class="pagehead"><h1>Settings</h1></div>' +
-      usersPanelHtml() +
+      settingsHeadHtml(statsData) +
       displayPanelHtml() +
+      usersPanelHtml() +
       aiPanelHtml(aiData) +
       builtinSourcesHtml(builtinData.sources || []) +
       '<section class="settings-sources"><div class="pagehead" style="margin:32px 0 12px">' +

@@ -46,6 +46,10 @@ img { display: block; }
 
 .pagehead { margin: 6px 0 26px; }
 .pagehead h1 { font-family: var(--serif); font-weight: 400; font-size: 34px; margin: 0 0 4px; }
+.settings-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+.settings-meta { text-align: right; }
+.settings-meta .app-version { font-size: 13px; color: var(--dim); letter-spacing: .05em; }
+.settings-meta .app-stats { display: flex; flex-direction: column; gap: 1px; margin-top: 5px; font-size: 12.5px; color: var(--dim); }
 .pagehead .sub { color: var(--dim); margin: 0; }
 .inline-add {
   display: inline-block; margin-left: 12px; padding: 2px 12px;

@@ -3,6 +3,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+VERSION = "0.1"
+
 LIBRARY_DIR = Path(os.environ.get("GALLERY_LIBRARY", str(ROOT / "library")))
 CACHE_DIR = Path(os.environ.get("GALLERY_CACHE", str(ROOT / "cache")))
 STATIC_DIR = ROOT / "static"

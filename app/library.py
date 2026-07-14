@@ -201,6 +201,25 @@ def artists():
     return out
 
 
+def stats():
+    """Totals for the Settings screen: artist/image counts, the total bytes of the
+    stored images, and free/total space on the library's filesystem."""
+    ws = all_works()
+    free = disk_total = None
+    try:
+        du = shutil.disk_usage(str(config.LIBRARY_DIR))
+        free, disk_total = du.free, du.total
+    except OSError:
+        pass
+    return {
+        "artists": len({w["artist"] for w in ws}),
+        "images": len(ws),
+        "images_bytes": sum(w.get("size") or 0 for w in ws),
+        "disk_free": free,
+        "disk_total": disk_total,
+    }
+
+
 def _era_sort_key(pair):
     m = re.match(r"(\d+)", pair["value"])
     return (int(m.group(1)) if m else 999, pair["value"])
