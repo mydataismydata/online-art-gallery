@@ -88,6 +88,22 @@ def _og_title(page):
     return t.strip()
 
 
+def _same_artist(a, b):
+    """Lenient two-way name check — either name being a token-subset of the other."""
+    return bool(a and b) and (name_match(a, b) or name_match(b, a))
+
+
+def _title_score(tokens, title):
+    """How well an entity title matches the query: one point per query word present,
+    plus a bonus when every word is present — so 'David Davies' beats 'Arthur Bowen
+    Davies' for the query 'David Davies' rather than losing to it on page order."""
+    norm = strip_diacritics(title).lower()
+    hits = sum(1 for t in tokens if t in norm)
+    if tokens and hits == len(tokens):
+        hits += 1
+    return hits
+
+
 def _find_entity(sess, job, query):
     page = _get_html(sess, GAC + "/search/entity?q=" + re.sub(r"\s+", "+", query.strip()))
     artists, others = [], []
@@ -102,17 +118,26 @@ def _find_entity(sess, job, query):
         raise RuntimeError("No artist entity found for \"%s\". Try pasting the entity URL "
                            "from artsandculture.google.com." % query)
     tokens = [t for t in re.split(r"[^a-z0-9]+", strip_diacritics(query).lower()) if len(t) > 2]
-    # Verify candidates by their page title; entity ids ("m057ldt") say nothing by themselves.
-    for path in candidates[:5]:
+    # Verify candidates by their page title (entity ids like "m057ldt" say nothing),
+    # and pick the BEST-scoring title, not the first hit: GAC's search mixes in
+    # same-surname painters, so "David Davies" also returns "Arthur Bowen Davies".
+    best = None  # (score, path, page, title)
+    for path in candidates[:6]:
         try:
             entity_page = _get_html(sess, GAC + path)
         except Exception:
             continue
         title = _og_title(entity_page)
-        norm = strip_diacritics(title).lower()
-        if title and (not tokens or any(t in norm for t in tokens)):
-            job.log("Entity search matched: %s (\"%s\")" % (path, title))
-            return GAC + path, entity_page
+        if not title:
+            continue
+        score = _title_score(tokens, title) if tokens else 1
+        if best is None or score > best[0]:
+            best = (score, path, entity_page, title)
+        if tokens and best[0] >= len(tokens) + 1:  # every query word present — ideal
+            break
+    if best and best[0] > 0:
+        job.log("Entity search matched: %s (\"%s\")" % (best[1], best[3]))
+        return GAC + best[1], best[2]
     # No candidate's page title contained any word from the query. Google's entity
     # search returns *associated* people too, so the top result is often a different
     # artist entirely (e.g. searching "Adrian Stokes" surfacing "Barbara Hepworth").
@@ -190,6 +215,13 @@ def run(job):
     else:
         entity_url, entity_page = _find_entity(sess, job, q)
     entity_artist = unshout(normalize_comma_name((_og_title(entity_page) or q).strip()))
+    # Names that count as "this artist" when filtering the page's works. GAC often
+    # titles an entity with the full name ("Thomas Roberts") while crediting works
+    # to the common form ("Tom Roberts"), so also accept the typed query — but not
+    # when the query is a pasted entity URL, which carries no usable name.
+    accepted = [entity_artist]
+    if "artsandculture.google.com" not in q:
+        accepted.append(q)
     assets = _harvest_assets(entity_page)
     job.log("Artist page \"%s\": found %d works embedded in the page." % (entity_artist, len(assets)))
     if not assets:
@@ -230,7 +262,7 @@ def run(job):
         artist = unshout(normalize_comma_name((artist or "").strip()))
 
         # entity pages also embed "related" works by other painters — skip those
-        if artist and not name_match(entity_artist, artist) and not name_match(artist, entity_artist):
+        if artist and not any(_same_artist(artist, ref) for ref in accepted):
             job.log("Skipping \"%s\" — credited to %s." % (title, artist))
             continue
         job.found += 1
