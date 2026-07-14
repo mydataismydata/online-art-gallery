@@ -290,13 +290,16 @@ function browseCtx(opts) {
   opts = opts || {};
   const actions = [];
   if (canCurate()) actions.push("collect");
-  // Authoring lives only on the private box; the public snapshot is fed by Pull,
-  // so an owner there gets no add/edit/delete tools — only curators' "collect".
-  if (isOwner() && !isPublic()) {
-    // Artist page: batch "Get metadata" via the AI (one call per artist). Browse
-    // grids mix artists, so they keep the free per-work Wikidata "Find metadata".
-    actions.push(opts.artist ? "aimeta" : "metadata");
-    if (opts.artist) { actions.push("setcover"); actions.push("publish"); }
+  // Authoring (add/edit/AI/publish) lives only on the private box; the public
+  // snapshot is fed by Pull. But the owner can still curate the public gallery by
+  // deleting works, so "delete" is available in both modes.
+  if (isOwner()) {
+    if (!isPublic()) {
+      // Artist page: batch "Get metadata" via the AI (one call per artist). Browse
+      // grids mix artists, so they keep the free per-work Wikidata "Find metadata".
+      actions.push(opts.artist ? "aimeta" : "metadata");
+      if (opts.artist) { actions.push("setcover"); actions.push("publish"); }
+    }
     actions.push("delete");
   }
   return { actions, artist: opts.artist };

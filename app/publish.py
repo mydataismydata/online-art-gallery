@@ -75,6 +75,24 @@ def set_repo_path(path):
     return repo_status()
 
 
+# ---------------- pull suppression ----------------
+# When the owner deletes a pulled work on the public server, its pid is remembered
+# here so a later Pull doesn't re-import it (the pid is still in the content repo).
+
+def suppressed_pids():
+    return set(_load_cfg().get("suppressed") or [])
+
+
+def suppress_pids(pids):
+    add = [p for p in (pids or []) if p]
+    if not add:
+        return
+    cfg = _load_cfg()
+    cfg["suppressed"] = sorted(set(cfg.get("suppressed") or []) | set(add))
+    config.PUBLISH_CONFIG_FILE.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 # ---------------- git plumbing ----------------
 
 def _git(repo, *args, check=True, timeout=120):
@@ -354,10 +372,14 @@ def pull_and_import():
                 pass
 
     existing = {w["pid"]: w for w in library.all_works() if w.get("pid")}
-    added = updated = unchanged = 0
+    suppressed = suppressed_pids()
+    added = updated = unchanged = skipped = 0
     errors, touched = [], set()
     for p in placards:
         try:
+            if p["pid"] in suppressed:   # owner deleted it here; don't bring it back
+                skipped += 1
+                continue
             cur = existing.get(p["pid"])
             if cur is None:
                 _import_new(repo, p)
@@ -376,4 +398,4 @@ def pull_and_import():
         _prewarm(touched)
 
     return {"added": added, "updated": updated, "unchanged": unchanged,
-            "errors": errors, "pull": pull_msg, "total": len(placards)}
+            "skipped": skipped, "errors": errors, "pull": pull_msg, "total": len(placards)}

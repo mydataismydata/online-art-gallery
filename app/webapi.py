@@ -16,7 +16,7 @@ bp = Blueprint("api", __name__)
 # False, so this never fires. (Publish routes use the @private_only decorator.)
 _PRIVATE_ONLY_ENDPOINTS = {
     "api.api_rescan", "api.api_artist_rename", "api.api_artist_cover",
-    "api.api_works_delete", "api.api_artist_lookup", "api.api_artist_save",
+    "api.api_artist_lookup", "api.api_artist_save",
     "api.api_work_find_metadata", "api.api_work_update",
     "api.api_ai_config", "api.api_ai_config_save",
     "api.api_work_autofill", "api.api_works_autofill_batch",
@@ -395,7 +395,18 @@ def api_works_delete():
     ids = data.get("ids") or []
     if not isinstance(ids, list) or not ids:
         return jsonify({"error": "No works selected."}), 400
-    deleted, errors = library.delete_works([str(i) for i in ids])
+    ids = [str(i) for i in ids]
+    # On the public server, tombstone the publish-ids being removed so a later Pull
+    # doesn't resurrect them (they're still present in the content repo).
+    pids = []
+    if config.PUBLIC:
+        for wid in ids:
+            w = library.get(wid)
+            if w and w.get("pid"):
+                pids.append(w["pid"])
+    deleted, errors = library.delete_works(ids)
+    if config.PUBLIC and pids:
+        publish.suppress_pids(pids)
     return jsonify({"deleted": deleted, "errors": errors})
 
 
