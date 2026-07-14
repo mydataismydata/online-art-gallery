@@ -124,5 +124,27 @@ def _run(job, module):
             job.log("ERROR: %s" % e)
             job.log(traceback.format_exc(limit=4))
         job.finished = time.time()
-        from .. import library
+        from .. import library, thumbs
         library.invalidate()
+        # Pre-render thumbnails + view derivatives for the artists this job saved,
+        # so the first viewer doesn't wait on generation. Best-effort, local CPU
+        # only (decoupled from the slow uplink); never fails the job.
+        if job.saved and job.saved_artists:
+            try:
+                wanted = {a.casefold() for a in job.saved_artists}
+                warmed = 0
+                for w in library.scan()["by_id"].values():
+                    if job.cancelled:
+                        break
+                    if (w.get("artist") or "").casefold() not in wanted:
+                        continue
+                    for fn in (thumbs.thumb_for, thumbs.view_for):
+                        try:
+                            fn(w)
+                        except Exception:
+                            pass
+                    warmed += 1
+                if warmed:
+                    job.log("Pre-rendered thumbnails for %d work(s)." % warmed)
+            except Exception:
+                pass

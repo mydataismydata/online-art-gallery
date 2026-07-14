@@ -38,6 +38,15 @@ function errbox(e) {
   app.innerHTML = '<div class="errbox">Something went wrong: ' + esc(e.message || e) + "</div>";
 }
 
+/* Cache-busting image URLs: ?v=<mtime> names an exact rendering, so the browser
+   may cache it forever (the server marks versioned image URLs immutable) yet
+   refetches when the file changes. thumb = grid, view = fullscreen (screen-
+   sized), orig = full resolution. */
+function imgVer(w) { return "?v=" + Math.floor(w.mtime || 0); }
+function thumbSrc(w) { return "/thumb/" + w.id + imgVer(w); }
+function viewSrc(w) { return "/img/" + w.id + imgVer(w); }
+function origSrc(w) { return "/orig/" + w.id + imgVer(w); }
+
 /* ============================== router ============================== */
 
 let pollTimer = null;
@@ -197,7 +206,7 @@ function workFigure(w, i, showArtist) {
     : "";
   return (
     '<figure class="work" data-i="' + i + '" data-id="' + w.id + '">' +
-      '<div class="wimg"><img src="/thumb/' + w.id + '" loading="lazy" alt="">' +
+      '<div class="wimg"><img src="' + thumbSrc(w) + '" loading="lazy" alt="">' +
       '<span class="checkmark" aria-hidden="true"></span>' + dim + "</div>" +
       '<figcaption><div class="wt">' + esc(w.title) + "</div>" +
       (meta ? '<div class="wm">' + esc(meta) + "</div>" : "") +
@@ -1608,7 +1617,9 @@ function caption(w) {
   const src = w.source_url
     ? ' &nbsp;<a href="' + esc(w.source_url) + '" target="_blank" rel="noopener">source ↗</a>'
     : "";
-  return '<div class="vtitle">' + esc(w.title) + '</div><div class="vmeta">' + esc(bits) + src + "</div>";
+  // The viewer shows a screen-sized image; offer the true original one click away.
+  const full = ' &nbsp;<a href="' + origSrc(w) + '" target="_blank" rel="noopener">full resolution ↗</a>';
+  return '<div class="vtitle">' + esc(w.title) + '</div><div class="vmeta">' + esc(bits) + src + full + "</div>";
 }
 
 function setFit(fit) {
@@ -1819,14 +1830,14 @@ function showWork(i) {
   const w = V.list[V.i];
   viewer.classList.add("loading");
   setFit(true);
-  vimg.src = "/img/" + w.id;
+  vimg.src = viewSrc(w);
   vcap.innerHTML = caption(w);
   syncPlacard();
   vcount.textContent = n > 1 ? (V.i + 1) + " / " + n : "";
   if (n > 1) {
     [V.i + 1, V.i - 1].forEach((k) => {
       const pw = V.list[((k % n) + n) % n];
-      new Image().src = "/img/" + pw.id;
+      new Image().src = viewSrc(pw);
     });
   }
 }

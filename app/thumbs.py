@@ -9,10 +9,23 @@ from . import config
 Image.MAX_IMAGE_PIXELS = None
 
 
+def _flatten(im):
+    """Composite alpha/palette onto the gallery's dark background and force RGB."""
+    if "A" in im.mode or im.mode == "P":
+        im = im.convert("RGBA")
+        bg = Image.new("RGB", im.size, (24, 20, 17))
+        bg.paste(im, mask=im.split()[-1])
+        return bg
+    if im.mode != "RGB":
+        return im.convert("RGB")
+    return im
+
+
 def thumb_for(work):
-    """Return the path of a cached thumbnail for a work dict, generating it if needed."""
-    key = "%s-%d" % (work["id"], int(work["mtime"]))
-    out = config.THUMB_DIR / (key + ".jpg")
+    """Return the path of a cached WebP thumbnail for a work dict, generating it if
+    needed. WebP is ~30% smaller than JPEG at the same quality."""
+    key = "%s-%d.webp" % (work["id"], int(work["mtime"]))
+    out = config.THUMB_DIR / key
     if out.exists():
         return out
 
@@ -23,18 +36,37 @@ def thumb_for(work):
         im.draft("RGB", (config.THUMB_WIDTH * 2, config.THUMB_WIDTH * 2))
     except Exception:
         pass
-    im = ImageOps.exif_transpose(im)
-    if "A" in im.mode or im.mode == "P":
-        im = im.convert("RGBA")
-        bg = Image.new("RGB", im.size, (24, 20, 17))
-        bg.paste(im, mask=im.split()[-1])
-        im = bg
-    elif im.mode != "RGB":
-        im = im.convert("RGB")
+    im = _flatten(ImageOps.exif_transpose(im))
     im.thumbnail((config.THUMB_WIDTH, config.THUMB_WIDTH * 4), Image.LANCZOS)
 
-    tmp = config.THUMB_DIR / (key + ".part.jpg")
-    im.save(str(tmp), "JPEG", quality=84, optimize=True)
+    tmp = config.THUMB_DIR / (key + ".part")
+    im.save(str(tmp), "WEBP", quality=80, method=4)
+    os.replace(str(tmp), str(out))
+    return out
+
+
+def view_for(work):
+    """Path of a cached, screen-sized WebP for the fullscreen viewer, capped at
+    config.VIEW_MAX on the long side. Far smaller than the original (which stays at
+    /orig for a true full-resolution look/download), so it loads fast over a slow
+    uplink."""
+    key = "%s-%d-v%d.webp" % (work["id"], int(work["mtime"]), config.VIEW_MAX)
+    out = config.THUMB_DIR / key
+    if out.exists():
+        return out
+
+    src = config.LIBRARY_DIR / work["rel"]
+    im = Image.open(str(src))
+    try:
+        im.draft("RGB", (config.VIEW_MAX, config.VIEW_MAX))
+    except Exception:
+        pass
+    im = _flatten(ImageOps.exif_transpose(im))
+    if max(im.size) > config.VIEW_MAX:
+        im.thumbnail((config.VIEW_MAX, config.VIEW_MAX), Image.LANCZOS)
+
+    tmp = config.THUMB_DIR / (key + ".part")
+    im.save(str(tmp), "WEBP", quality=82, method=4)
     os.replace(str(tmp), str(out))
     return out
 
@@ -67,15 +99,7 @@ def display_for(work):
     out = config.THUMB_DIR / key
     if out.exists():
         return out
-    im = Image.open(str(src))
-    im = ImageOps.exif_transpose(im)
-    if "A" in im.mode or im.mode == "P":
-        im = im.convert("RGBA")
-        bg = Image.new("RGB", im.size, (24, 20, 17))
-        bg.paste(im, mask=im.split()[-1])
-        im = bg
-    elif im.mode != "RGB":
-        im = im.convert("RGB")
+    im = _flatten(ImageOps.exif_transpose(Image.open(str(src))))
     if max(im.size) > _DISPLAY_MAX:
         im.thumbnail((_DISPLAY_MAX, _DISPLAY_MAX), Image.LANCZOS)
     tmp = config.THUMB_DIR / (key + ".part")

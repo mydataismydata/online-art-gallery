@@ -496,25 +496,16 @@ def api_custom_sources_test():
 
 # ==================== images (any signed-in user) ====================
 
-@bp.get("/img/<wid>")
-@auth.require_login
-def img(wid):
-    w = library.get(wid)
-    if not w:
-        abort(404)
-    if not (config.LIBRARY_DIR / w["rel"]).exists():
-        abort(404)
-    # Non-web formats (e.g. a TIFF a museum served with a .jpg name) are converted
-    # to a cached JPEG so the browser can display them; web formats serve as-is.
-    path = thumbs.display_for(w)
-    converted = str(path).endswith(".disp.jpg")
-    return send_file(
-        str(path),
-        mimetype="image/jpeg" if converted else None,
-        conditional=True,
-        max_age=3600,
-        download_name=os.path.basename(w["rel"]),
-    )
+def _img_response(path, mimetype, download_name=None):
+    resp = send_file(str(path), mimetype=mimetype, conditional=True,
+                     max_age=31536000, download_name=download_name)
+    # Versioned URLs (?v=<mtime>) name an exact rendering, so cache them forever;
+    # unversioned ones (e.g. artist covers by bare id) revalidate daily instead.
+    if request.args.get("v"):
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 @bp.get("/thumb/<wid>")
@@ -528,7 +519,38 @@ def thumb(wid):
     except Exception as e:
         print("thumb failed for %s: %s" % (w["rel"], e), flush=True)
         abort(500)
-    return send_file(str(path), mimetype="image/jpeg", conditional=True, max_age=86400)
+    return _img_response(path, "image/webp")
+
+
+@bp.get("/img/<wid>")
+@auth.require_login
+def img(wid):
+    """Screen-sized derivative for the fullscreen viewer — small and fast. The full
+    original is at /orig."""
+    w = library.get(wid)
+    if not w or not (config.LIBRARY_DIR / w["rel"]).exists():
+        abort(404)
+    try:
+        path = thumbs.view_for(w)
+    except Exception as e:
+        print("view failed for %s: %s" % (w["rel"], e), flush=True)
+        abort(500)
+    return _img_response(path, "image/webp")
+
+
+@bp.get("/orig/<wid>")
+@auth.require_login
+def orig(wid):
+    """The full-resolution original (browser-displayable), for a proper look or a
+    download. Large — only fetched via the viewer's 'full resolution' link."""
+    w = library.get(wid)
+    if not w or not (config.LIBRARY_DIR / w["rel"]).exists():
+        abort(404)
+    # Non-web formats (e.g. a TIFF a museum served with a .jpg name) are converted
+    # to a cached JPEG so the browser can display them; web formats serve as-is.
+    path = thumbs.display_for(w)
+    mimetype = "image/jpeg" if str(path).endswith(".disp.jpg") else None
+    return _img_response(path, mimetype, download_name=os.path.basename(w["rel"]))
 
 
 # ==================== downloads (owner only) ====================

@@ -30,6 +30,10 @@ for _d in (LIBRARY_DIR, THUMB_DIR, TMP_DIR, TRASH_DIR, ARTIST_META_DIR,
     _d.mkdir(parents=True, exist_ok=True)
 
 THUMB_WIDTH = 560
+# Long-side cap for the fullscreen "view" image the browser actually loads. The
+# original stays available at /orig for a full-resolution look/download; serving
+# this smaller derivative keeps transfers fast over a slow uplink (e.g. Starlink).
+VIEW_MAX = int(os.environ.get("GALLERY_VIEW_MAX", "2560"))
 
 # Browser-like UA: Google Arts & Culture serves a degraded page to bare bots,
 # and none of the museum APIs mind.
