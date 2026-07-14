@@ -293,15 +293,16 @@ function browseCtx(opts) {
   const actions = [];
   if (canCurate()) actions.push("collect");
   // Authoring (add/edit/AI/publish) lives only on the private box; the public
-  // snapshot is fed by Pull. But the owner can still curate the public gallery by
-  // deleting works, so "delete" is available in both modes.
+  // snapshot is fed by Pull. Curating what's on show — deleting works and choosing
+  // an artist's thumbnail — is allowed on both boxes.
   if (isOwner()) {
     if (!isPublic()) {
       // Artist page: batch "Get metadata" via the AI (one call per artist). Browse
       // grids mix artists, so they keep the free per-work Wikidata "Find metadata".
       actions.push(opts.artist ? "aimeta" : "metadata");
-      if (opts.artist) { actions.push("setcover"); actions.push("publish"); }
+      if (opts.artist) actions.push("publish");
     }
+    if (opts.artist) actions.push("setcover");   // artist pages only
     actions.push("delete");
   }
   return { actions, artist: opts.artist };

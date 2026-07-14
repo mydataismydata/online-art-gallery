@@ -15,7 +15,7 @@ bp = Blueprint("api", __name__)
 # not even the owner — can add or mutate art there. On the private box PUBLIC is
 # False, so this never fires. (Publish routes use the @private_only decorator.)
 _PRIVATE_ONLY_ENDPOINTS = {
-    "api.api_rescan", "api.api_artist_rename", "api.api_artist_cover",
+    "api.api_rescan", "api.api_artist_rename",
     "api.api_artist_lookup", "api.api_artist_save",
     "api.api_work_find_metadata", "api.api_work_update",
     "api.api_ai_config", "api.api_ai_config_save",
