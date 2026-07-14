@@ -271,7 +271,7 @@ def run(job):
                 tmp.unlink()
             continue
         size_mb = tmp.stat().st_size / 1048576.0
-        saved_path = library.save_work(artist or entity_artist, meta, tmp)
+        saved_path = library.save_work(artist or entity_artist, meta, tmp, job)
         job.saved += 1
         job.log("Saved: %s (%.0fs, %.1f MB)" % (saved_path.name, time.time() - t0, size_mb))
         if max_items and job.saved >= max_items:

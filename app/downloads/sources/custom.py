@@ -230,7 +230,7 @@ def run_custom(job, defn):
                 job.failed += 1
                 job.log("FAILED \"%s\": %s" % (m["title"], e))
                 continue
-            path = library.save_work(m["artist"] or cleaned["label"], meta, tmp)
+            path = library.save_work(m["artist"] or cleaned["label"], meta, tmp, job)
             job.saved += 1
             job.log("Saved: %s" % path.name)
             if max_items and job.saved >= max_items:

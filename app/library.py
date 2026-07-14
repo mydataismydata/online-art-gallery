@@ -404,9 +404,10 @@ def update_work(wid, fields):
     return st2["by_id"].get(new_id)
 
 
-def save_work(artist, meta, tmp_path):
+def save_work(artist, meta, tmp_path, job=None):
     """Move a downloaded temp file into the library and write its sidecar.
-    Returns the final path."""
+    Returns the final path. If a download `job` is given, records the artist the
+    work was filed under so the UI can link to that artist afterwards."""
     artist_name = re.sub(r"\s+", " ", artist or "").strip() or "Unknown Artist"
     folder = config.LIBRARY_DIR / safe_name(artist_name, 80)
     folder.mkdir(parents=True, exist_ok=True)
@@ -435,4 +436,6 @@ def save_work(artist, meta, tmp_path):
     with _lock:
         if meta.get("source") and meta.get("source_id") is not None:
             _state["src_ids"].add("%s-%s" % (meta["source"], meta["source_id"]))
+    if job is not None:
+        job.record_artist(artist_name)
     return path

@@ -2,6 +2,7 @@
 Jobs each get a thread, but a global semaphore serializes actual work so we
 never hammer a site (or the disk) from several jobs at once."""
 import itertools
+import re
 import threading
 import time
 import traceback
@@ -24,10 +25,21 @@ class Job:
         self.saved = 0
         self.skipped = 0   # already in library
         self.failed = 0
+        self.saved_artists = []  # distinct artist names works were actually saved under
         self.log_lines = []
         self.created = time.time()
         self.finished = None
         self._cancel = threading.Event()
+
+    def record_artist(self, name):
+        """Note the (normalized) artist a work was saved under, so the UI can link
+        to that artist's page once the download finishes."""
+        name = re.sub(r"\s+", " ", name or "").strip()
+        if not name:
+            return
+        with _jobs_lock:
+            if name not in self.saved_artists:
+                self.saved_artists.append(name)
 
     def log(self, msg):
         line = "%s  %s" % (time.strftime("%H:%M:%S"), msg)
@@ -61,6 +73,7 @@ class Job:
             "saved": self.saved,
             "skipped": self.skipped,
             "failed": self.failed,
+            "artists": list(self.saved_artists),
             "log": log_tail,
             "created": self.created,
             "finished": self.finished,

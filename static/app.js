@@ -42,6 +42,7 @@ function errbox(e) {
 
 let pollTimer = null;
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+function ensurePolling() { if (!pollTimer) pollTimer = setInterval(refreshJobs, 1500); }
 
 /* multi-select state for deleting / collecting works; reset whenever the route changes */
 const SEL = { on: false, ids: new Set() };
@@ -1001,8 +1002,7 @@ async function addView(prefill) {
       }
     });
 
-    refreshJobs();
-    pollTimer = setInterval(refreshJobs, 1500);
+    refreshJobs();  // starts polling itself only while a download is active
   } catch (e) { errbox(e); }
 }
 
@@ -1018,28 +1018,40 @@ async function refreshJobs() {
   try { jobs = (await api("/api/downloads?tail=14")).jobs; } catch (e) { return; }
   if (!jobs.length) {
     box.innerHTML = '<div class="emptybox">No downloads yet.</div>';
+    stopPolling();
     return;
   }
+  const anyActive = jobs.some((j) => j.status === "running" || j.status === "queued");
   box.innerHTML = jobs.map((j) => {
     const counts = "matched " + j.found + " · saved " + j.saved +
       " · already had " + j.skipped + " · failed " + j.failed;
     const active = j.status === "running" || j.status === "queued";
+    const artists = (j.artists || []).length
+      ? '<div class="job-artists">' + (j.artists.length > 1 ? "Artists: " : "Artist: ") +
+        j.artists.map((a) =>
+          '<a class="alink" href="#/artist/' + encodeURIComponent(a) + '">' + esc(a) + "</a>").join(", ") +
+        "</div>"
+      : "";
     return (
       '<div class="job"><div class="head">' +
         '<span class="q">' + esc(j.query) + "</span>" +
         '<span class="src">' + esc(srcLabel(j.source)) + "</span>" +
         '<span class="badge ' + j.status + '">' + j.status + "</span></div>" +
         '<div class="counts">' + counts + (j.message ? " · " + esc(j.message) : "") + "</div>" +
+        artists +
         "<pre>" + esc((j.log || []).join("\n")) + "</pre>" +
         (active ? '<button class="cancel" data-id="' + j.id + '">Cancel</button>' : "") +
       "</div>"
     );
   }).join("");
-  box.querySelectorAll("pre").forEach((p) => { p.scrollTop = p.scrollHeight; });
+  // Auto-scroll logs to the newest line only while work is ongoing; once a job is
+  // finished the list stops refreshing, so the user can scroll up freely.
+  if (anyActive) box.querySelectorAll("pre").forEach((p) => { p.scrollTop = p.scrollHeight; });
   box.querySelectorAll(".cancel").forEach((b) => {
     b.addEventListener("click", () =>
       api("/api/downloads/" + b.dataset.id + "/cancel", { method: "POST" }).then(refreshJobs));
   });
+  if (anyActive) ensurePolling(); else stopPolling();
 }
 
 /* ============================== settings ============================== */
@@ -1627,8 +1639,12 @@ function placardHtml(w) {
     ? '<div class="pl-desc">' + richDescHtml(w.description) + "</div>"
     : (isOwner() ? '<div class="pl-desc pl-empty">No description yet.</div>' : "");
   const edit = isOwner() ? '<button class="pl-edit" id="pl-edit" type="button">Edit</button>' : "";
+  const artist = w.artist
+    ? '<a class="pl-artist" id="pl-artist" href="#/artist/' + encodeURIComponent(w.artist) + '">' + esc(w.artist) + "</a>"
+    : '<div class="pl-artist">Unknown artist</div>';
   return '<div class="pl-card">' +
-    '<div class="pl-artist">' + esc(w.artist || "Unknown artist") + "</div>" +
+    '<button class="pl-close" id="pl-close" type="button" aria-label="Hide placard">×</button>' +
+    artist +
     '<div class="pl-title"><span class="pl-name">' + esc(w.title) + "</span>" +
     (date ? '<span class="pl-date">, ' + esc(date) + "</span>" : "") + "</div>" +
     (w.medium ? '<div class="pl-medium">' + esc(w.medium) + "</div>" : "") +
@@ -1645,6 +1661,14 @@ function syncPlacard() {
     el.hidden = false;
     const eb = document.getElementById("pl-edit");
     if (eb) eb.addEventListener("click", () => editWorkDialog(V.list[V.i]));
+    const cb = document.getElementById("pl-close");
+    if (cb) cb.addEventListener("click", () => { setPlacards(false); syncPlacard(); });
+    const pa = document.getElementById("pl-artist");
+    if (pa) pa.addEventListener("click", (e) => {   // leave the viewer, then open the artist
+      e.preventDefault();
+      closeViewer();
+      location.hash = pa.getAttribute("href");
+    });
   } else {
     el.hidden = true;
   }
@@ -1903,10 +1927,14 @@ function openCollectPicker(collections, work, addOne) {
 
 viewer.addEventListener("pointermove", wake);
 
-/* click the painting: toggle between fit-to-screen and 1:1 pixels */
-vimg.addEventListener("click", (e) => {
+/* click the painting: toggle between fit-to-screen and 1:1 pixels. Bound to the
+   stage, not the image, so a click while zoomed in still zooms back out even
+   though panning has the pointer captured on the stage (which would otherwise
+   swallow the image's click). */
+vstage.addEventListener("click", (e) => {
   if (dragMoved) { dragMoved = false; return; }
   if (viewer.classList.contains("fit")) {
+    if (e.target !== vimg) return;   // in fit view only the painting zooms in, not the letterbox
     const r = vimg.getBoundingClientRect();
     const s = Math.min(r.width / vimg.naturalWidth, r.height / vimg.naturalHeight);
     const dw = vimg.naturalWidth * s, dh = vimg.naturalHeight * s;
@@ -1919,7 +1947,7 @@ vimg.addEventListener("click", (e) => {
       vstage.scrollTop = fy * vimg.clientHeight - vstage.clientHeight / 2;
     });
   } else {
-    setFit(true);
+    setFit(true);   // zoomed in → any click zooms back out
   }
 });
 

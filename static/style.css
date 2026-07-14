@@ -173,6 +173,9 @@ img { display: block; }
 .job .badge.done { color: #8fbc8f; border-color: #3d5a3d; }
 .job .badge.error { color: #d97b6c; border-color: #6b3a32; }
 .job .counts { color: var(--dim); font-size: 12.5px; margin: 7px 0 8px; }
+.job-artists { font-size: 13px; margin: 0 0 8px; }
+.job-artists .alink { color: var(--accent); text-decoration: none; }
+.job-artists .alink:hover { text-decoration: underline; }
 .job pre {
   background: #120e0b; border: 1px solid #251f19; border-radius: 4px;
   padding: 9px 11px; margin: 0; max-height: 170px; overflow: auto;
@@ -370,12 +373,21 @@ img { display: block; }
 #placard { position: absolute; left: 26px; bottom: 26px; z-index: 5; max-width: 380px; }
 #viewer.placards #vcap { display: none; }   /* the placard stands in for the plain caption */
 .pl-card {
+  position: relative;
   background: #f3efe4; color: #2a2620;
   border: 1px solid rgba(0,0,0,.18); border-left: 3px solid #7a6a4f;
   border-radius: 2px; padding: 15px 18px 16px;
   box-shadow: 0 12px 36px rgba(0,0,0,.55); font-family: var(--serif);
 }
-.pl-artist { font-weight: 700; font-size: 14.5px; }
+.pl-close {
+  position: absolute; top: 5px; right: 7px;
+  background: none; border: 0; color: #7a6a4f; cursor: pointer;
+  font-family: var(--serif); font-size: 18px; line-height: 1; padding: 2px 5px;
+}
+.pl-close:hover { color: #2a2620; }
+.pl-artist { display: block; font-weight: 700; font-size: 14.5px; padding-right: 18px; }
+a.pl-artist { color: inherit; text-decoration: none; cursor: pointer; }
+a.pl-artist:hover { text-decoration: underline; }
 .pl-title { font-size: 14px; margin-top: 2px; }
 .pl-name { font-style: italic; }
 .pl-date { color: #5a5245; }
