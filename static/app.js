@@ -212,7 +212,9 @@ function browseCtx(opts) {
   opts = opts || {};
   const actions = [];
   if (canCurate()) actions.push("collect");
-  if (isOwner()) actions.push("metadata");
+  // Artist page: batch "Get metadata" via the AI (one call per artist). Browse
+  // grids mix artists, so they keep the free per-work Wikidata "Find metadata".
+  if (isOwner()) actions.push(opts.artist ? "aimeta" : "metadata");
   if (isOwner() && opts.artist) actions.push("setcover");  // artist pages only
   if (isOwner()) actions.push("delete");
   return { actions, artist: opts.artist };
@@ -280,6 +282,8 @@ function renderSelCtl(works, rerender, ctx) {
     html += '<button id="selcollect" class="toolbtn"' + (n ? "" : " disabled") + ">Add to collection" + tag + "</button>";
   if (ctx.actions.includes("metadata"))
     html += '<button id="selmeta" class="toolbtn"' + (n ? "" : " disabled") + ">Find metadata" + tag + "</button>";
+  if (ctx.actions.includes("aimeta"))
+    html += '<button id="selaimeta" class="toolbtn"' + (n ? "" : " disabled") + ">Get metadata" + tag + "</button>";
   if (ctx.actions.includes("setcover"))
     html += '<button id="selcover" class="toolbtn"' + (n === 1 ? "" : " disabled") +
       ' title="Pick exactly one work">Set as thumbnail</button>';
@@ -303,6 +307,8 @@ function renderSelCtl(works, rerender, ctx) {
   if (del) del.addEventListener("click", () => deleteSelection(rerender));
   const meta = $("#selmeta");
   if (meta) meta.addEventListener("click", () => findSelectionMetadata(works, rerender));
+  const aimeta = $("#selaimeta");
+  if (aimeta) aimeta.addEventListener("click", () => getSelectionMetadata(ctx.artist, rerender));
   const cover = $("#selcover");
   if (cover) cover.addEventListener("click", () => setArtistCover(ctx.artist, rerender));
 }
@@ -346,6 +352,33 @@ async function findSelectionMetadata(works, rerender) {
   toast("Filled medium on " + filled + " of " + total + " work" + (total === 1 ? "" : "s") + ".");
   resetSel();
   if (rerender) rerender();
+}
+
+/* "Get metadata" (artist page): send all the selected works to the AI in ONE
+   call for the artist; it fills any blank date/medium/genre/description on each.
+   Saved server-side (no per-work review), so this is owner-only and batched. */
+async function getSelectionMetadata(artist, rerender) {
+  const ids = Array.from(SEL.ids);
+  if (!ids.length) return;
+  const btn = $("#selaimeta");
+  if (btn) { btn.disabled = true; btn.textContent = "Getting metadata…"; }
+  toast("Getting metadata for " + ids.length + " work" + (ids.length === 1 ? "" : "s") +
+        "… this can take a moment.");
+  try {
+    const r = await api("/api/works/autofill_batch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids }),
+    });
+    resetSel();
+    let msg = "Filled metadata on " + r.filled + " of " + (r.requested || ids.length) +
+              " work" + ((r.requested || ids.length) === 1 ? "" : "s") + ".";
+    if (r.error) msg += " (" + r.error + ")";
+    toast(msg);
+    if (rerender) rerender();
+  } catch (e) {
+    toast(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = "Get metadata"; }
+  }
 }
 
 async function deleteSelection(rerender) {

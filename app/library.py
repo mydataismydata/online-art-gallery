@@ -404,6 +404,49 @@ def update_work(wid, fields):
     return st2["by_id"].get(new_id)
 
 
+def update_works_meta(updates):
+    """Apply non-relocating metadata (date/medium/style/description/title) to many
+    works at once, writing each sidecar and rescanning only once. `updates` maps a
+    work id to a {field: value} dict. Returns the count of works changed. (Artist
+    isn't handled here — it would move files and change ids; use update_work.)"""
+    st = scan()
+    changed = 0
+    for wid, fields in (updates or {}).items():
+        w = st["by_id"].get(wid)
+        if not w:
+            continue
+        src = config.LIBRARY_DIR / w["rel"]
+        if not src.exists():
+            continue
+        sc = Path(str(src) + ".json")
+        data = {}
+        if sc.exists():
+            try:
+                data = json.loads(sc.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        touched = False
+        for k, v in fields.items():
+            if k == "date":
+                d = re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v
+                data["date"] = d or None
+                data["year"] = parse_year(d)
+            elif k in ("medium", "style", "title"):
+                cv = re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v
+                data[k] = cv or None
+            elif k == "description":
+                data["description"] = v.strip() if isinstance(v, str) and v.strip() else None
+            else:
+                continue
+            touched = True
+        if touched:
+            sc.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            changed += 1
+    if changed:
+        invalidate()
+    return changed
+
+
 def save_work(artist, meta, tmp_path, job=None):
     """Move a downloaded temp file into the library and write its sidecar.
     Returns the final path. If a download `job` is given, records the artist the

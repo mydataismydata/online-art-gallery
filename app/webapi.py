@@ -417,6 +417,47 @@ def api_work_autofill(wid):
     return jsonify({"fields": fields})
 
 
+# Batch "Get metadata": fill several works at once, ONE AI call per distinct
+# artist (works on an artist page all share one). Saves the found fields to each
+# sidecar, filling only blanks unless overwrite is set. Owner-only.
+@bp.post("/api/works/autofill_batch")
+@auth.require_role("owner")
+def api_works_autofill_batch():
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    overwrite = bool(data.get("overwrite"))
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "No works selected."}), 400
+    by_id = library.scan()["by_id"]
+    works = [by_id[str(i)] for i in ids if by_id.get(str(i))]
+    if not works:
+        abort(404)
+
+    groups = {}
+    for w in works:
+        groups.setdefault((w.get("artist") or "").strip(), []).append(w)
+
+    updates, errors, calls = {}, [], 0
+    for artist, ws in groups.items():
+        try:
+            results = ai.autofill_many(artist, ws)
+            calls += 1
+        except ai.AIError as e:
+            errors.append(str(e))
+            continue
+        for w, found in zip(ws, results):
+            want = {k: v for k, v in found.items() if overwrite or not w.get(k)}
+            if want:
+                updates[w["id"]] = want
+    filled = library.update_works_meta(updates)
+    if not calls and errors:
+        return jsonify({"error": errors[0]}), 502
+    out = {"filled": filled, "calls": calls, "artists": len(groups), "requested": len(works)}
+    if errors:
+        out["error"] = errors[0]
+    return jsonify(out)
+
+
 # ---------------- custom sources (Settings — owner only) ----------------
 
 @bp.get("/api/custom_sources")

@@ -132,6 +132,28 @@ def _extract_json(text):
     return parsed if isinstance(parsed, dict) else None
 
 
+def _chat(key, messages, max_tokens, timeout):
+    """POST a chat-completions request; return the assistant's text. Raises AIError."""
+    body = {"model": model(), "messages": messages, "temperature": 0.2, "max_tokens": max_tokens}
+    try:
+        r = requests.post(
+            ENDPOINT,
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+            json=body, timeout=timeout)
+    except requests.RequestException as e:
+        raise AIError("Couldn't reach the AI service: %s" % e)
+    if r.status_code in (401, 403):
+        raise AIError("The API rejected the key (%s). Check it in Settings." % r.status_code)
+    if r.status_code == 402:
+        raise AIError("The AI account is out of credits (402).")
+    if r.status_code >= 400:
+        raise AIError("AI service error %s: %s" % (r.status_code, (r.text or "")[:200]))
+    try:
+        return r.json()["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise AIError("Unexpected response from the AI service.")
+
+
 def autofill(work):
     """Ask the model for catalogue metadata for one work. Returns a dict of the
     fields it could supply (schema keys: artist/title/date/medium/style/
@@ -151,34 +173,8 @@ def autofill(work):
         user += "Known medium: %s\n" % work["medium"]
     user += "\nReturn the JSON described in your instructions."
 
-    body = {
-        "model": model(),
-        "messages": [
-            {"role": "system", "content": _SYSTEM},
-            {"role": "user", "content": user},
-        ],
-        "temperature": 0.2,
-        "max_tokens": 1500,
-    }
-    try:
-        r = requests.post(
-            ENDPOINT,
-            headers={"Authorization": "Bearer " + key,
-                     "Content-Type": "application/json"},
-            json=body, timeout=_TIMEOUT)
-    except requests.RequestException as e:
-        raise AIError("Couldn't reach the AI service: %s" % e)
-    if r.status_code in (401, 403):
-        raise AIError("The API rejected the key (%s). Check it in Settings." % r.status_code)
-    if r.status_code == 402:
-        raise AIError("The AI account is out of credits (402).")
-    if r.status_code >= 400:
-        raise AIError("AI service error %s: %s" % (r.status_code, (r.text or "")[:200]))
-
-    try:
-        content = r.json()["choices"][0]["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError):
-        raise AIError("Unexpected response from the AI service.")
+    content = _chat(key, [{"role": "system", "content": _SYSTEM},
+                          {"role": "user", "content": user}], 1500, _TIMEOUT)
     parsed = _extract_json(content)
     if parsed is None:
         raise AIError("The AI didn't return usable JSON. Try again, or another model.")
@@ -188,4 +184,114 @@ def autofill(work):
         v = parsed.get(f)
         if isinstance(v, str) and v.strip():
             out[_FIELD_MAP.get(f, f)] = v.strip()
+    return out
+
+
+# ---------- batch: one call for several works by the same artist ----------
+# Only the fill-in fields — artist and title are already known from the gallery.
+_BATCH_FIELDS = ("date", "medium", "genre", "description")
+
+_BATCH_SYSTEM = (
+    "You are a museum registrar's cataloguing assistant. You are given one artist "
+    "and a numbered list of that artist's paintings. For EVERY item, return accurate "
+    "catalogue metadata as STRICT JSON.\n\n"
+    "Return ONLY a JSON array. Each element is an object with keys: "
+    "n (the item number as given), date, medium, genre, description.\n\n"
+    "Sourcing rules — follow them exactly:\n"
+    "- date, medium, genre: Wikipedia, Wikimedia and Wikidata are acceptable, as are "
+    "museum catalogues. Keep each short and factual. date = the year or year-range; "
+    "medium = the materials, e.g. \"Oil on canvas\"; genre = a brief genre and/or "
+    "school or movement, e.g. \"Marine painting, Dutch Golden Age\".\n"
+    "- description: DO NOT use Wikipedia or Wikimedia in ANY form. It MUST come from a "
+    "primary or authoritative source — the holding museum's catalogue entry, a "
+    "catalogue raisonne, or comparable scholarship. Write ONE or TWO concise "
+    "paragraphs specific to THAT painting (its composition, subject and context), not "
+    "a biography of the artist. If you cannot find a suitable non-Wikipedia source, "
+    "use an empty string for description.\n"
+    "- If you are not confident a field is correct for a specific painting, use an "
+    "empty string. Never invent facts. Include every item number exactly once.\n\n"
+    "Output only the JSON array — no prose, no markdown, no code fences."
+)
+
+
+def _salvage_objects(text):
+    """Best-effort: parse each top-level {...} block, dropping a broken final one
+    (so a truncated array still yields the works that came through intact)."""
+    out, depth, start = [], 0, -1
+    for idx, ch in enumerate(text):
+        if ch == "{":
+            if depth == 0:
+                start = idx
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start != -1:
+                try:
+                    obj = json.loads(text[start:idx + 1])
+                    if isinstance(obj, dict):
+                        out.append(obj)
+                except ValueError:
+                    pass
+                start = -1
+    return out
+
+
+def _extract_array(text):
+    """Pull a JSON array of objects out of the reply, tolerating code fences and a
+    truncated tail."""
+    text = (text or "").strip()
+    m = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
+    if m:
+        text = m.group(1).strip()
+    i, j = text.find("["), text.rfind("]")
+    if i != -1 and j > i:
+        try:
+            v = json.loads(text[i:j + 1])
+            if isinstance(v, list):
+                return [o for o in v if isinstance(o, dict)]
+        except ValueError:
+            pass
+    return _salvage_objects(text)
+
+
+def autofill_many(artist, works):
+    """One API call for several works by the same artist. Returns a list aligned to
+    `works`; each element is a dict of the fillable fields (date/medium/style/
+    description) the model supplied for that work, or {} if none. Raises AIError on a
+    config/transport error."""
+    key = _api_key()
+    if not key:
+        raise AIError("No API key set. Add one under Settings → Auto-fill.")
+    lines = []
+    for i, w in enumerate(works, 1):
+        hints = []
+        d = w.get("date") or (str(w["year"]) if w.get("year") else "")
+        if d:
+            hints.append("date so far: %s" % d)
+        if w.get("medium"):
+            hints.append("medium so far: %s" % w["medium"])
+        tail = (" — " + "; ".join(hints)) if hints else ""
+        lines.append("%d. %s%s" % (i, w.get("title") or "(untitled)", tail))
+    user = ("Artist: %s\nPaintings:\n%s\n\nReturn the JSON array described in your "
+            "instructions, one object per numbered painting."
+            % (artist or "(unknown)", "\n".join(lines)))
+    max_tokens = min(900 + 320 * len(works), 8000)
+    timeout = min(120 + 6 * len(works), 300)
+    content = _chat(key, [{"role": "system", "content": _BATCH_SYSTEM},
+                          {"role": "user", "content": user}], max_tokens, timeout)
+
+    out = [{} for _ in works]
+    for obj in _extract_array(content):
+        try:
+            n = int(obj.get("n"))
+        except (TypeError, ValueError):
+            continue
+        if not (1 <= n <= len(works)):
+            continue
+        fields = {}
+        for f in _BATCH_FIELDS:
+            v = obj.get(f)
+            if isinstance(v, str) and v.strip():
+                fields[_FIELD_MAP.get(f, f)] = v.strip()
+        out[n - 1] = fields
     return out
