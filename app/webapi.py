@@ -608,6 +608,18 @@ def api_publish():
     return jsonify(result)
 
 
+@bp.post("/api/publish/new")
+@auth.private_only
+@auth.require_role("owner")
+def api_publish_new():
+    """Export everything imported since the last export (works with no pid yet)."""
+    try:
+        result = publish.publish_new()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result)
+
+
 @bp.post("/api/pull")
 @auth.public_only
 @auth.require_role("owner")

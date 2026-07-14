@@ -605,7 +605,10 @@ kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4
 .repo-pill.ok { color: #8fbc8f; border-color: #3d5a3d; }
 .repo-pill.bad { color: #d9a441; border-color: #5a4a2a; }
 
-.publishpanel .dlform, .pullpanel { max-width: 560px; }
+.publishpanel .dlform, .pullpanel, .exportbox { max-width: 560px; }
+.exportbox { margin-bottom: 18px; }
+.exportbox .bf-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.exportbox .tiny { margin: 8px 0 0; color: var(--dim); }
 .repoform .invlink, .repoform code { word-break: break-all; }
 .pullpanel .bf-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 

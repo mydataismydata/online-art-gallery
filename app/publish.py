@@ -75,6 +75,24 @@ def set_repo_path(path):
     return repo_status()
 
 
+def _record_export(count):
+    cfg = _load_cfg()
+    cfg["last_export"] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "count": count}
+    config.PUBLISH_CONFIG_FILE.write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def last_export():
+    rec = _load_cfg().get("last_export")
+    return rec if isinstance(rec, dict) else None
+
+
+def unpublished_works():
+    """Everything imported since the last export: a work is 'new' until a publish
+    stamps a pid into its sidecar, so this self-corrects (no timestamp bookkeeping)."""
+    return [w for w in library.all_works() if not w.get("pid")]
+
+
 # ---------------- pull suppression ----------------
 # When the owner deletes a pulled work on the public server, its pid is remembered
 # here so a later Pull doesn't re-import it (the pid is still in the content repo).
@@ -139,6 +157,11 @@ def repo_status():
     wd = repo / WORKS_SUBDIR
     if wd.is_dir():
         st["works"] = sum(1 for _ in wd.glob("*.json"))
+    st["last_export"] = last_export()
+    try:
+        st["new_count"] = len(unpublished_works())
+    except Exception:
+        st["new_count"] = None
     return st
 
 
@@ -237,6 +260,10 @@ def publish_works(ids):
         result["message"] = "Nothing to publish."
         return result
 
+    # The sidecars just gained pids; drop the scan cache so those works stop
+    # counting as "new" straight away.
+    library.invalidate()
+    _record_export(published)
     _git(repo, "add", "-A")
     _, staged, _ = _git(repo, "status", "--porcelain")
     if not staged.strip():
@@ -256,6 +283,18 @@ def publish_works(ids):
     except Exception as e:
         result["message"] = ("Committed locally but the push failed: %s — the commit "
                               "is saved; retry once git access is sorted." % e)
+    return result
+
+
+def publish_new():
+    """Export every work that has never been published, in one commit + push."""
+    works = unpublished_works()
+    if not works:
+        return {"published": 0, "new": 0, "pids": [], "errors": [], "committed": False,
+                "pushed": False, "commit": None,
+                "message": "No new artwork — everything is already on the public server."}
+    result = publish_works([w["id"] for w in works])
+    result["new"] = len(works)
     return result
 
 

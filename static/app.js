@@ -1306,18 +1306,33 @@ function repoPill(st) {
   return '<span class="repo-pill bad">repo not found</span>';
 }
 
-// Private box: shows where the content repo is and lets the owner set its path.
+// Private box: shows where the content repo is, lets the owner set its path, and
+// exports everything added since the last export in one go.
 function publishPanelHtml(st) {
   const pinned = st && st.env_pinned;
   const path = st ? st.path : "";
   const remote = st && st.remote ? st.remote : "—";
   const worksN = st && st.works != null ? st.works : "—";
+  const newN = st && st.new_count != null ? st.new_count : null;
+  const last = st && st.last_export;
+  const lastTxt = last
+    ? "Last export: " + last.at + " · " + last.count + " work(s)."
+    : "No exports yet.";
+  const newTxt = newN == null ? ""
+    : (newN === 0 ? "Nothing new since your last export. "
+                  : newN + " work(s) added since your last export. ");
   return (
     '<section class="publishpanel"><div class="pagehead" style="margin:32px 0 12px">' +
     '<h2 class="sec">Public server</h2>' +
     '<p class="sub"><b>Push to public</b> (on an artist page) copies the reduced-size images and ' +
     "placards of the selected works into your content repo and pushes them to GitHub; the public " +
     "site then pulls them in. " + repoPill(st) + "</p></div>" +
+    '<div class="exportbox"><div class="bf-actions">' +
+    '<button type="button" class="cta-btn" id="export-new"' + (newN === 0 ? " disabled" : "") + ">" +
+    "Export all new artwork" + (newN ? " (" + newN + ")" : "") + "</button>" +
+    '<span class="formmsg" id="export-msg"></span></div>' +
+    '<p class="tiny">' + esc(newTxt) + esc(lastTxt) +
+    " A large first export can take a few minutes.</p></div>" +
     '<form class="dlform repoform" id="repoform">' +
     "<label>Content repo folder</label>" +
     '<input id="repo-path" value="' + esc(path) + '"' + (pinned ? " disabled" : "") +
@@ -1332,6 +1347,21 @@ function publishPanelHtml(st) {
 }
 
 function wirePublishPanel() {
+  const ex = $("#export-new");
+  if (ex) ex.addEventListener("click", async () => {
+    const msg = $("#export-msg"); msg.className = "formmsg";
+    const orig = ex.textContent;
+    ex.disabled = true; ex.textContent = "Exporting…";
+    msg.textContent = "Rendering and pushing — this can take a while.";
+    try {
+      const r = await api("/api/publish/new", { method: "POST" });
+      toast(r.message || ("Exported " + r.published + " work(s)."));
+      settingsView();                       // re-render with fresh counts
+    } catch (e) {
+      msg.className = "formmsg err"; msg.textContent = e.message;
+      ex.disabled = false; ex.textContent = orig;
+    }
+  });
   const form = $("#repoform");
   if (!form) return;
   form.addEventListener("submit", async (e) => {
