@@ -270,7 +270,9 @@ async function acceptInviteView(token) {
 function workFigure(w, i, showArtist) {
   const meta = [showArtist ? w.artist : null, w.date || w.year, w.medium]
     .filter(Boolean).join(" · ");
-  const dim = (w.width && w.height)
+  // The public snapshot serves one reduced size for every work, so the pixel
+  // dimensions say nothing there — only show them on the private box.
+  const dim = (!isPublic() && w.width && w.height)
     ? '<span class="wdim">' + w.width + " × " + w.height + "</span>"
     : "";
   return (
