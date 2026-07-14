@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- pediment (hollow gable) -->
+  <path d="M12 3 L21.5 8.3 L2.5 8.3 Z" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linejoin="round"/>
+  <!-- architrave -->
+  <rect x="2.6" y="9.5" width="18.8" height="1.9" rx="0.4" fill="#ffffff"/>
+  <!-- four columns -->
+  <rect x="3.9" y="11.9" width="2.2" height="7.0" fill="#ffffff"/>
+  <rect x="8.6" y="11.9" width="2.2" height="7.0" fill="#ffffff"/>
+  <rect x="13.2" y="11.9" width="2.2" height="7.0" fill="#ffffff"/>
+  <rect x="17.9" y="11.9" width="2.2" height="7.0" fill="#ffffff"/>
+  <!-- plinth -->
+  <rect x="2.6" y="19.1" width="18.8" height="1.8" rx="0.3" fill="#ffffff"/>
+  <!-- base step (widest) -->
+  <rect x="1.6" y="21.2" width="20.8" height="1.9" rx="0.3" fill="#ffffff"/>
+</svg>
