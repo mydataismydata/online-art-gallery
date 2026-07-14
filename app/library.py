@@ -92,6 +92,10 @@ def _work_from_file(path, artist_dir_name):
     return {
         "id": wid,
         "rel": rel,
+        # Persistent publish id: stamped on first "push to public", it survives
+        # artist/title edits (which change `id`) so re-pushes update the same public
+        # work instead of duplicating it. Absent until a work has been published.
+        "pid": meta.get("pid"),
         "width": dims[0] if dims else None,
         "height": dims[1] if dims else None,
         "artist": meta.get("artist") or artist_dir_name,

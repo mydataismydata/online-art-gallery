@@ -2,12 +2,36 @@ import os
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
-from . import config, library, thumbs, artistinfo, auth, collections, related, metadata, ai
+from . import config, library, thumbs, artistinfo, auth, collections, related, metadata, ai, publish
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
                                 list_builtin_configs, set_builtin_config, reset_builtin_config)
 
 bp = Blueprint("api", __name__)
+
+
+# Endpoints that don't exist on the public "snapshot" server (authoring, downloads,
+# AI, sources): the public box is fed only by Pull. Blocked centrally so nothing —
+# not even the owner — can add or mutate art there. On the private box PUBLIC is
+# False, so this never fires. (Publish routes use the @private_only decorator.)
+_PRIVATE_ONLY_ENDPOINTS = {
+    "api.api_rescan", "api.api_artist_rename", "api.api_artist_cover",
+    "api.api_works_delete", "api.api_artist_lookup", "api.api_artist_save",
+    "api.api_work_find_metadata", "api.api_work_update",
+    "api.api_ai_config", "api.api_ai_config_save",
+    "api.api_work_autofill", "api.api_works_autofill_batch",
+    "api.api_custom_sources", "api.api_custom_sources_save",
+    "api.api_custom_sources_delete", "api.api_custom_sources_test",
+    "api.api_sources", "api.api_sources_builtin",
+    "api.api_sources_builtin_save", "api.api_sources_builtin_reset",
+    "api.api_downloads", "api.api_downloads_start", "api.api_downloads_cancel",
+}
+
+
+@bp.before_request
+def _block_private_in_public():
+    if config.PUBLIC and request.endpoint in _PRIVATE_ONLY_ENDPOINTS:
+        return jsonify({"error": "Not available on the public server."}), 403
 
 
 # ==================== auth / session ====================
@@ -17,7 +41,8 @@ def api_session():
     """How the SPA learns who (if anyone) is logged in, and whether the very
     first Owner still needs to be created. Public by design."""
     user = auth.current_user()
-    return jsonify({"user": auth.public(user), "needs_setup": not auth.any_users()})
+    return jsonify({"user": auth.public(user), "needs_setup": not auth.any_users(),
+                    "public": config.PUBLIC})
 
 
 @bp.post("/api/setup")
@@ -116,6 +141,69 @@ def api_users_delete(username):
     return jsonify({"deleted": True})
 
 
+# ==================== invites (owner issues Curator links) ====================
+
+def _invite_url(token):
+    """The full accept link the owner emails. request.host_url already reflects
+    whatever origin the owner is browsing (LAN, Tailscale name, or the public host)."""
+    return request.host_url.rstrip("/") + "/#/invite/" + token
+
+
+@bp.get("/api/invites")
+@auth.require_role("owner")
+def api_invites():
+    items = [dict(inv, url=_invite_url(inv["token"])) for inv in auth.list_invites()]
+    return jsonify({"invites": items})
+
+
+@bp.post("/api/invites")
+@auth.require_role("owner")
+def api_invites_create():
+    data = request.get_json(silent=True) or {}
+    me = auth.current_user()
+    try:
+        inv = auth.create_invite(data.get("email"), data.get("role") or "curator",
+                                 me["username"])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    inv["url"] = _invite_url(inv["token"])
+    return jsonify({"invite": inv})
+
+
+@bp.delete("/api/invites/<token>")
+@auth.require_role("owner")
+def api_invites_revoke(token):
+    try:
+        auth.revoke_invite(token)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"revoked": True})
+
+
+@bp.get("/api/invite/<token>")
+def api_invite_get(token):
+    """Public: what the accept screen shows (invited email + role). No auth."""
+    inv = auth.get_invite(token)
+    if not inv:
+        return jsonify({"error": "This invite link is no longer valid."}), 410
+    return jsonify({"invite": inv})
+
+
+@bp.post("/api/invite/accept")
+def api_invite_accept():
+    """Public: turn an invite into an account and sign the new user in."""
+    data = request.get_json(silent=True) or {}
+    try:
+        user = auth.accept_invite(data.get("token"), data.get("username"),
+                                  data.get("password"))
+    except LookupError as e:
+        return jsonify({"error": str(e)}), 410
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    auth.login_session(auth.get_user(user["username"]))
+    return jsonify({"user": user})
+
+
 # ==================== collections ====================
 
 def _load_editable(cid):
@@ -130,7 +218,7 @@ def _load_editable(cid):
 
 
 @bp.get("/api/collections")
-@auth.require_login
+@auth.require_view
 def api_collections():
     return jsonify({"collections": collections.list_summaries(auth.current_user())})
 
@@ -148,7 +236,7 @@ def api_collections_create():
 
 
 @bp.get("/api/collection/<cid>")
-@auth.require_login
+@auth.require_view
 def api_collection(cid):
     rec = collections.get_collection(cid)
     if not rec:
@@ -212,7 +300,7 @@ def api_collection_remove_works(cid):
 # ==================== library (browse — any signed-in user) ====================
 
 @bp.get("/api/artists")
-@auth.require_login
+@auth.require_view
 def api_artists():
     arts = library.artists()
     return jsonify({
@@ -222,7 +310,7 @@ def api_artists():
 
 
 @bp.get("/api/works")
-@auth.require_login
+@auth.require_view
 def api_works():
     works = library.query_works(
         artist=request.args.get("artist"),
@@ -235,13 +323,13 @@ def api_works():
 
 
 @bp.get("/api/facets")
-@auth.require_login
+@auth.require_view
 def api_facets():
     return jsonify(library.facets())
 
 
 @bp.get("/api/work/<wid>")
-@auth.require_login
+@auth.require_view
 def api_work(wid):
     w = library.get(wid)
     if not w:
@@ -314,7 +402,7 @@ def api_works_delete():
 # ---------------- artist metadata ----------------
 
 @bp.get("/api/artist_info")
-@auth.require_login
+@auth.require_view
 def api_artist_info():
     name = (request.args.get("name") or "").strip()
     if not name:
@@ -323,7 +411,7 @@ def api_artist_info():
 
 
 @bp.get("/api/artist/<name>/related")
-@auth.require_login
+@auth.require_view
 def api_artist_related(name):
     return jsonify({"related": related.related_artists(name)})
 
@@ -467,6 +555,51 @@ def api_stats():
     return jsonify(s)
 
 
+# ==================== publish / pull (public snapshot) ====================
+
+# On the LOCAL box: push selected works (reduced images + placards) to the content
+# repo. On the PUBLIC box: pull them in. Repo config is local-box only.
+
+@bp.get("/api/publish/status")
+@auth.require_role("owner")
+def api_publish_status():
+    return jsonify(publish.repo_status())
+
+
+@bp.post("/api/publish/config")
+@auth.private_only
+@auth.require_role("owner")
+def api_publish_config():
+    data = request.get_json(silent=True) or {}
+    return jsonify(publish.set_repo_path(data.get("repo_path")))
+
+
+@bp.post("/api/publish")
+@auth.private_only
+@auth.require_role("owner")
+def api_publish():
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "No works selected."}), 400
+    try:
+        result = publish.publish_works([str(i) for i in ids])
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result)
+
+
+@bp.post("/api/pull")
+@auth.public_only
+@auth.require_role("owner")
+def api_pull():
+    try:
+        result = publish.pull_and_import()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result)
+
+
 # ---------------- custom sources (Settings — owner only) ----------------
 
 @bp.get("/api/custom_sources")
@@ -518,7 +651,7 @@ def _img_response(path, mimetype, download_name=None):
 
 
 @bp.get("/thumb/<wid>")
-@auth.require_login
+@auth.require_view
 def thumb(wid):
     w = library.get(wid)
     if not w:
@@ -532,7 +665,7 @@ def thumb(wid):
 
 
 @bp.get("/img/<wid>")
-@auth.require_login
+@auth.require_view
 def img(wid):
     """Screen-sized derivative for the fullscreen viewer — small and fast. The full
     original is at /orig."""
@@ -548,7 +681,7 @@ def img(wid):
 
 
 @bp.get("/orig/<wid>")
-@auth.require_login
+@auth.require_view
 def orig(wid):
     """The full-resolution original (browser-displayable), for a proper look or a
     download. Large — only fetched via the viewer's 'full resolution' link."""

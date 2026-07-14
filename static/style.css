@@ -592,3 +592,38 @@ kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4
 .rel-meta { padding: 8px 10px 9px; display: flex; flex-direction: column; gap: 2px; }
 .rel-name { font-family: var(--serif); font-size: 13.5px; line-height: 1.2; }
 .rel-why { color: var(--dim); font-size: 11px; }
+
+/* ---------- public snapshot: sign-in chip, publish/pull, invites ---------- */
+#userbox .signin { text-transform: none; letter-spacing: 0; font-size: 14px; }
+
+/* repo status pill (Settings publish / pull panels) */
+.repo-pill {
+  display: inline-block; margin-left: 4px; padding: 2px 9px; border-radius: 999px;
+  font-size: 11.5px; letter-spacing: .04em; border: 1px solid var(--line); color: var(--dim);
+  vertical-align: middle;
+}
+.repo-pill.ok { color: #8fbc8f; border-color: #3d5a3d; }
+.repo-pill.bad { color: #d9a441; border-color: #5a4a2a; }
+
+.publishpanel .dlform, .pullpanel { max-width: 560px; }
+.repoform .invlink, .repoform code { word-break: break-all; }
+.pullpanel .bf-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+
+/* invite a curator (People panel) */
+.invitebox { margin-top: 8px; max-width: 620px; }
+.inviteform { max-width: 420px; }
+.invrow {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 11px 14px; margin-bottom: 9px;
+}
+.invmeta { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.invmeta .uname { font-family: var(--serif); font-size: 15px; }
+.invlink {
+  width: 100%; box-sizing: border-box; margin-top: 2px; padding: 5px 8px;
+  border: 1px solid var(--line); background: #14100d; color: var(--dim);
+  border-radius: 4px; font-size: 12px;
+}
+.invlink:focus { outline: none; border-color: var(--accent); color: var(--text); }
+.invact { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+.invnone { color: var(--dim); }

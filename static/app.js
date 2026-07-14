@@ -11,10 +11,14 @@ function esc(s) {
 
 /* ============================== session ============================== */
 
-let SESSION = { user: null, needs_setup: false };
+let SESSION = { user: null, needs_setup: false, public: false };
 function role() { return SESSION.user ? SESSION.user.role : null; }
 function isOwner() { return role() === "owner"; }
 function canCurate() { return role() === "owner" || role() === "curator"; }
+// The public "snapshot" deployment: anyone may browse anonymously, and all
+// authoring/download tools are gone (fed instead by the owner's Pull button).
+function isPublic() { return !!SESSION.public; }
+function setUser(u) { SESSION = { user: u, needs_setup: false, public: SESSION.public }; }
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -66,7 +70,9 @@ function setNav(which) {
 function renderNav() {
   const nav = $("#mainnav"), ub = $("#userbox");
   if (!nav || !ub) return;
-  if (!SESSION.user) { nav.innerHTML = ""; ub.innerHTML = ""; return; }
+  // Private box with nobody signed in: the whole site sits behind the login wall.
+  // Public box: anyone may browse, so we still build the nav for anonymous visitors.
+  if (!SESSION.user && !isPublic()) { nav.innerHTML = ""; ub.innerHTML = ""; return; }
   const links = [
     ["#/", "home", "Artists", false],
     ["#/browse/era", "browse", "Browse", false],
@@ -74,22 +80,28 @@ function renderNav() {
   ];
   if (isOwner()) {
     links.push(["#/settings", "settings", "Settings", false]);
-    links.push(["#/add", "add", "Add artist", true]);
+    // No "Add artist" on the public snapshot — even for the owner.
+    if (!isPublic()) links.push(["#/add", "add", "Add artist", true]);
   }
   nav.innerHTML = links.map(([href, key, label, cta]) =>
     '<a href="' + href + '" data-nav="' + key + '"' + (cta ? ' class="cta"' : "") + ">" +
     esc(label) + "</a>").join("");
-  const u = SESSION.user;
-  ub.innerHTML =
-    '<span class="who"><span class="uname">' + esc(u.username) + "</span>" +
-    '<span class="role-badge ' + esc(u.role) + '">' + esc(u.role) + "</span></span>" +
-    '<button id="logout" class="linkbtn">Log out</button>';
-  $("#logout").addEventListener("click", doLogout);
+  if (SESSION.user) {
+    const u = SESSION.user;
+    ub.innerHTML =
+      '<span class="who"><span class="uname">' + esc(u.username) + "</span>" +
+      '<span class="role-badge ' + esc(u.role) + '">' + esc(u.role) + "</span></span>" +
+      '<button id="logout" class="linkbtn">Log out</button>';
+    $("#logout").addEventListener("click", doLogout);
+  } else {
+    // Anonymous visitor on the public site: offer sign-in (accounts are invite-only).
+    ub.innerHTML = '<a href="#/login" class="linkbtn signin">Sign in</a>';
+  }
 }
 
 async function doLogout() {
   try { await api("/api/logout", { method: "POST" }); } catch (e) {}
-  SESSION = { user: null, needs_setup: false };
+  setUser(null);
   renderNav();
   route();
 }
@@ -103,19 +115,23 @@ function route() {
   closeViewer();
   stopPolling();
   resetSel();
-  // Auth gates come before any normal routing: the whole site sits behind a login.
-  if (SESSION.needs_setup) return setupView();
-  if (!SESSION.user) return loginView();
-
   const segs = (location.hash.slice(1) || "/").split("/").filter(Boolean).map(decodeURIComponent);
+  // Accepting an invite works with no session, in either mode — check it first.
+  if (segs[0] === "invite" && segs[1]) return acceptInviteView(segs[1]);
+  // Auth gates: first-run setup, then the login wall — but the public snapshot
+  // lets anyone browse without an account.
+  if (SESSION.needs_setup) return setupView();
+  if (!SESSION.user && !isPublic()) return loginView();
+
   window.scrollTo(0, 0);
   if (segs.length === 0) return homeView();
-  if (segs[0] === "login") return void goHome();          // already signed in
+  if (segs[0] === "login") return SESSION.user ? void goHome() : loginView();
   if (segs[0] === "artist" && segs[1]) return artistView(segs[1]);
   if (segs[0] === "browse") return browseView(segs[1] || "era", segs[2] || null);
   if (segs[0] === "collections") return collectionsView();
   if (segs[0] === "collection" && segs[1]) return collectionView(segs[1]);
-  if (segs[0] === "add") return isOwner() ? addView(segs[1] || "") : void goHome();
+  // Adding art doesn't exist on the public box, even for the owner.
+  if (segs[0] === "add") return (isOwner() && !isPublic()) ? addView(segs[1] || "") : void goHome();
   if (segs[0] === "settings") return isOwner() ? settingsView() : void goHome();
   homeView();
 }
@@ -163,7 +179,7 @@ function setupView() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: u, password: p }),
       });
-      SESSION = { user: r.user, needs_setup: false };
+      setUser(r.user);
       renderNav();
       goHome();
     } catch (err) { msg.textContent = err.message; }
@@ -188,12 +204,53 @@ function loginView() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: $("#li-user").value.trim(), password: $("#li-pass").value }),
       });
-      SESSION = { user: r.user, needs_setup: false };
+      setUser(r.user);
       renderNav();
       goHome();
     } catch (err) { msg.textContent = err.message; }
   });
   $("#li-user").focus();
+}
+
+/* Accept an owner-issued invite: pick a username + password and the account is
+   created with the invited role, then signed in. Reachable with no session. */
+async function acceptInviteView(token) {
+  let inv;
+  try {
+    inv = (await api("/api/invite/" + encodeURIComponent(token))).invite;
+  } catch (e) {
+    authShell("Invitation",
+      "",
+      '<p class="sub">' + esc(e.message || "This invite link is no longer valid.") + "</p>" +
+      '<p style="margin-top:14px"><a href="#/">Go to the gallery</a></p>');
+    return;
+  }
+  authShell(
+    "Join The Gallery",
+    "You've been invited as a <b>" + esc(inv.role) + "</b>" +
+      (inv.email ? " — " + esc(inv.email) : "") + ". Pick a username and password.",
+    '<form class="authform" id="acceptform">' +
+    "<label>Username<input id=\"iv-user\" autocomplete=\"username\"></label>" +
+    "<label>Password<input id=\"iv-pass\" type=\"password\" autocomplete=\"new-password\"></label>" +
+    "<label>Confirm password<input id=\"iv-pass2\" type=\"password\" autocomplete=\"new-password\"></label>" +
+    '<button type="submit" class="cta-btn">Create account</button>' +
+    '<p class="formmsg err" id="iv-msg"></p></form>');
+  $("#acceptform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = $("#iv-msg");
+    const u = $("#iv-user").value.trim(), p = $("#iv-pass").value, p2 = $("#iv-pass2").value;
+    if (p !== p2) { msg.textContent = "The two passwords don't match."; return; }
+    try {
+      const r = await api("/api/invite/accept", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token, username: u, password: p }),
+      });
+      setUser(r.user);
+      renderNav();
+      goHome();
+    } catch (err) { msg.textContent = err.message; }
+  });
+  $("#iv-user").focus();
 }
 
 /* ============================== works grid + selection ============================== */
@@ -221,11 +278,15 @@ function browseCtx(opts) {
   opts = opts || {};
   const actions = [];
   if (canCurate()) actions.push("collect");
-  // Artist page: batch "Get metadata" via the AI (one call per artist). Browse
-  // grids mix artists, so they keep the free per-work Wikidata "Find metadata".
-  if (isOwner()) actions.push(opts.artist ? "aimeta" : "metadata");
-  if (isOwner() && opts.artist) actions.push("setcover");  // artist pages only
-  if (isOwner()) actions.push("delete");
+  // Authoring lives only on the private box; the public snapshot is fed by Pull,
+  // so an owner there gets no add/edit/delete tools — only curators' "collect".
+  if (isOwner() && !isPublic()) {
+    // Artist page: batch "Get metadata" via the AI (one call per artist). Browse
+    // grids mix artists, so they keep the free per-work Wikidata "Find metadata".
+    actions.push(opts.artist ? "aimeta" : "metadata");
+    if (opts.artist) { actions.push("setcover"); actions.push("publish"); }
+    actions.push("delete");
+  }
   return { actions, artist: opts.artist };
 }
 function collectionCtx(c) {
@@ -296,6 +357,9 @@ function renderSelCtl(works, rerender, ctx) {
   if (ctx.actions.includes("setcover"))
     html += '<button id="selcover" class="toolbtn"' + (n === 1 ? "" : " disabled") +
       ' title="Pick exactly one work">Set as thumbnail</button>';
+  if (ctx.actions.includes("publish"))
+    html += '<button id="selpublish" class="toolbtn"' + (n ? "" : " disabled") +
+      ' title="Push these works to the public server">Push to public' + tag + "</button>";
   if (ctx.actions.includes("uncollect"))
     html += '<button id="seluncollect" class="danger"' + (n ? "" : " disabled") + ">Remove" + tag + "</button>";
   if (ctx.actions.includes("delete"))
@@ -320,6 +384,8 @@ function renderSelCtl(works, rerender, ctx) {
   if (aimeta) aimeta.addEventListener("click", () => getSelectionMetadata(ctx.artist, rerender));
   const cover = $("#selcover");
   if (cover) cover.addEventListener("click", () => setArtistCover(ctx.artist, rerender));
+  const pub = $("#selpublish");
+  if (pub) pub.addEventListener("click", () => publishSelection(ctx.artist, rerender));
 }
 
 /* "Set as thumbnail": make the one selected work the artist's representative
@@ -387,6 +453,30 @@ async function getSelectionMetadata(artist, rerender) {
   } catch (e) {
     toast(e.message);
     if (btn) { btn.disabled = false; btn.textContent = "Get metadata"; }
+  }
+}
+
+/* "Push to public": copy the selected works (reduced images + completed placards)
+   into the content repo and git-push them to the public server. Re-pushing an
+   already-published work updates it in place. Owner-only, private box. */
+async function publishSelection(artist, rerender) {
+  const ids = Array.from(SEL.ids);
+  if (!ids.length) return;
+  const btn = $("#selpublish");
+  if (btn) { btn.disabled = true; btn.textContent = "Pushing…"; }
+  toast("Pushing " + ids.length + " work" + (ids.length === 1 ? "" : "s") +
+        " to the public server…");
+  try {
+    const r = await api("/api/publish", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids }),
+    });
+    resetSel();
+    toast(r.message || ("Pushed " + r.published + " work(s)."));
+    if (rerender) rerender();
+  } catch (e) {
+    toast(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = "Push to public"; }
   }
 }
 
@@ -1128,13 +1218,15 @@ function settingsHeadHtml(s) {
 
 async function settingsView() {
   setNav("settings");
+  if (isPublic()) return settingsPublicView();
   try {
-    const [srcData, usersData, builtinData, aiData, statsData] = await Promise.all([
+    const [srcData, usersData, builtinData, aiData, statsData, pubData] = await Promise.all([
       api("/api/custom_sources"),
       api("/api/users"),
       api("/api/sources/builtin"),
       api("/api/ai/config"),
       api("/api/stats"),
+      api("/api/publish/status").catch(() => null),
     ]);
     if (srcData.field_keys) fieldKeys = srcData.field_keys;
     const presets = srcData.presets || [];
@@ -1142,6 +1234,7 @@ async function settingsView() {
       settingsHeadHtml(statsData) +
       displayPanelHtml() +
       usersPanelHtml() +
+      publishPanelHtml(pubData) +
       aiPanelHtml(aiData) +
       builtinSourcesHtml(builtinData.sources || []) +
       '<section class="settings-sources"><div class="pagehead" style="margin:32px 0 12px">' +
@@ -1154,13 +1247,119 @@ async function settingsView() {
       "<div>" + sourceFormHtml(presets) + "</div></div></section>";
     renderUsers(usersData.users);
     wireAddUser();
+    wireInvites();
     const pc = document.getElementById("opt-placards");
     if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
     wireAiPanel(aiData);
     renderSourceList(srcData.sources || []);
     wireSourceForm(presets);
     wireBuiltinSources();
+    wirePublishPanel();
   } catch (e) { errbox(e); }
+}
+
+/* Settings on the public snapshot: no authoring/download/AI panels (those routes
+   are refused there). Just the header, a Pull button, Display, and People. */
+async function settingsPublicView() {
+  try {
+    const [usersData, statsData, pubData] = await Promise.all([
+      api("/api/users"),
+      api("/api/stats"),
+      api("/api/publish/status").catch(() => null),
+    ]);
+    app.innerHTML =
+      settingsHeadHtml(statsData) +
+      pullPanelHtml(pubData) +
+      displayPanelHtml() +
+      usersPanelHtml();
+    renderUsers(usersData.users);
+    wireAddUser();
+    wireInvites();
+    const pc = document.getElementById("opt-placards");
+    if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+    wirePullPanel();
+  } catch (e) { errbox(e); }
+}
+
+/* ---------- publish / pull (public snapshot) ---------- */
+
+function repoPill(st) {
+  if (!st) return '<span class="repo-pill bad">status unavailable</span>';
+  if (st.is_git) return '<span class="repo-pill ok">repo connected</span>';
+  if (st.exists) return '<span class="repo-pill bad">folder isn’t a git repo</span>';
+  return '<span class="repo-pill bad">repo not found</span>';
+}
+
+// Private box: shows where the content repo is and lets the owner set its path.
+function publishPanelHtml(st) {
+  const pinned = st && st.env_pinned;
+  const path = st ? st.path : "";
+  const remote = st && st.remote ? st.remote : "—";
+  const worksN = st && st.works != null ? st.works : "—";
+  return (
+    '<section class="publishpanel"><div class="pagehead" style="margin:32px 0 12px">' +
+    '<h2 class="sec">Public server</h2>' +
+    '<p class="sub"><b>Push to public</b> (on an artist page) copies the reduced-size images and ' +
+    "placards of the selected works into your content repo and pushes them to GitHub; the public " +
+    "site then pulls them in. " + repoPill(st) + "</p></div>" +
+    '<form class="dlform repoform" id="repoform">' +
+    "<label>Content repo folder</label>" +
+    '<input id="repo-path" value="' + esc(path) + '"' + (pinned ? " disabled" : "") +
+    ' placeholder="/path/to/gallery-content">' +
+    (pinned
+      ? '<p class="tiny">Set by the <code>GALLERY_PUBLISH_REPO</code> environment variable.</p>'
+      : '<button type="submit">Save path</button>') +
+    '<p class="tiny">Remote: <code>' + esc(remote) + "</code> · " + esc(String(worksN)) +
+    " work(s) published</p>" +
+    '<p class="formmsg" id="repo-msg"></p></form></section>'
+  );
+}
+
+function wirePublishPanel() {
+  const form = $("#repoform");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = $("#repo-msg"); msg.className = "formmsg";
+    try {
+      const st = await api("/api/publish/config", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo_path: $("#repo-path").value }),
+      });
+      msg.className = "formmsg ok";
+      msg.textContent = st.is_git ? "Saved — repo connected." :
+        "Saved, but that folder isn’t a git repo yet. Clone your content repo there.";
+    } catch (err) { msg.className = "formmsg err"; msg.textContent = err.message; }
+  });
+}
+
+// Public box: pull the latest published works into the gallery.
+function pullPanelHtml(st) {
+  return (
+    '<section class="pullpanel"><div class="pagehead" style="margin:24px 0 12px">' +
+    '<h2 class="sec">Pull new artwork</h2>' +
+    '<p class="sub">Fetch the latest works your local gallery pushed and import them here. ' +
+    repoPill(st) + (st && st.works != null ? " · " + st.works + " in the repo" : "") + "</p></div>" +
+    '<div class="bf-actions"><button type="button" class="cta-btn" id="pull-btn">Pull new artwork</button>' +
+    '<span class="formmsg" id="pull-msg"></span></div></section>'
+  );
+}
+
+function wirePullPanel() {
+  const btn = $("#pull-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const msg = $("#pull-msg"); msg.className = "formmsg";
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = "Pulling…";
+    try {
+      const r = await api("/api/pull", { method: "POST" });
+      msg.className = "formmsg ok";
+      msg.textContent = "Added " + r.added + ", updated " + r.updated + ", " +
+        r.unchanged + " unchanged.";
+      toast("Pull complete: +" + r.added + " new, " + r.updated + " updated.");
+    } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  });
 }
 
 /* ---------- Auto-fill (AI) configuration ---------- */
@@ -1333,8 +1532,83 @@ function usersPanelHtml() {
     '<option value="visitor">Visitor</option><option value="curator">Curator</option>' +
     '<option value="owner">Owner</option></select>' +
     "<button type=\"submit\">Add user</button>" +
-    '<p class="formmsg" id="nu-msg"></p></form></div></section>'
+    '<p class="formmsg" id="nu-msg"></p></form></div>' +
+    inviteBoxHtml() +
+    "</section>"
   );
+}
+
+/* Invite a Curator by emailing them a one-time link (no self-registration).
+   Works on both the private and public boxes. */
+function inviteBoxHtml() {
+  return (
+    '<div class="invitebox"><div class="pagehead" style="margin:22px 0 6px">' +
+    '<p class="sub">Invite a Curator — they set their own username &amp; password from the link.</p></div>' +
+    '<form class="dlform inviteform" id="invcreate">' +
+    "<label>Email</label>" +
+    '<input id="inv-email" type="email" autocomplete="off" placeholder="name@example.com">' +
+    "<button type=\"submit\">Create invite link</button>" +
+    '<p class="formmsg" id="inv-msg"></p></form>' +
+    '<div id="invitelist"></div></div>'
+  );
+}
+
+function mailtoFor(iv) {
+  const subject = "You're invited to The Gallery";
+  const body = "You've been invited to join The Gallery as a Curator.\n\n" +
+    "Open this link to create your account:\n" + iv.url + "\n\n(The link expires in 14 days.)";
+  return "mailto:" + iv.email + "?subject=" + encodeURIComponent(subject) +
+    "&body=" + encodeURIComponent(body);
+}
+
+function renderInvites(list) {
+  const box = $("#invitelist");
+  if (!box) return;
+  if (!list.length) { box.innerHTML = '<p class="tiny invnone">No pending invites.</p>'; return; }
+  box.innerHTML = list.map((iv) =>
+    '<div class="invrow"><div class="invmeta"><span class="uname">' + esc(iv.email) + "</span>" +
+    '<span class="tiny">' + esc(iv.role) + " · invited " + esc((iv.created || "").split(" ")[0]) + "</span>" +
+    '<input class="invlink" readonly value="' + esc(iv.url) + '"></div>' +
+    '<div class="invact">' +
+    '<button class="linkbtn" data-copy="' + esc(iv.url) + '">copy</button>' +
+    '<a class="linkbtn" href="' + esc(mailtoFor(iv)) + '">email</a>' +
+    '<button class="danger" data-revoke="' + esc(iv.token) + '">revoke</button>' +
+    "</div></div>").join("");
+  box.querySelectorAll("[data-copy]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const done = () => toast("Invite link copied.");
+      if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(done).catch(() => {});
+    }));
+  box.querySelectorAll("[data-revoke]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      if (!confirm("Revoke this invite? The link will stop working.")) return;
+      try {
+        await api("/api/invites/" + encodeURIComponent(b.dataset.revoke), { method: "DELETE" });
+        reloadInvites();
+      } catch (e) { alert(e.message); }
+    }));
+}
+
+async function reloadInvites() {
+  try { renderInvites((await api("/api/invites")).invites); } catch (e) {}
+}
+
+function wireInvites() {
+  const form = $("#invcreate");
+  if (form) form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const msg = $("#inv-msg"); msg.className = "formmsg";
+    try {
+      await api("/api/invites", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: $("#inv-email").value }),
+      });
+      $("#inv-email").value = "";
+      msg.className = "formmsg ok"; msg.textContent = "Invite created — copy or email the link below.";
+      reloadInvites();
+    } catch (err) { msg.className = "formmsg err"; msg.textContent = err.message; }
+  });
+  reloadInvites();
 }
 
 function roleOptions(current) {

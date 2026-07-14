@@ -8,6 +8,7 @@ deleted or re-roled user takes effect immediately."""
 import functools
 import json
 import re
+import secrets
 import threading
 import time
 
@@ -18,6 +19,9 @@ from . import config
 
 ROLES = ("owner", "curator", "visitor")
 _RANK = {"visitor": 1, "curator": 2, "owner": 3}
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_INVITE_TTL = 14 * 24 * 3600  # invite links expire after 14 days
 
 # pbkdf2 is chosen explicitly: always available, no dependency on an OpenSSL build
 # that supports scrypt (Werkzeug's newer default).
@@ -231,3 +235,134 @@ def require_role(role):
             return fn(*args, **kwargs)
         return wrapper
     return deco
+
+
+def require_view(fn):
+    """Read access. In public (snapshot) mode anyone may browse anonymously; on the
+    private box it behaves like require_login. This is the login-wall toggle."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if config.PUBLIC or current_user():
+            return fn(*args, **kwargs)
+        return jsonify({"error": "Login required."}), 401
+    return wrapper
+
+
+def private_only(fn):
+    """Refuse a route on the public server — for authoring/download/AI/source
+    endpoints that must not exist there, even for the owner."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if config.PUBLIC:
+            return jsonify({"error": "Not available on the public server."}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+def public_only(fn):
+    """Refuse a route unless on the public server — for the pull-new-artwork action."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not config.PUBLIC:
+            return jsonify({"error": "Only available on the public server."}), 403
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+# ---------------- invites (owner-issued Curator links) ----------------
+
+def _load_invites():
+    try:
+        data = json.loads(config.INVITES_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"invites": {}}
+    except Exception:
+        return {"invites": {}}
+    if not isinstance(data, dict) or not isinstance(data.get("invites"), dict):
+        return {"invites": {}}
+    return data
+
+
+def _save_invites(data):
+    config.INVITES_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _invite_expired(rec):
+    return (time.time() - (rec.get("ts") or 0)) > _INVITE_TTL
+
+
+def _prune_invites(data):
+    live = {t: r for t, r in data["invites"].items() if not _invite_expired(r)}
+    if len(live) != len(data["invites"]):
+        data["invites"] = live
+        _save_invites(data)
+    return data
+
+
+def create_invite(email, role, invited_by):
+    """Mint a single-use invite for a Curator (or Visitor) account. Never an Owner."""
+    email = re.sub(r"\s+", "", (email or "").strip())
+    if not _EMAIL_RE.match(email):
+        raise ValueError("Enter a valid email address.")
+    role = role or "curator"
+    if role not in ("curator", "visitor"):
+        raise ValueError("Invites can create Curator accounts only.")
+    with _lock:
+        data = _prune_invites(_load_invites())
+        token = secrets.token_urlsafe(24)
+        rec = {"email": email, "role": role, "invited_by": invited_by,
+               "ts": time.time(), "created": time.strftime("%Y-%m-%d %H:%M:%S")}
+        data["invites"][token] = rec
+        _save_invites(data)
+        return {"token": token, "email": email, "role": role, "created": rec["created"]}
+
+
+def list_invites():
+    with _lock:
+        data = _prune_invites(_load_invites())
+        out = [{"token": t, "email": r["email"], "role": r["role"], "created": r.get("created")}
+               for t, r in data["invites"].items()]
+    out.sort(key=lambda r: r.get("created") or "", reverse=True)
+    return out
+
+
+def get_invite(token):
+    """The pending invite (email/role) for an accept screen, or None if gone/expired."""
+    data = _load_invites()
+    rec = data["invites"].get(token)
+    if not rec:
+        return None
+    if _invite_expired(rec):
+        with _lock:
+            data = _load_invites()
+            data["invites"].pop(token, None)
+            _save_invites(data)
+        return None
+    return {"email": rec["email"], "role": rec["role"], "created": rec.get("created")}
+
+
+def revoke_invite(token):
+    with _lock:
+        data = _load_invites()
+        if token not in data["invites"]:
+            raise ValueError("No such invite.")
+        del data["invites"][token]
+        _save_invites(data)
+        return True
+
+
+def accept_invite(token, username, password):
+    """Create the account the invite is for, then consume the token (single use).
+    Raises LookupError for a missing/expired token, ValueError for bad input."""
+    with _lock:
+        data = _load_invites()
+        rec = data["invites"].get(token)
+        if not rec or _invite_expired(rec):
+            data["invites"].pop(token, None)
+            _save_invites(data)
+            raise LookupError("This invite link is no longer valid.")
+        user = create_user(username, password, rec["role"])  # validates; may raise ValueError
+        del data["invites"][token]
+        _save_invites(data)
+        return user
