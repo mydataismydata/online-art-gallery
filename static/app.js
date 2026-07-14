@@ -18,7 +18,18 @@ function canCurate() { return role() === "owner" || role() === "curator"; }
 // The public "snapshot" deployment: anyone may browse anonymously, and all
 // authoring/download tools are gone (fed instead by the owner's Pull button).
 function isPublic() { return !!SESSION.public; }
-function setUser(u) { SESSION = { user: u, needs_setup: false, public: SESSION.public }; }
+function setUser(u) {
+  SESSION = { user: u, needs_setup: false, public: SESSION.public, site_title: SESSION.site_title };
+}
+
+// Owner-set site name (from /api/session), shown in the tab + header brand.
+function siteTitle() { return (SESSION.site_title || "").trim() || "The Gallery"; }
+function applyTitle() {
+  const t = siteTitle();
+  document.title = t;
+  const b = document.querySelector(".brand");
+  if (b) b.textContent = t;
+}
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -144,6 +155,7 @@ async function boot() {
   } catch (e) {
     SESSION = { user: null, needs_setup: false };
   }
+  applyTitle();
   renderNav();
   route();
 }
@@ -161,7 +173,7 @@ function authShell(title, sub, formHtml) {
 
 function setupView() {
   authShell(
-    "Welcome to The Gallery",
+    "Welcome to " + esc(siteTitle()),
     "Create the first account — the <b>Owner</b>, who runs the gallery and adds everyone else.",
     '<form class="authform" id="setupform">' +
     "<label>Username<input id=\"su-user\" autocomplete=\"username\"></label>" +
@@ -189,7 +201,7 @@ function setupView() {
 
 function loginView() {
   authShell(
-    "The Gallery",
+    esc(siteTitle()),
     "Please sign in to continue.",
     '<form class="authform" id="loginform">' +
     "<label>Username<input id=\"li-user\" autocomplete=\"username\"></label>" +
@@ -226,7 +238,7 @@ async function acceptInviteView(token) {
     return;
   }
   authShell(
-    "Join The Gallery",
+    "Join " + esc(siteTitle()),
     "You've been invited as a <b>" + esc(inv.role) + "</b>" +
       (inv.email ? " — " + esc(inv.email) : "") + ". Pick a username and password.",
     '<form class="authform" id="acceptform">' +
@@ -1248,8 +1260,7 @@ async function settingsView() {
     renderUsers(usersData.users);
     wireAddUser();
     wireInvites();
-    const pc = document.getElementById("opt-placards");
-    if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+    wireDisplayPanel();
     wireAiPanel(aiData);
     renderSourceList(srcData.sources || []);
     wireSourceForm(presets);
@@ -1275,8 +1286,7 @@ async function settingsPublicView() {
     renderUsers(usersData.users);
     wireAddUser();
     wireInvites();
-    const pc = document.getElementById("opt-placards");
-    if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+    wireDisplayPanel();
     wirePullPanel();
   } catch (e) { errbox(e); }
 }
@@ -1508,12 +1518,38 @@ function displayPanelHtml() {
   return (
     '<section class="displaypanel"><div class="pagehead" style="margin-bottom:12px">' +
     '<h2 class="sec">Display</h2></div>' +
+    '<div class="siterow"><label for="opt-title">Site title</label>' +
+    '<input id="opt-title" type="text" maxlength="80" value="' + esc(siteTitle()) + '">' +
+    '<button type="button" class="toolbtn" id="opt-title-save">Save</button>' +
+    '<span class="formmsg" id="opt-title-msg"></span></div>' +
+    '<p class="sub optnote">The name shown in the browser tab and the top-left header. ' +
+    "Set per server, so your public site can carry a different name from your local one.</p>" +
     '<label class="optrow"><input type="checkbox" id="opt-placards">' +
     "<span>Show placards in the viewer</span></label>" +
     '<p class="sub optnote">A museum-style label — piece name, artist, date and description — ' +
     "shown over each painting in fullscreen. Toggle any time with the <kbd>p</kbd> key while " +
     "viewing a work.</p></section>"
   );
+}
+
+function wireDisplayPanel() {
+  const pc = document.getElementById("opt-placards");
+  if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+  const save = document.getElementById("opt-title-save");
+  if (save) save.addEventListener("click", async () => {
+    const inp = document.getElementById("opt-title");
+    const msg = document.getElementById("opt-title-msg"); msg.className = "formmsg";
+    try {
+      const r = await api("/api/site", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: inp.value }),
+      });
+      SESSION.site_title = r.site_title;
+      inp.value = r.site_title;
+      applyTitle();
+      msg.className = "formmsg ok"; msg.textContent = "Saved.";
+    } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
+  });
 }
 
 /* ---------- users ---------- */

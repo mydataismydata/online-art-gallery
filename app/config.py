@@ -33,6 +33,9 @@ COLLECTIONS_DIR = DATA_DIR / "collections"   # one <id>.json per collection
 SECRET_KEY_FILE = DATA_DIR / "secret_key"    # persisted so sessions survive restarts
 # Auto-fill (owner-set model + API key for the placard editor's AI lookup).
 AI_CONFIG_FILE = DATA_DIR / "ai_config.json"
+# Site branding (the owner-set title shown in the tab + header). Per-instance, so
+# the public snapshot can carry a different name from the local box.
+SITE_FILE = DATA_DIR / "site.json"
 # Pending Curator invites (owner-issued one-time links). Kept out of the library.
 INVITES_FILE = DATA_DIR / "invites.json"
 # Where the publish "content" repo working tree lives — the git checkout the local

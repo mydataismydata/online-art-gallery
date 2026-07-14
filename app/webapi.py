@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
-from . import config, library, thumbs, artistinfo, auth, collections, related, metadata, ai, publish
+from . import config, library, thumbs, artistinfo, auth, collections, related, metadata, ai, publish, site
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
                                 list_builtin_configs, set_builtin_config, reset_builtin_config)
@@ -42,7 +42,7 @@ def api_session():
     first Owner still needs to be created. Public by design."""
     user = auth.current_user()
     return jsonify({"user": auth.public(user), "needs_setup": not auth.any_users(),
-                    "public": config.PUBLIC})
+                    "public": config.PUBLIC, "site_title": site.get_title()})
 
 
 @bp.post("/api/setup")
@@ -553,6 +553,14 @@ def api_stats():
     s = library.stats()
     s["version"] = config.VERSION
     return jsonify(s)
+
+
+# Site title (owner-set branding for the tab + header).
+@bp.post("/api/site")
+@auth.require_role("owner")
+def api_site_save():
+    data = request.get_json(silent=True) or {}
+    return jsonify({"site_title": site.set_title(data.get("title"))})
 
 
 # ==================== publish / pull (public snapshot) ====================
