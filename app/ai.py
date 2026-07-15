@@ -249,6 +249,98 @@ def autofill(work, hint=None, trace=None):
     return out
 
 
+# ---------- artist bios ----------
+# What the bio form holds. `movements` is a list; the rest are plain strings.
+_ARTIST_STR_FIELDS = ("born", "died", "birthplace", "nationality", "description")
+
+# Unlike a painting's description, an artist bio MAY draw on Wikipedia — but it
+# isn't allowed to stop there. The movements it returns feed the Connections map's
+# clustering, so they have to be the canonical names rather than free prose.
+_ARTIST_SYSTEM = (
+    "You are a museum registrar's research assistant. You are given the name of one "
+    "painter whose work hangs in a private gallery. Identify that exact artist and "
+    "return accurate biographical metadata as STRICT JSON.\n\n"
+    "Return ONLY a JSON object with these keys: born, died, birthplace, nationality, "
+    "movements (an array of strings), description (a string).\n\n"
+    "Sourcing rules — follow them exactly:\n"
+    "- Wikidata and Wikipedia are acceptable starting points, but DO NOT stop there. "
+    "Corroborate and extend them with primary and authoritative sources: the "
+    "collection records and curatorial texts of museums holding this artist's work, "
+    "catalogues raisonnes, exhibition catalogues, archival material, letters, and "
+    "scholarly writing. Where those sources disagree with Wikipedia, follow the "
+    "scholarship and not the summary.\n"
+    '- born, died: the YEAR only, digits, e.g. "1815". Empty string if genuinely '
+    "unknown or seriously disputed — do not guess a plausible year.\n"
+    '- birthplace: the city or town only, e.g. "Berlin". Not the country.\n'
+    '- nationality: a single adjective, e.g. "German", "Dutch", "Australian".\n'
+    "- movements: the established art-historical movements or schools this painter "
+    'belongs to, most characteristic first, e.g. ["Realism"], ["Impressionism"], '
+    '["Heidelberg School"], ["Dutch Golden Age"]. Use the canonical NAME of the '
+    "movement, never a description of their manner. Return an empty array if the "
+    "painter genuinely belongs to no named movement.\n"
+    "- description: TWO OR MORE paragraphs about this artist — their training, what "
+    "they actually painted and how, their standing among contemporaries, and what "
+    "they are remembered for. Concrete and specific, drawn from the sources above. "
+    "No filler, no hedging, no list of dates already given in the other fields.\n"
+    "- If you are not confident a field is correct for THIS artist, return an empty "
+    "string (or empty array) for it. Never invent facts.\n\n"
+    "Output only the JSON object — no prose, no markdown, no code fences."
+)
+
+
+def autofill_artist(name, hint=None, trace=None):
+    """Research one artist and return bio fields for the owner to review — this
+    never saves. Returns a dict with any of born/died/birthplace/nationality/
+    movements/description the model could supply, blanks omitted. `movements` is a
+    list of strings. Raises AIError on a config/transport problem.
+
+    `hint` is the owner's own words, for when a name is ambiguous (two painters
+    called Brueghel, a son working in his father's manner). Omitted, the request is
+    unchanged. Pass a dict as `trace` to record the call (see _chat)."""
+    key = _api_key()
+    if not key:
+        msg = "No API key set. Add one under Settings → Auto-fill."
+        if trace is not None:
+            trace["error"] = msg
+        raise AIError(msg)
+
+    name = (name or "").strip()
+    user = "Artist to research:\nName: %s\n" % (name or "(unknown)")
+    hint = (hint or "").strip()
+    if hint:
+        user += ("\nThe gallery owner describes THIS artist as follows. Use it to "
+                 "identify the right painter — others may share the name — and "
+                 "research THAT one. Treat it as authoritative:\n%s\n" % hint)
+    user += "\nReturn the JSON described in your instructions."
+
+    content = _chat(key, [{"role": "system", "content": _ARTIST_SYSTEM},
+                          {"role": "user", "content": user}], 1800, _TIMEOUT, trace=trace)
+    parsed = _extract_json(content)
+    if parsed is None:
+        msg = "The AI didn't return usable JSON. Try again, or another model."
+        if trace is not None:
+            trace["error"] = msg
+        raise AIError(msg)
+
+    out = {}
+    for f in _ARTIST_STR_FIELDS:
+        v = parsed.get(f)
+        if isinstance(v, str) and v.strip():
+            out[f] = v.strip()
+    # Tolerate a comma-separated string where the schema asks for an array — models
+    # slip into prose here more often than anywhere else in the object.
+    mv = parsed.get("movements")
+    if isinstance(mv, str):
+        mv = [p.strip() for p in mv.split(",")]
+    if isinstance(mv, list):
+        clean = [m.strip() for m in mv if isinstance(m, str) and m.strip()]
+        if clean:
+            out["movements"] = clean
+    if trace is not None:
+        trace["fields"] = out
+    return out
+
+
 # ---------- batch: one call for several works by the same artist ----------
 # Only the fill-in fields — artist and title are already known from the gallery.
 _BATCH_FIELDS = ("date", "medium", "style", "genre", "school", "description")

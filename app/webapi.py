@@ -18,7 +18,7 @@ bp = Blueprint("api", __name__)
 # False, so this never fires. (Publish routes use the @private_only decorator.)
 _PRIVATE_ONLY_ENDPOINTS = {
     "api.api_rescan", "api.api_artist_rename",
-    "api.api_artist_lookup", "api.api_artist_save",
+    "api.api_artist_lookup", "api.api_artist_ai_lookup", "api.api_artist_save",
     "api.api_work_find_metadata", "api.api_work_update",
     "api.api_ai_config", "api.api_ai_config_save",
     "api.api_work_autofill", "api.api_works_autofill_batch",
@@ -603,8 +603,27 @@ def api_artist_lookup():
         return jsonify({"error": "Wikidata lookup failed: %s" % e}), 502
     if not found:
         return jsonify({"info": None, "message": "No matching artist found on Wikidata."})
-    saved = artistinfo.save(name, found)
-    return jsonify({"info": saved, "matched_label": found.get("matched_label")})
+    # Deliberately does NOT save: this hands the fields to the bio form, and the
+    # owner decides. It used to write straight to disk, which quietly threw away
+    # anything they'd typed and could redraw the connections map behind their back.
+    return jsonify({"info": found, "matched_label": found.get("matched_label")})
+
+
+@bp.post("/api/artist_info/ai_lookup")
+@auth.require_role("owner")
+def api_artist_ai_lookup():
+    """Research an artist with the same AI the placard editor uses. Returns fields
+    for review — never saves — plus the request/response trace."""
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name required"}), 400
+    trace = {}
+    try:
+        fields = ai.autofill_artist(name, hint=data.get("hint"), trace=trace)
+    except ai.AIError as e:
+        return jsonify({"error": str(e), "trace": trace}), 502
+    return jsonify({"fields": fields, "trace": trace})
 
 
 @bp.post("/api/artist_info/save")

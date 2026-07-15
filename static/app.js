@@ -876,9 +876,9 @@ function renderBio(name, info) {
   if (!info) {
     box.innerHTML = isOwner()
       ? '<div class="bio empty">' +
-        '<button id="bio-lookup" class="toolbtn">＋ Look up artist details</button>' +
-        '<button id="bio-edit" class="linkbtn">edit manually</button>' +
-        '<span id="bio-msg" class="bio-msg"></span></div>'
+        '<button id="bio-edit" class="toolbtn">＋ Add artist details</button>' +
+        '<span class="tiny">Life dates, movements and a biography — look them up or ' +
+        "type them yourself.</span></div>"
       : "";
     if (isOwner()) wireBio(name, info);
     return;
@@ -891,8 +891,7 @@ function renderBio(name, info) {
   if (place) facts.push('<span class="fact"><b>From</b>&nbsp; ' + esc(place) + "</span>");
   const movements = (info.movements || []).map((m) => '<span class="mv">' + esc(m) + "</span>").join("");
   const ctl = isOwner()
-    ? '<div class="bioctl"><button id="bio-edit" class="linkbtn">edit</button>' +
-      '<button id="bio-lookup" class="linkbtn">Re-fetch</button>' +
+    ? '<div class="bioctl"><button id="bio-edit" class="linkbtn">Edit &amp; look up</button>' +
       '<span id="bio-msg" class="bio-msg"></span></div>'
     : "";
   box.innerHTML =
@@ -905,39 +904,117 @@ function renderBio(name, info) {
 }
 
 function wireBio(name, info) {
-  const lk = $("#bio-lookup");
-  if (lk) lk.addEventListener("click", async () => {
-    const msg = $("#bio-msg");
-    msg.textContent = "Searching…";
-    lk.disabled = true;
-    try {
-      const r = await api("/api/artist_info/lookup", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      if (!r.info) { msg.textContent = "No match found — try editing manually."; lk.disabled = false; return; }
-      renderBio(name, r.info);
-    } catch (e) { msg.textContent = e.message; lk.disabled = false; }
-  });
   const ed = $("#bio-edit");
   if (ed) ed.addEventListener("click", () => renderBioForm(name, info || {}));
 }
 
+/* The bio form is the ONLY way a bio gets written, and looking one up lives
+   inside it: research fills the fields, you read them, Save persists. Nothing
+   reaches disk until you say so — a lookup used to overwrite the record on the
+   spot, which quietly discarded hand edits and could redraw the connections map
+   (which derives movement and place links from these very fields). */
 function renderBioForm(name, info) {
   const box = $("#biobar");
   const f = (id, label, val, extra) =>
     "<label>" + label + (extra || "") + '<input id="bf-' + id + '" value="' + esc(val || "") + '"></label>';
   box.innerHTML =
     '<form class="bioform" id="bioform">' +
-    '<div class="bf-row">' + f("born", "Born", info.born) + f("died", "Died", info.died) + "</div>" +
+    '<div class="ew-autobar">' +
+    '<button type="button" class="toolbtn" id="bf-auto">Look up with AI</button>' +
+    '<button type="button" class="linkbtn" id="bf-wd">Wikidata only</button>' +
+    '<span class="tiny ew-autohint">Researches this painter and fills the fields below — ' +
+    "review before saving.</span>" +
+    '<span class="formmsg" id="bf-auto-msg"></span></div>' +
+    '<label class="ew-hintrow">Which painter? ' +
+    '<span class="tiny">optional · sent with the AI lookup only — use it when the name ' +
+    "is ambiguous</span>" +
+    '<textarea id="bf-hint" rows="2" placeholder="e.g. the younger Brueghel, who copied ' +
+    'his father\'s compositions"></textarea></label>' +
+    '<div id="bf-trace-box"></div>' +
+    '<div class="bf-row">' + f("born", "Born", info.born, ' <span class="tiny">year</span>') +
+      f("died", "Died", info.died, ' <span class="tiny">year</span>') + "</div>" +
     '<div class="bf-row">' + f("birthplace", "Birthplace", info.birthplace) +
       f("nationality", "Nationality", info.nationality) + "</div>" +
-    f("mv", "Movements", (info.movements || []).join(", "), ' <span class="tiny">comma-separated</span>') +
-    f("desc", "Note", info.description) +
-    '<div class="bf-actions"><button type="submit" class="toolbtn">Save</button>' +
+    f("mv", "Movements", (info.movements || []).join(", "),
+      ' <span class="tiny">comma-separated · these cluster the connections map</span>') +
+    "<label>Biography<textarea id=\"bf-desc\" rows=\"8\">" + esc(info.description || "") +
+    "</textarea></label>" +
+    '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
     '<button type="button" id="bf-cancel" class="linkbtn">cancel</button>' +
     '<span id="bio-msg" class="bio-msg"></span></div></form>';
   $("#bf-cancel").addEventListener("click", () => reloadBio(name));
+
+  // The Wikidata pointers ride along invisibly; a lookup can improve them.
+  const refs = { wikidata_id: info.wikidata_id, wikipedia_url: info.wikipedia_url };
+
+  const flash = (el) => {
+    el.classList.add("justfilled");
+    setTimeout(() => el.classList.remove("justfilled"), 900);
+  };
+  /* Fill the form from a lookup and report what actually moved. Only fields the
+     lookup has an answer for are touched — a blank shouldn't wipe what's there —
+     and the message names the fields we set rather than every key in the payload
+     (Wikidata's carries `source` and `matched_label` too). */
+  const applyFields = (fx) => {
+    const done = [];
+    const fill = (id, v, label) => {
+      if (!v) return;
+      const el = $(id);
+      el.value = v;
+      flash(el);
+      done.push(label);
+    };
+    fill("#bf-born", fx.born, "born");
+    fill("#bf-died", fx.died, "died");
+    fill("#bf-birthplace", fx.birthplace, "birthplace");
+    fill("#bf-nationality", fx.nationality, "nationality");
+    fill("#bf-mv", (fx.movements || []).join(", "), "movements");
+    fill("#bf-desc", fx.description, "biography");
+    return done.length ? "Filled " + done.join(", ") + ". Review, then Save." : "";
+  };
+
+  $("#bf-auto").addEventListener("click", async () => {
+    const btn = $("#bf-auto"), msg = $("#bf-auto-msg"), label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Researching…";
+    msg.className = "formmsg"; msg.textContent = "";
+    try {
+      const hint = $("#bf-hint").value.trim();
+      const r = await api("/api/artist_info/ai_lookup", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(hint ? { name: name, hint: hint } : { name: name }),
+      });
+      $("#bf-trace-box").innerHTML = traceHtml(r.trace);
+      const said = applyFields(r.fields || {});
+      msg.className = said ? "formmsg ok" : "formmsg";
+      msg.textContent = said || "The AI found nothing for this one.";
+    } catch (e) {
+      msg.className = "formmsg err"; msg.textContent = e.message;
+      $("#bf-trace-box").innerHTML = traceHtml(e.body && e.body.trace);
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
+
+  // The free, structured fallback — no API credits, no invention. Worth keeping
+  // for when the AI is down or the answer looks wrong.
+  $("#bf-wd").addEventListener("click", async () => {
+    const btn = $("#bf-wd"), msg = $("#bf-auto-msg"), label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Searching Wikidata…";
+    msg.className = "formmsg"; msg.textContent = "";
+    try {
+      const r = await api("/api/artist_info/lookup", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name }),
+      });
+      if (!r.info) { msg.textContent = r.message || "No match on Wikidata."; return; }
+      if (r.info.wikidata_id) refs.wikidata_id = r.info.wikidata_id;
+      if (r.info.wikipedia_url) refs.wikipedia_url = r.info.wikipedia_url;
+      const said = applyFields(r.info);
+      msg.className = "formmsg ok";
+      msg.textContent = (said || "Nothing new from Wikidata.") +
+        (r.matched_label && r.matched_label !== name ? " (matched “" + r.matched_label + "”)" : "");
+    } catch (e) {
+      msg.className = "formmsg err"; msg.textContent = e.message;
+    } finally { btn.disabled = false; btn.textContent = label; }
+  });
   $("#bioform").addEventListener("submit", async (e) => {
     e.preventDefault();
     const payload = {
@@ -945,7 +1022,9 @@ function renderBioForm(name, info) {
       born: $("#bf-born").value, died: $("#bf-died").value,
       birthplace: $("#bf-birthplace").value, nationality: $("#bf-nationality").value,
       movements: $("#bf-mv").value, description: $("#bf-desc").value,
-      wikidata_id: info.wikidata_id, wikipedia_url: info.wikipedia_url,
+      // Not shown in the form, but a Wikidata lookup may have found better ones
+      // than the record started with.
+      wikidata_id: refs.wikidata_id, wikipedia_url: refs.wikipedia_url,
     };
     try {
       const r = await api("/api/artist_info/save", {

@@ -1017,7 +1017,8 @@ a.pl-artist:hover { color: #262019; }
 .modal.modal-wide { max-width: min(620px, 94vw); }
 .ew-autobar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .ew-autohint { flex: 1 1 180px; min-width: 0; }
-#ewform .justfilled { outline: 1px solid var(--gold); outline-offset: 1px; }
+/* Flash on a field a lookup just wrote, so you can see what changed under you. */
+.justfilled { outline: 1px solid var(--gold); outline-offset: 1px; }
 .modal-drag { cursor: move; user-select: none; }
 .ew-hintrow { margin-bottom: 4px; }
 .ew-hintrow textarea { margin-top: 6px; }

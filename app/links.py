@@ -23,7 +23,7 @@ import json
 import math
 import secrets
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from . import config, library, artistinfo
 
@@ -216,7 +216,24 @@ def _profiles():
             "year_min": years[0] if years else None,
             "year_max": years[-1] if years else None,
         }
+    _canon_primaries(out)
     return out
+
+
+def _canon_primaries(profiles):
+    """Collapse case-variants of a movement to one spelling.
+
+    Bios don't agree on capitalisation — Wikidata hands back "realism" where a
+    curator typed "Realism" — and the map groups clusters by this string. Left
+    alone, that draws two clusters with the same name and splits a school in half.
+    Most-used spelling wins; ties break alphabetically so the pick is stable."""
+    variants = defaultdict(Counter)
+    for p in profiles.values():
+        variants[p["primary"].casefold()][p["primary"]] += 1
+    canon = {cf: sorted(c.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+             for cf, c in variants.items()}
+    for p in profiles.values():
+        p["primary"] = canon[p["primary"].casefold()]
 
 
 def _common(works, field):
