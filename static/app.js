@@ -34,8 +34,8 @@ function applyTitle() {
 async function api(path, opts) {
   const r = await fetch(path, opts);
   if (!r.ok) {
-    let msg = r.status + " " + r.statusText;
-    try { const j = await r.json(); if (j.error) msg = j.error; } catch (e) {}
+    let msg = r.status + " " + r.statusText, body = null;
+    try { body = await r.json(); if (body && body.error) msg = body.error; } catch (e) {}
     // A 401 while we thought we were signed in means the session lapsed — drop to login.
     if (r.status === 401 && SESSION.user) {
       SESSION.user = null;
@@ -44,6 +44,7 @@ async function api(path, opts) {
     }
     const err = new Error(msg);
     err.status = r.status;
+    err.body = body;      // keep the payload: failures carry detail worth showing
     throw err;
   }
   return r.json();
@@ -1950,6 +1951,66 @@ function renderTestResult(r) {
 
 /* ============================== modal + toast ============================== */
 
+/* Drag a modal around by its heading. The placard editor sits on top of the very
+   painting you're reading, so it needs to get out of the way. Uses a transform so
+   the backdrop's flex centring stays intact. */
+function makeModalDraggable(m, handle) {
+  const box = m.el.querySelector(".modal");
+  if (!box || !handle) return;
+  let ox = 0, oy = 0, sx = 0, sy = 0;
+  const onMove = (e) => {
+    box.style.transform =
+      "translate(" + (ox + e.clientX - sx) + "px," + (oy + e.clientY - sy) + "px)";
+  };
+  const onUp = (e) => {
+    ox += e.clientX - sx; oy += e.clientY - sy;
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+  };
+  handle.classList.add("modal-drag");
+  handle.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || e.target.closest("button, input, select, textarea, a")) return;
+    sx = e.clientX; sy = e.clientY;
+    e.preventDefault();                       // don't start a text selection mid-drag
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+}
+
+/* Owner-facing detail of the last Auto fill call: the exact request and whatever
+   came back, so a bad key/model/endpoint is diagnosable without leaving the
+   editor. The API key is never part of the trace (see ai._chat). */
+function traceHtml(trace) {
+  if (!trace || !Object.keys(trace).length) return "";
+  const req = trace.request || {};
+  const head = [
+    "POST " + (trace.endpoint || "?"),
+    "model: " + (trace.model || "?") +
+      (req.temperature != null ? "    temperature: " + req.temperature : "") +
+      (req.max_tokens != null ? "    max_tokens: " + req.max_tokens : "") +
+      (trace.timeout != null ? "    timeout: " + trace.timeout + "s" : ""),
+    trace.status != null
+      ? "HTTP " + trace.status + (trace.ms != null ? "  ·  " + trace.ms + " ms" : "")
+      : (trace.ms != null ? "no response after " + trace.ms + " ms" : "no response"),
+  ];
+  if (trace.error) head.push("error: " + trace.error);
+  const parts = ['<pre class="tr-block">' + esc(head.join("\n")) + "</pre>"];
+  (req.messages || []).forEach((mm) => {
+    parts.push('<div class="tr-h">request · ' + esc(mm.role) + "</div>" +
+               '<pre class="tr-block">' + esc(mm.content) + "</pre>");
+  });
+  if (trace.response) {
+    parts.push('<div class="tr-h">raw response</div>' +
+               '<pre class="tr-block">' + esc(trace.response) + "</pre>");
+  }
+  if (trace.fields && Object.keys(trace.fields).length) {
+    parts.push('<div class="tr-h">parsed fields</div>' +
+               '<pre class="tr-block">' + esc(JSON.stringify(trace.fields, null, 1)) + "</pre>");
+  }
+  return '<details class="ew-trace"><summary>Request / response</summary>' +
+         parts.join("") + "</details>";
+}
+
 function modal(html) {
   const wrap = document.createElement("div");
   wrap.className = "modal-backdrop";
@@ -2147,6 +2208,7 @@ function editWorkDialog(w) {
     '<button type="button" class="toolbtn" id="ew-auto">Auto fill</button>' +
     '<span class="tiny ew-autohint">Researches this painting and fills the fields below — review before saving.</span>' +
     '<span class="formmsg" id="ew-auto-msg"></span></div>' +
+    '<div id="ew-trace-box"></div>' +
     "<label>Title<input id=\"ew-title\" autocomplete=\"off\"></label>" +
     "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
     "<label>Date <span class=\"tiny\">optional</span><input id=\"ew-date\" autocomplete=\"off\"></label>" +
@@ -2180,6 +2242,8 @@ function editWorkDialog(w) {
   m.el.querySelector(".modal").classList.add("modal-wide");
   const q = (id) => m.el.querySelector(id);
   const ed = q("#ew-desc");
+  makeModalDraggable(m, m.el.querySelector("h2"));
+  const showTrace = (t) => { q("#ew-trace-box").innerHTML = traceHtml(t); };
 
   /* ---- format bar (description) ---- */
   try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
@@ -2240,6 +2304,7 @@ function editWorkDialog(w) {
         ed.innerHTML = esc(f.description).replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>");
         flash(ed);
       }
+      showTrace(r.trace);
       const names = Object.keys(f);
       msg.className = "formmsg ok";
       msg.textContent = names.length
@@ -2247,6 +2312,7 @@ function editWorkDialog(w) {
         : "Nothing found for this one.";
     } catch (e) {
       msg.className = "formmsg err"; msg.textContent = e.message;
+      showTrace(e.body && e.body.trace);   // the failing call is the one worth reading
     } finally { btn.disabled = false; btn.textContent = label; }
   });
 

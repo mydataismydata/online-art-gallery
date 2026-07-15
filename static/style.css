@@ -415,6 +415,24 @@ a.pl-artist:hover { text-decoration: underline; }
 .ew-autohint { flex: 1 1 180px; min-width: 0; }
 #ewform .justfilled { outline: 2px solid var(--accent); }
 /* mini format bar + rich description editor */
+/* draggable modal heading */
+.modal-drag { cursor: move; user-select: none; }
+
+/* Auto fill request/response detail */
+.ew-trace { margin: 2px 0 12px; }
+.ew-trace summary { cursor: pointer; color: var(--dim); font-size: 12.5px; }
+.ew-trace summary:hover { color: var(--accent); }
+.tr-h {
+  color: var(--dim); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .06em; margin: 9px 0 3px;
+}
+.tr-block {
+  margin: 0; padding: 8px 10px; max-height: 210px; overflow: auto;
+  background: #14100d; border: 1px solid var(--line); border-radius: 4px;
+  font-family: monospace; font-size: 11.5px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word; color: var(--text);
+}
+
 /* style / genre / school side by side in the placard editor */
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 @media (max-width: 560px) { .row3 { grid-template-columns: 1fr; } }

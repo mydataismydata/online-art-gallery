@@ -512,11 +512,14 @@ def api_work_autofill(wid):
     w = library.scan()["by_id"].get(wid)
     if not w:
         abort(404)
+    # The trace goes back either way — a failed call is exactly when the owner
+    # needs to see what was sent and what came back.
+    trace = {}
     try:
-        fields = ai.autofill(w)
+        fields = ai.autofill(w, trace=trace)
     except ai.AIError as e:
-        return jsonify({"error": str(e)}), 502
-    return jsonify({"fields": fields})
+        return jsonify({"error": str(e), "trace": trace}), 502
+    return jsonify({"fields": fields, "trace": trace})
 
 
 # Batch "Get metadata": fill several works at once, ONE AI call per distinct

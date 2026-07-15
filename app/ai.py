@@ -16,6 +16,7 @@ The system prompt hard-codes the sourcing rules the owner asked for:
 import json
 import os
 import re
+import time
 
 import requests
 
@@ -140,35 +141,71 @@ def _extract_json(text):
     return parsed if isinstance(parsed, dict) else None
 
 
-def _chat(key, messages, max_tokens, timeout):
-    """POST a chat-completions request; return the assistant's text. Raises AIError."""
+_TRACE_MAX = 20000   # cap recorded bodies so a runaway reply can't bloat the response
+
+
+def _clip(s):
+    s = s or ""
+    return s if len(s) <= _TRACE_MAX else s[:_TRACE_MAX] + "\n… (truncated, %d chars total)" % len(s)
+
+
+def _chat(key, messages, max_tokens, timeout, trace=None):
+    """POST a chat-completions request; return the assistant's text. Raises AIError.
+
+    Pass a dict as `trace` to record exactly what was sent and what came back —
+    including on failure, which is when it matters. The API key is never recorded:
+    it travels in the Authorization header, which we deliberately don't copy in."""
     body = {"model": model(), "messages": messages, "temperature": 0.2, "max_tokens": max_tokens}
+    if trace is not None:
+        trace.update({"endpoint": ENDPOINT, "model": body["model"],
+                      "timeout": timeout, "request": body})
+
+    def fail(msg):
+        if trace is not None:
+            trace["error"] = msg
+        return AIError(msg)
+
+    t0 = time.time()
     try:
         r = requests.post(
             ENDPOINT,
             headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
             json=body, timeout=timeout)
     except requests.RequestException as e:
-        raise AIError("Couldn't reach the AI service: %s" % e)
+        if trace is not None:
+            trace["ms"] = int((time.time() - t0) * 1000)
+        raise fail("Couldn't reach the AI service: %s" % e)
+    if trace is not None:
+        trace["ms"] = int((time.time() - t0) * 1000)
+        trace["status"] = r.status_code
+        trace["response"] = _clip(r.text)
     if r.status_code in (401, 403):
-        raise AIError("The API rejected the key (%s). Check it in Settings." % r.status_code)
+        raise fail("The API rejected the key (%s). Check it in Settings." % r.status_code)
     if r.status_code == 402:
-        raise AIError("The AI account is out of credits (402).")
+        raise fail("The AI account is out of credits (402).")
     if r.status_code >= 400:
-        raise AIError("AI service error %s: %s" % (r.status_code, (r.text or "")[:200]))
+        raise fail("AI service error %s: %s" % (r.status_code, (r.text or "")[:200]))
     try:
-        return r.json()["choices"][0]["message"]["content"]
+        content = r.json()["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
-        raise AIError("Unexpected response from the AI service.")
+        raise fail("Unexpected response from the AI service.")
+    if trace is not None:
+        trace["content"] = _clip(content)
+    return content
 
 
-def autofill(work):
+def autofill(work, trace=None):
     """Ask the model for catalogue metadata for one work. Returns a dict of the
-    fields it could supply (schema keys: artist/title/date/medium/style/
-    description), omitting blanks. Raises AIError on any config/transport error."""
+    fields it could supply (schema keys: artist/title/date/medium/style/genre/
+    school/description), omitting blanks. Raises AIError on any config/transport
+    error. Pass a dict as `trace` to have the request/response recorded for the
+    editor's debug panel (see _chat)."""
     key = _api_key()
     if not key:
-        raise AIError("No API key set. Add one under Settings → Auto-fill.")
+        msg = "No API key set. Add one under Settings → Auto-fill."
+        if trace is not None:
+            trace["error"] = msg
+        raise AIError(msg)
 
     artist = work.get("artist") or ""
     title = work.get("title") or ""
@@ -182,16 +219,21 @@ def autofill(work):
     user += "\nReturn the JSON described in your instructions."
 
     content = _chat(key, [{"role": "system", "content": _SYSTEM},
-                          {"role": "user", "content": user}], 1500, _TIMEOUT)
+                          {"role": "user", "content": user}], 1500, _TIMEOUT, trace=trace)
     parsed = _extract_json(content)
     if parsed is None:
-        raise AIError("The AI didn't return usable JSON. Try again, or another model.")
+        msg = "The AI didn't return usable JSON. Try again, or another model."
+        if trace is not None:
+            trace["error"] = msg
+        raise AIError(msg)
 
     out = {}
     for f in _MODEL_FIELDS:
         v = parsed.get(f)
         if isinstance(v, str) and v.strip():
             out[_FIELD_MAP.get(f, f)] = v.strip()
+    if trace is not None:
+        trace["fields"] = out
     return out
 
 
