@@ -151,6 +151,12 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
   gap: 24px; flex-wrap: wrap;
 }
 .sechead h2, .sec { font: 400 27px var(--serif); color: var(--display2); }
+/* A heading that is also its own disclosure: the button carries the h2's type so
+   the section still reads as a heading, and the caret says it opens. */
+.dh { line-height: 1; }
+.dh .disclosure { font: inherit; color: var(--display2); gap: 10px; padding: 0; }
+.dh .disclosure:hover { color: var(--gold-hi); }
+.dh .caret { font-size: 13px; color: var(--faint); }
 .sechead .note { font: 400 12.5px var(--sans); color: var(--faint); }
 .sechead .titlegroup { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 .back { font: 400 12px var(--sans); letter-spacing: .08em; color: var(--faint); }
@@ -358,6 +364,12 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
   margin: 22px 0 0; max-width: 640px;
   font: 400 15.5px/1.75 var(--serif); color: #c9bda9; text-wrap: pretty;
 }
+/* Collapsed to an opening glimpse; the toggle below expands it. Clamping the box
+   rather than truncating the text means nothing is lost and no ellipsis is faked. */
+.artist-bio.clamped {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+#bio-more { margin-top: 12px; }
 /* The bio carries the same small allowlist as a placard: work titles arrive
    italicised, and paragraphs are a blank line (<br><br>) rather than <p>. */
 .artist-bio em, .artist-bio i, .bio-rich em, .bio-rich i { font-style: italic; }

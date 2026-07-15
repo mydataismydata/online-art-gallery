@@ -772,16 +772,20 @@ function connStripHtml(name, conns, total) {
     '<a class="conncard ghost" href="#/connections?artist=' + encodeURIComponent(name) + '">' +
     '<span class="star">✳</span><span class="glabel">See ' + esc(name) +
     " among all the painters<br>on the connections map</span></a>";
-  const explain = conns.length
-    ? "how " + esc(name.split(" ").pop()) + " relates to painters in this museum"
-    : "";
+  // Collapsed, the heading has to carry the whole story — say how many threads are
+  // folded away, not just that the section exists.
+  const explain = total
+    ? total + (total === 1 ? " link" : " links") + " to painters in this museum"
+    : "not yet connected to anyone here";
   return (
     '<section class="connstrip"><div class="sechead">' +
-    '<div class="titlegroup"><h2>Connections</h2>' +
-    (explain ? '<span class="note">' + explain + "</span>" : "") + "</div>" +
+    '<div class="titlegroup"><h2 class="dh">' +
+    '<button class="disclosure" id="conn-toggle" aria-expanded="false">' +
+    '<span class="lbl">Connections</span><span class="caret">▾</span></button></h2>' +
+    '<span class="note">' + esc(explain) + "</span></div>" +
     '<a class="conn-open" href="#/connections?artist=' + encodeURIComponent(name) + '">' +
     "Open the connections map →</a></div>" +
-    '<div class="conngrid">' + cards + ghost + "</div></section>"
+    '<div class="conngrid" id="conngrid" hidden>' + cards + ghost + "</div></section>"
   );
 }
 
@@ -833,7 +837,11 @@ async function artistView(name) {
       (life ? '<span class="artist-life">' + esc(life) + "</span>" : "") + "</div>" +
       (eyebrow ? '<p class="artist-eyebrow">' + esc(eyebrow) + "</p>" : "") +
       (info.description
-        ? '<div class="artist-bio">' + richDescHtml(info.description) + "</div>" : "") +
+        ? '<div class="artist-bio clamped" id="artist-bio">' +
+          richDescHtml(info.description) + "</div>" +
+          '<button class="disclosure" id="bio-more" aria-expanded="false" hidden>' +
+          '<span class="lbl">Read full biography</span><span class="caret">▾</span></button>'
+        : "") +
       ownerTools +
       '<div id="biobar" hidden></div>' +
       "</div>" +
@@ -852,11 +860,30 @@ async function artistView(name) {
 
     renderBio(name, ov.info);
     wireDisclosure("bio-toggle", "biobar");
+    wireDisclosure("conn-toggle", "conngrid");
+    wireBioClamp();
     if (isOwner()) { wireRename(name); wireRepoint(name); }
     bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
     const g = document.getElementById("grid");
     if (g) g.classList.add("show-dims");   // dimension pills only on the artist page
   } catch (e) { errbox(e); }
+}
+
+/* The bio opens clamped to a few lines — a researched one runs long enough to
+   push the paintings off the screen, which is the wrong way round for a museum.
+   The toggle only appears when there's actually more to read, so a one-line bio
+   doesn't sprout a control that does nothing. */
+function wireBioClamp() {
+  const bio = $("#artist-bio"), more = $("#bio-more");
+  if (!bio || !more) return;
+  if (bio.scrollHeight <= bio.clientHeight + 2) return;   // it all fits; no toggle
+  more.hidden = false;
+  more.addEventListener("click", () => {
+    const open = !bio.classList.toggle("clamped");
+    more.classList.toggle("open", open);
+    more.setAttribute("aria-expanded", String(open));
+    more.querySelector(".lbl").textContent = open ? "Show less" : "Read full biography";
+  });
 }
 
 /* ---------- disclosures (collapsible bio) ---------- */
