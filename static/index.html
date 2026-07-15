@@ -11,9 +11,13 @@
 <header id="topbar">
   <a class="brand" href="#/">
     <span class="brand-eyebrow" hidden></span>
-    <span class="brand-name">The Gallery</span>
+    <span class="brand-name full">The Gallery</span>
+    <span class="brand-name compact"></span>
   </a>
-  <div class="topright">
+  <button id="navtoggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="topright">
+    <span></span><span></span><span></span>
+  </button>
+  <div class="topright" id="topright">
     <nav id="mainnav"></nav>
     <div id="userbox"></div>
   </div>

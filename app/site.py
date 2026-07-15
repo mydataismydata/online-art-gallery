@@ -65,3 +65,21 @@ def set_eyebrow(text):
         data.pop("eyebrow", None)
     _save(data)
     return get_eyebrow()
+
+
+def get_short():
+    """A shorter title for narrow screens, where the full one eats the whole width.
+    Empty = fall back to the full title. Never names the tab — that stays the real
+    title, which is what a bookmark should say."""
+    return (_load().get("short") or "").strip()
+
+
+def set_short(text):
+    clean = _clean(text, 40)
+    data = _load()
+    if clean:
+        data["short"] = clean
+    else:
+        data.pop("short", None)
+    _save(data)
+    return get_short()

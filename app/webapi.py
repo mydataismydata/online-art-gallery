@@ -45,7 +45,7 @@ def api_session():
     user = auth.current_user()
     out = {"user": auth.public(user), "needs_setup": not auth.any_users(),
            "public": config.PUBLIC, "site_title": site.get_title(),
-           "site_eyebrow": site.get_eyebrow()}
+           "site_eyebrow": site.get_eyebrow(), "site_short": site.get_short()}
     # Footer totals, for whoever may actually see the gallery. Behind the login
     # wall we don't hand the size of the collection to an anonymous caller.
     if config.PUBLIC or user:
@@ -763,8 +763,11 @@ def api_site_save():
         out["site_title"] = site.set_title(data.get("title"))
     if "eyebrow" in data:
         out["site_eyebrow"] = site.set_eyebrow(data.get("eyebrow"))
+    if "short" in data:
+        out["site_short"] = site.set_short(data.get("short"))
     out.setdefault("site_title", site.get_title())
     out.setdefault("site_eyebrow", site.get_eyebrow())
+    out.setdefault("site_short", site.get_short())
     return jsonify(out)
 
 

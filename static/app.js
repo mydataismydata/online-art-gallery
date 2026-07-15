@@ -25,11 +25,16 @@ function setUser(u) {
 // Owner-set wordmark (from /api/session), shown in the tab + header.
 function siteTitle() { return (SESSION.site_title || "").trim() || "The Gallery"; }
 function siteEyebrow() { return (SESSION.site_eyebrow || "").trim(); }
+function siteShort() { return (SESSION.site_short || "").trim(); }
 function applyTitle() {
   const t = siteTitle(), eb = siteEyebrow();
-  document.title = t;
-  const name = document.querySelector(".brand-name");
+  document.title = t;                       // the tab always gets the real name
+  const name = document.querySelector(".brand-name.full");
   if (name) name.textContent = t;
+  // The phone wordmark. Falls back to the full title when no short one is set,
+  // so a narrow header is never blank — CSS picks which of the two is on show.
+  const compact = document.querySelector(".brand-name.compact");
+  if (compact) compact.textContent = siteShort() || t;
   // Two-tier wordmark: the eyebrow is optional, so collapse it when unset
   // rather than leaving an empty gold line above the title.
   const e = document.querySelector(".brand-eyebrow");
@@ -61,6 +66,28 @@ function renderFoot() {
    renders outside it so it can span the full width of the window. */
 function page(html, cls) {
   return '<div class="page' + (cls ? " " + cls : "") + '">' + html + "</div>";
+}
+
+/* The phone menu: nav and the user chip fold behind the three lines rather than
+   stacking down the page. Desktop never sees it — the panel is a media query. */
+function setNavOpen(open) {
+  const bar = $("#topbar"), btn = $("#navtoggle");
+  if (!bar || !btn) return;
+  bar.classList.toggle("navopen", open);
+  btn.setAttribute("aria-expanded", String(open));
+}
+
+function wireNavToggle() {
+  const btn = $("#navtoggle");
+  if (!btn) return;
+  btn.addEventListener("click", () => setNavOpen(!$("#topbar").classList.contains("navopen")));
+  // Tapping outside the open panel should shut it, but not a tap inside it.
+  document.addEventListener("click", (e) => {
+    if (!$("#topbar").classList.contains("navopen")) return;
+    if (e.target.closest("#topbar")) return;
+    setNavOpen(false);
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setNavOpen(false); });
 }
 
 async function api(path, opts) {
@@ -173,6 +200,7 @@ function route() {
   closeViewer();
   stopPolling();
   resetSel();
+  setNavOpen(false);          // a nav tap navigates AND closes the menu behind it
   // Split the query off first: #/connections?artist=…&mode=map deep-links the map.
   const raw = location.hash.slice(1) || "/";
   const qi = raw.indexOf("?");
@@ -212,6 +240,7 @@ async function boot() {
   applyTitle();
   renderNav();
   renderFoot();
+  wireNavToggle();
   route();
 }
 
@@ -2441,18 +2470,26 @@ function displayPanelHtml() {
     '<div class="siterow"><label for="opt-title">Second line</label>' +
     '<input id="opt-title" type="text" maxlength="80" value="' + esc(siteTitle()) + '">' +
     "</div>" +
+    '<div class="siterow"><label for="opt-short">Small title</label>' +
+    '<input id="opt-short" type="text" maxlength="40" value="' + esc(siteShort()) +
+    '" placeholder="e.g. MWA — optional, phones only"></div>' +
     '<div class="siterow"><span class="wmspacer"></span>' +
     '<button type="button" class="cta-btn" id="opt-title-save">Save</button>' +
     '<span class="formmsg" id="opt-title-msg"></span></div></div>' +
-    // A live sample of the actual header. Two fields with prose underneath didn't
-    // say "these are two separate lines" loudly enough — this does.
+    // Live samples of the real header. Two fields with prose underneath didn't say
+    // "these are two separate lines" loudly enough — this does, and the phone
+    // sample does the same job for the small title.
     '<div class="wmpreview"><span class="wmplabel">Your header</span>' +
     '<span class="brand"><span class="brand-eyebrow" id="wm-eb"></span>' +
-    '<span class="brand-name" id="wm-nm"></span></span></div></div>' +
+    '<span class="brand-name" id="wm-nm"></span></span>' +
+    '<span class="wmplabel">On a phone</span>' +
+    '<span class="brand"><span class="brand-eyebrow" id="wm-eb2"></span>' +
+    '<span class="brand-name" id="wm-sh"></span></span></div></div>' +
     '<p class="optnote">The two-tier wordmark in the top-left. Put one line in each box — ' +
-    "the top line is optional, and leaving it blank lets the second stand alone. The second " +
-    "line also names the browser tab. Set per server, so your public site can carry a " +
-    "different name from your local one.</p>" +
+    "the top line is optional, and leaving it blank lets the second stand alone. The small " +
+    "title replaces the second line on a phone, where a long name eats the whole width; " +
+    "leave it blank to use the full one. The browser tab always shows the full title. " +
+    "Set per server, so your public site can carry a different name from your local one.</p>" +
     '<label class="optrow" style="margin-top:24px"><input type="checkbox" id="opt-placards">' +
     "<span>Show placards in the viewer</span></label>" +
     '<p class="optnote">A museum-style label — piece name, artist, date and description — ' +
@@ -2467,33 +2504,37 @@ function wireDisplayPanel() {
   /* Show the wordmark as it will actually render, live, while you type — same
      markup and classes as the real header, so what you see is what you get. */
   const eb = document.getElementById("opt-eyebrow"), ti = document.getElementById("opt-title");
+  const sh = document.getElementById("opt-short");
   const pvEb = document.getElementById("wm-eb"), pvNm = document.getElementById("wm-nm");
-  if (eb && ti && pvEb && pvNm) {
+  const pvEb2 = document.getElementById("wm-eb2"), pvSh = document.getElementById("wm-sh");
+  if (eb && ti && sh && pvEb && pvNm && pvEb2 && pvSh) {
     const sync = () => {
-      const v = eb.value.trim();
-      pvEb.textContent = v;
-      pvEb.hidden = !v;
-      pvNm.textContent = ti.value.trim() || "The Gallery";
+      const v = eb.value.trim(), full = ti.value.trim() || "The Gallery";
+      [pvEb, pvEb2].forEach((e) => { e.textContent = v; e.hidden = !v; });
+      pvNm.textContent = full;
+      pvSh.textContent = sh.value.trim() || full;   // same fallback as the header
     };
-    eb.addEventListener("input", sync);
-    ti.addEventListener("input", sync);
+    [eb, ti, sh].forEach((el) => el.addEventListener("input", sync));
     sync();
   }
 
   const save = document.getElementById("opt-title-save");
   if (save) save.addEventListener("click", async () => {
     const inp = document.getElementById("opt-title");
-    const eb = document.getElementById("opt-eyebrow");
+    const ebi = document.getElementById("opt-eyebrow");
+    const shi = document.getElementById("opt-short");
     const msg = document.getElementById("opt-title-msg"); msg.className = "formmsg";
     try {
       const r = await api("/api/site", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: inp.value, eyebrow: eb.value }),
+        body: JSON.stringify({ title: inp.value, eyebrow: ebi.value, short: shi.value }),
       });
       SESSION.site_title = r.site_title;
       SESSION.site_eyebrow = r.site_eyebrow;
+      SESSION.site_short = r.site_short;
       inp.value = r.site_title;
-      eb.value = r.site_eyebrow;
+      ebi.value = r.site_eyebrow;
+      shi.value = r.site_short;
       applyTitle();
       renderFoot();
       msg.className = "formmsg ok"; msg.textContent = "Saved.";
