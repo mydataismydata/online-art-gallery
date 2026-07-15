@@ -71,6 +71,15 @@ def _clean_desc(desc):
     return (desc or "").strip()[:_MAX_DESC]
 
 
+def _owner_role(rec):
+    """The curator's role as it stands now, for the byline pill. Looked up rather
+    than frozen into the record: promote someone to Owner and their collections
+    should say so, and a deleted account shouldn't claim a role at all."""
+    from . import auth
+    u = auth.get_user(rec.get("owner") or "")
+    return u.get("role") if u else None
+
+
 # ---------------- work resolution ----------------
 
 def resolve_works(rec):
@@ -96,20 +105,24 @@ def can_edit(rec, user):
 # ---------------- views ----------------
 
 def summary(rec):
-    """Index-card view: cover + count reflect works that still exist."""
-    cover, count = None, 0
+    """Index-card view: covers + count reflect works that still exist. `covers` is
+    up to three ids — the card draws them as a mosaic; `cover` stays for callers
+    that just want the lead image."""
+    covers, count = [], 0
     for wid in rec.get("work_ids", []):
         if library.get(wid):
             count += 1
-            if cover is None:
-                cover = wid
+            if len(covers) < 3:
+                covers.append(wid)
     return {
         "id": rec.get("id"),
         "title": rec.get("title"),
         "description": rec.get("description") or "",
         "owner_display": rec.get("owner_display"),
+        "owner_role": _owner_role(rec),
         "count": count,
-        "cover": cover,
+        "cover": covers[0] if covers else None,
+        "covers": covers,
         "updated": rec.get("updated"),
     }
 
@@ -127,6 +140,18 @@ def detail(rec, user):
         "count": len(works),
         "can_edit": can_edit(rec, user),
     }
+
+
+def count_containing_artist(name):
+    """How many collections hold at least one work by this artist — the artist
+    page's 'IN COLLECTIONS' figure."""
+    key = (name or "").strip().casefold()
+    n = 0
+    for rec in _all():
+        if any((library.get(wid) or {}).get("artist", "").strip().casefold() == key
+               for wid in rec.get("work_ids", [])):
+            n += 1
+    return n
 
 
 def list_summaries(user=None):

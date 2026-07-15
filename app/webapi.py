@@ -1,8 +1,10 @@
 import os
+import time
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
-from . import config, library, thumbs, artistinfo, auth, collections, related, metadata, ai, publish, site
+from . import (config, library, thumbs, artistinfo, auth, collections,
+               metadata, ai, publish, site, links, threads)
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
                                 list_builtin_configs, set_builtin_config, reset_builtin_config)
@@ -41,8 +43,15 @@ def api_session():
     """How the SPA learns who (if anyone) is logged in, and whether the very
     first Owner still needs to be created. Public by design."""
     user = auth.current_user()
-    return jsonify({"user": auth.public(user), "needs_setup": not auth.any_users(),
-                    "public": config.PUBLIC, "site_title": site.get_title()})
+    out = {"user": auth.public(user), "needs_setup": not auth.any_users(),
+           "public": config.PUBLIC, "site_title": site.get_title(),
+           "site_eyebrow": site.get_eyebrow()}
+    # Footer totals, for whoever may actually see the gallery. Behind the login
+    # wall we don't hand the size of the collection to an anonymous caller.
+    if config.PUBLIC or user:
+        out["counts"] = {"artists": len(library.artists()),
+                         "works": len(library.all_works())}
+    return jsonify(out)
 
 
 @bp.post("/api/setup")
@@ -330,6 +339,21 @@ def api_facets():
     return jsonify(library.facets())
 
 
+@bp.get("/api/featured")
+@auth.require_view
+def api_featured():
+    """The work in the home hero. Rotates once a day rather than per request, so
+    the front page has a 'today's painting' rather than a slot machine — and
+    everyone looking at it sees the same one. Prefers works that have a
+    description: those are the ones with something to read on the other side."""
+    works = library.all_works()
+    if not works:
+        return jsonify({"work": None})
+    pool = [w for w in works if (w.get("description") or "").strip()] or works
+    day = int(time.strftime("%Y%j"))          # year + day-of-year
+    return jsonify({"work": pool[day % len(pool)]})
+
+
 @bp.get("/api/work/<wid>")
 @auth.require_view
 def api_work(wid):
@@ -371,6 +395,11 @@ def api_artist_rename():
             if info:
                 artistinfo.save(to, info)
                 break
+    # Curator notes and threads are written about a painter, not a folder — keep
+    # them attached through a rename or a merge.
+    for f in frm:
+        links.rename(f, to)
+        threads.rename(f, to)
     return jsonify({"moved": moved, "errors": errors, "to": to})
 
 
@@ -423,10 +452,142 @@ def api_artist_info():
     return jsonify({"name": name, "info": artistinfo.load(name)})
 
 
-@bp.get("/api/artist/<name>/related")
+@bp.get("/api/artist/<name>/overview")
 @auth.require_view
-def api_artist_related(name):
-    return jsonify({"related": related.related_artists(name)})
+def api_artist_overview(name):
+    """Everything the artist page's header needs in one round trip: the bio, the
+    figures for the stats card, and the strongest connections for the strip."""
+    conns = links.for_artist(name)
+    return jsonify({
+        "info": artistinfo.load(name),
+        "connections": conns[:3],
+        "stats": {
+            "connections": len(conns),
+            "collections": collections.count_containing_artist(name),
+        },
+    })
+
+
+# ==================== connections ====================
+
+@bp.get("/api/connections")
+@auth.require_view
+def api_connections():
+    return jsonify(links.graph())
+
+
+@bp.get("/api/artist/<name>/connections")
+@auth.require_view
+def api_artist_connections(name):
+    return jsonify({"connections": links.for_artist(name)})
+
+
+def _may_edit_link(rec, user):
+    """Owners edit anything; a curator may only revise their own note."""
+    if not user or not rec:
+        return False
+    if user.get("role") == "owner":
+        return True
+    return rec.get("created_by") == user.get("username")
+
+
+@bp.post("/api/links")
+@auth.require_role("curator")
+def api_links_create():
+    data = request.get_json(silent=True) or {}
+    try:
+        rec = links.create_link(
+            data.get("a"), data.get("b"), data.get("type"), data.get("note"),
+            directed=data.get("directed"),
+            created_by=(auth.current_user() or {}).get("username"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"link": rec})
+
+
+@bp.post("/api/links/<lid>")
+@auth.require_role("curator")
+def api_links_update(lid):
+    rec = links.get_link(lid)
+    if not rec:
+        return jsonify({"error": "No such link."}), 404
+    if not _may_edit_link(rec, auth.current_user()):
+        return jsonify({"error": "That link isn't yours to edit."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"link": links.update_link(lid, note=data.get("note"),
+                                                  directed=data.get("directed"))})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except LookupError as e:
+        return jsonify({"error": str(e)}), 404
+
+
+@bp.delete("/api/links/<lid>")
+@auth.require_role("curator")
+def api_links_delete(lid):
+    rec = links.get_link(lid)
+    if not rec:
+        return jsonify({"error": "No such link."}), 404
+    if not _may_edit_link(rec, auth.current_user()):
+        return jsonify({"error": "That link isn't yours to remove."}), 403
+    links.delete_link(lid)
+    return jsonify({"deleted": lid})
+
+
+# ---------------- threads ----------------
+
+@bp.get("/api/threads")
+@auth.require_view
+def api_threads():
+    user = auth.current_user()
+    out = []
+    for t in threads.list_threads():
+        out.append(dict(t, can_edit=_may_edit_link(t, user)))
+    return jsonify({"threads": out})
+
+
+@bp.post("/api/threads")
+@auth.require_role("curator")
+def api_threads_create():
+    data = request.get_json(silent=True) or {}
+    try:
+        rec = threads.create(data.get("title"), data.get("description"),
+                             data.get("steps"),
+                             created_by=(auth.current_user() or {}).get("username"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"thread": rec})
+
+
+@bp.post("/api/threads/<tid>")
+@auth.require_role("curator")
+def api_threads_update(tid):
+    rec = threads.get(tid)
+    if not rec:
+        return jsonify({"error": "No such thread."}), 404
+    if not _may_edit_link(rec, auth.current_user()):
+        return jsonify({"error": "That thread isn't yours to edit."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"thread": threads.update(tid, data.get("title"),
+                                                 data.get("description"), data.get("steps"))})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except LookupError as e:
+        return jsonify({"error": str(e)}), 404
+
+
+@bp.delete("/api/threads/<tid>")
+@auth.require_role("curator")
+def api_threads_delete(tid):
+    rec = threads.get(tid)
+    if not rec:
+        return jsonify({"error": "No such thread."}), 404
+    if not _may_edit_link(rec, auth.current_user()):
+        return jsonify({"error": "That thread isn't yours to remove."}), 403
+    threads.delete(tid)
+    return jsonify({"deleted": tid})
 
 
 @bp.post("/api/artist_info/lookup")
@@ -578,7 +739,14 @@ def api_stats():
 @auth.require_role("owner")
 def api_site_save():
     data = request.get_json(silent=True) or {}
-    return jsonify({"site_title": site.set_title(data.get("title"))})
+    out = {}
+    if "title" in data:
+        out["site_title"] = site.set_title(data.get("title"))
+    if "eyebrow" in data:
+        out["site_eyebrow"] = site.set_eyebrow(data.get("eyebrow"))
+    out.setdefault("site_title", site.get_title())
+    out.setdefault("site_eyebrow", site.get_eyebrow())
+    return jsonify(out)
 
 
 # ==================== publish / pull (public snapshot) ====================

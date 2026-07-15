@@ -19,16 +19,48 @@ function canCurate() { return role() === "owner" || role() === "curator"; }
 // authoring/download tools are gone (fed instead by the owner's Pull button).
 function isPublic() { return !!SESSION.public; }
 function setUser(u) {
-  SESSION = { user: u, needs_setup: false, public: SESSION.public, site_title: SESSION.site_title };
+  SESSION = Object.assign({}, SESSION, { user: u, needs_setup: false });
 }
 
-// Owner-set site name (from /api/session), shown in the tab + header brand.
+// Owner-set wordmark (from /api/session), shown in the tab + header.
 function siteTitle() { return (SESSION.site_title || "").trim() || "The Gallery"; }
+function siteEyebrow() { return (SESSION.site_eyebrow || "").trim(); }
 function applyTitle() {
-  const t = siteTitle();
+  const t = siteTitle(), eb = siteEyebrow();
   document.title = t;
-  const b = document.querySelector(".brand");
-  if (b) b.textContent = t;
+  const name = document.querySelector(".brand-name");
+  if (name) name.textContent = t;
+  // Two-tier wordmark: the eyebrow is optional, so collapse it when unset
+  // rather than leaving an empty gold line above the title.
+  const e = document.querySelector(".brand-eyebrow");
+  if (e) { e.textContent = eb; e.hidden = !eb; }
+  // Dropping the eyebrow makes the header shorter, and anything sticking to its
+  // underside (the Settings index) has to know by how much — otherwise the page
+  // scrolls through the gap between them.
+  const bar = $("#topbar");
+  if (bar) document.documentElement.style.setProperty("--topbar-h", bar.offsetHeight + "px");
+}
+
+/* The footer carries the wordmark and the size of the collection. Hidden until
+   there's a gallery to describe — the login wall and setup get a bare page. */
+function renderFoot() {
+  const f = $("#foot");
+  if (!f) return;
+  const c = SESSION.counts;
+  if (!c) { f.hidden = true; return; }
+  const parts = [c.artists + (c.artists === 1 ? " painter" : " painters"),
+                 c.works + (c.works === 1 ? " work" : " works"),
+                 "maintained with care"];
+  f.querySelector(".foot-mark").textContent =
+    [siteEyebrow(), siteTitle()].filter(Boolean).join(" ");
+  f.querySelector(".foot-stats").textContent = parts.join(" · ");
+  f.hidden = false;
+}
+
+/* Every view's content sits in this container; the home hero deliberately
+   renders outside it so it can span the full width of the window. */
+function page(html, cls) {
+  return '<div class="page' + (cls ? " " + cls : "") + '">' + html + "</div>";
 }
 
 async function api(path, opts) {
@@ -51,7 +83,7 @@ async function api(path, opts) {
 }
 
 function errbox(e) {
-  app.innerHTML = '<div class="errbox">Something went wrong: ' + esc(e.message || e) + "</div>";
+  app.innerHTML = page('<div class="errbox">Something went wrong: ' + esc(e.message || e) + "</div>");
 }
 
 /* Cache-busting image URLs: ?v=<mtime> names an exact rendering, so the browser
@@ -86,18 +118,18 @@ function renderNav() {
   // Public box: anyone may browse, so we still build the nav for anonymous visitors.
   if (!SESSION.user && !isPublic()) { nav.innerHTML = ""; ub.innerHTML = ""; return; }
   const links = [
-    ["#/", "home", "Artists", false],
-    ["#/browse/era", "browse", "Browse", false],
-    ["#/collections", "collections", "Collections", false],
+    ["#/", "home", "Artists"],
+    ["#/browse/era", "browse", "Browse"],
+    ["#/connections", "connections", "Connections"],
+    ["#/collections", "collections", "Collections"],
   ];
-  if (isOwner()) {
-    links.push(["#/settings", "settings", "Settings", false]);
-    // No "Add artist" on the public snapshot — even for the owner.
-    if (!isPublic()) links.push(["#/add", "add", "Add artist", true]);
-  }
-  nav.innerHTML = links.map(([href, key, label, cta]) =>
-    '<a href="' + href + '" data-nav="' + key + '"' + (cta ? ' class="cta"' : "") + ">" +
-    esc(label) + "</a>").join("");
+  if (isOwner()) links.push(["#/settings", "settings", "Settings"]);
+  // No "Add artist" on the public snapshot — even for the owner. It's a nav link
+  // now rather than a filled button: gold is wayfinding here, not a call to action.
+  if (isOwner() && !isPublic()) links.push(["#/add", "add", "Add artist"]);
+  nav.innerHTML = links.map(([href, key, label]) =>
+    '<a href="' + href + '" data-nav="' + key + '">' + esc(label) + "</a>").join("") +
+    '<span class="nav-div" aria-hidden="true"></span>';
   if (SESSION.user) {
     const u = SESSION.user;
     ub.innerHTML =
@@ -107,14 +139,28 @@ function renderNav() {
     $("#logout").addEventListener("click", doLogout);
   } else {
     // Anonymous visitor on the public site: offer sign-in (accounts are invite-only).
-    ub.innerHTML = '<a href="#/login" class="linkbtn signin">Sign in</a>';
+    ub.innerHTML = '<a href="#/login" class="signin">Sign in</a>';
   }
+}
+
+/* Re-read the session and repaint the chrome. Used after any sign-in/out, since
+   who you are decides the nav, and whether you may see the collection at all
+   decides whether the footer has counts to show. */
+async function refreshSession() {
+  try {
+    SESSION = await (await fetch("/api/session")).json();
+  } catch (e) {
+    SESSION = { user: null, needs_setup: false };
+  }
+  applyTitle();
+  renderNav();
+  renderFoot();
 }
 
 async function doLogout() {
   try { await api("/api/logout", { method: "POST" }); } catch (e) {}
   setUser(null);
-  renderNav();
+  await refreshSession();
   route();
 }
 
@@ -127,7 +173,12 @@ function route() {
   closeViewer();
   stopPolling();
   resetSel();
-  const segs = (location.hash.slice(1) || "/").split("/").filter(Boolean).map(decodeURIComponent);
+  // Split the query off first: #/connections?artist=…&mode=map deep-links the map.
+  const raw = location.hash.slice(1) || "/";
+  const qi = raw.indexOf("?");
+  const query = new URLSearchParams(qi < 0 ? "" : raw.slice(qi + 1));
+  const segs = (qi < 0 ? raw : raw.slice(0, qi))
+    .split("/").filter(Boolean).map(decodeURIComponent);
   // Accepting an invite works with no session, in either mode — check it first.
   if (segs[0] === "invite" && segs[1]) return acceptInviteView(segs[1]);
   // Auth gates: first-run setup, then the login wall — but the public snapshot
@@ -140,6 +191,8 @@ function route() {
   if (segs[0] === "login") return SESSION.user ? void goHome() : loginView();
   if (segs[0] === "artist" && segs[1]) return artistView(segs[1]);
   if (segs[0] === "browse") return browseView(segs[1] || "era", segs[2] || null);
+  if (segs[0] === "connections")
+    return connectionsView(query.get("artist"), query.get("mode"));
   if (segs[0] === "collections") return collectionsView();
   if (segs[0] === "collection" && segs[1]) return collectionView(segs[1]);
   // Adding art doesn't exist on the public box, even for the owner.
@@ -158,6 +211,7 @@ async function boot() {
   }
   applyTitle();
   renderNav();
+  renderFoot();
   route();
 }
 
@@ -193,7 +247,7 @@ function setupView() {
         body: JSON.stringify({ username: u, password: p }),
       });
       setUser(r.user);
-      renderNav();
+      await refreshSession();
       goHome();
     } catch (err) { msg.textContent = err.message; }
   });
@@ -218,7 +272,7 @@ function loginView() {
         body: JSON.stringify({ username: $("#li-user").value.trim(), password: $("#li-pass").value }),
       });
       setUser(r.user);
-      renderNav();
+      await refreshSession();
       goHome();
     } catch (err) { msg.textContent = err.message; }
   });
@@ -259,7 +313,7 @@ async function acceptInviteView(token) {
         body: JSON.stringify({ token: token, username: u, password: p }),
       });
       setUser(r.user);
-      renderNav();
+      await refreshSession();
       goHome();
     } catch (err) { msg.textContent = err.message; }
   });
@@ -317,13 +371,15 @@ function collectionCtx(c) {
   return c.can_edit ? { actions: ["uncollect"], collectionId: c.id } : { actions: [] };
 }
 
-function worksSection(works, showArtist, ctx) {
+/* `head` puts the Select control on the section heading's baseline (the artist
+   page); without one the toolbar just sits above the grid. */
+function worksSection(works, showArtist, ctx, head) {
   ctx = ctx || { actions: [] };
   const tools = ctx.actions.length
     ? '<div class="worktools"><button id="selbtn" class="toolbtn">Select</button><span id="selctl"></span></div>'
     : "";
   return (
-    tools +
+    (head ? '<div class="sechead">' + head + tools + "</div>" : tools) +
     '<div class="masonry" id="grid">' +
     works.map((w, i) => workFigure(w, i, showArtist)).join("") + "</div>"
   );
@@ -583,85 +639,213 @@ async function addIdsToCollection(cid, ids, m, rerender) {
 
 /* ============================== home / artists ============================== */
 
+/* Years an artist is represented by, e.g. "1872–1892" or a bare "1617". */
+function artistYears(a) {
+  if (!a.year_min) return "";
+  return a.year_max && a.year_max !== a.year_min ? a.year_min + "–" + a.year_max : String(a.year_min);
+}
+
+function artistCardHtml(a) {
+  const yr = artistYears(a);
+  return (
+    '<a class="artist-card" href="#/artist/' + encodeURIComponent(a.name) + '">' +
+      '<span class="cover"><img src="/thumb/' + a.cover + '" loading="lazy" alt=""></span>' +
+      '<span class="meta"><span class="name">' + esc(a.name) + "</span>" +
+      '<span class="sub">' + a.count + (a.count === 1 ? " work" : " works") +
+      (yr ? " · " + yr : "") + "</span></span></a>"
+  );
+}
+
+/* The hero: one painting, full-bleed, with the page's only gold call to action.
+   Falls back to nothing at all rather than an empty band when the library has
+   no works to feature. */
+function heroHtml(w) {
+  if (!w) return "";
+  const meta = [w.artist, w.date || w.year, w.medium].filter(Boolean).join(" · ");
+  return (
+    '<section class="hero">' +
+    '<img src="' + viewSrc(w) + '" alt="">' +
+    '<div class="scrim-x"></div><div class="scrim-y"></div>' +
+    '<div class="hero-in">' +
+    '<span class="hero-eyebrow">From the collection</span>' +
+    '<a class="hero-title" href="#/artist/' + encodeURIComponent(w.artist || "") +
+      '" id="hero-work">' + esc(w.title) + "</a>" +
+    (meta ? '<span class="hero-meta">' + esc(meta) + "</span>" : "") +
+    '<a class="hero-cta" href="#/artist/' + encodeURIComponent(w.artist || "") +
+      '" id="hero-cta">View this work →</a>' +
+    "</div></section>"
+  );
+}
+
+const SORTS = {
+  az: ["Sorted A–Z", (a, b) => a.name.localeCompare(b.name)],
+  works: ["Most works", (a, b) => b.count - a.count || a.name.localeCompare(b.name)],
+  early: ["Earliest first", (a, b) => (a.year_min || 9999) - (b.year_min || 9999)],
+};
+
 async function homeView() {
   setNav("home");
   try {
-    const d = await api("/api/artists");
+    const [d, feat] = await Promise.all([
+      api("/api/artists"),
+      api("/api/featured").catch(() => ({ work: null })),
+    ]);
     if (!d.artists.length) {
-      app.innerHTML =
+      app.innerHTML = page(
         '<div class="emptybox"><div class="big">The gallery is empty.</div>' +
         (isOwner()
           ? 'Run <code>python import_samples.py</code> to bring in your starter paintings, ' +
             'copy images into the <code>library/</code> folder, or ' +
             '<a href="#/add">download an artist’s works</a>.'
-          : "Ask an Owner to add some artworks.") +
-        "</div>";
+          : "Ask an Owner to add some artworks.") + "</div>");
       return;
     }
-    const cards = d.artists.map((a) => {
-      const yr = a.year_min
-        ? (a.year_max && a.year_max !== a.year_min ? a.year_min + "–" + a.year_max : a.year_min)
-        : "";
-      return (
-        '<a class="artist-card" href="#/artist/' + encodeURIComponent(a.name) + '">' +
-          '<div class="cover"><img src="/thumb/' + a.cover + '" loading="lazy" alt=""></div>' +
-          '<div class="meta"><span class="name">' + esc(a.name) + "</span>" +
-          '<span class="sub">' + a.count + (a.count === 1 ? " work" : " works") +
-          (yr ? " · " + yr : "") + "</span></div></a>"
-      );
-    }).join("");
+    const sortOpts = Object.keys(SORTS).map((k) =>
+      '<option value="' + k + '">' + esc(SORTS[k][0]) + "</option>").join("");
     const addCard = isOwner()
       ? '<a class="artist-card add-card" href="#/add">' +
-        '<div class="cover"><span>+</span></div>' +
-        '<div class="meta"><span class="name">Add artist</span>' +
-        '<span class="sub">download new works</span></div></a>'
+        '<span class="cover"><span>+</span></span>' +
+        '<span class="meta"><span class="name">Add artist</span>' +
+        '<span class="sub">download new works</span></span></a>'
       : "";
-    app.innerHTML =
-      '<div class="pagehead"><h1>Artists</h1><p class="sub">' +
-      d.artists.length + " painters · " + d.total_works + " works</p></div>" +
-      '<div class="artist-grid">' + cards + addCard + "</div>";
+    app.innerHTML = heroHtml(feat.work) + page(
+      '<div class="pagehead"><div><h1>Artists</h1>' +
+      '<p class="sub" id="acount"></p></div>' +
+      '<div class="headact">' +
+      '<label class="searchbox"><span class="mag" aria-hidden="true">⌕</span>' +
+      '<input id="asearch" type="search" placeholder="Search artists…" autocomplete="off" ' +
+      'aria-label="Search artists"></label>' +
+      '<select class="sortctl" id="asort" aria-label="Sort artists">' + sortOpts + "</select>" +
+      "</div></div>" +
+      '<div class="artist-grid" id="agrid"></div>');
+
+    // The hero's two links both point at the painting; open it in the viewer
+    // rather than just landing on the artist page.
+    if (feat.work) {
+      ["#hero-work", "#hero-cta"].forEach((sel) => {
+        const el = $(sel);
+        if (el) el.addEventListener("click", (e) => { e.preventDefault(); openViewer([feat.work], 0); });
+      });
+    }
+
+    const search = $("#asearch"), sort = $("#asort"), grid = $("#agrid"), count = $("#acount");
+    const paint = () => {
+      const q = search.value.trim().toLowerCase();
+      const list = (q ? d.artists.filter((a) => a.name.toLowerCase().includes(q)) : d.artists)
+        .slice().sort(SORTS[sort.value][1]);
+      grid.innerHTML = list.map(artistCardHtml).join("") + (q ? "" : addCard);
+      count.textContent = q
+        ? list.length + (list.length === 1 ? " painter" : " painters") + " matching “" + search.value.trim() + "”"
+        : d.artists.length + " painters · " + d.total_works + " works";
+    };
+    search.addEventListener("input", paint);
+    sort.addEventListener("change", paint);
+    paint();
   } catch (e) { errbox(e); }
+}
+
+/* One card in the artist page's Connections strip. Curator notes are quoted and
+   set in italic serif — a human wrote them; derived links are plain sans, because
+   they're the machine reporting a fact. */
+function connCardHtml(c) {
+  const t = LINK_TYPES[c.type] || LINK_TYPES.movement;
+  const note = c.type === "curator" ? "“" + esc(c.note) + "”" : esc(c.note);
+  return (
+    '<a class="conncard" href="#/connections?artist=' + encodeURIComponent(c.other) +
+      '" style="' + typeVars(t) + '">' +
+    '<img src="/thumb/' + c.cover + '" loading="lazy" alt="">' +
+    '<span class="cbody">' +
+    '<span class="ctype"><span class="cdot" style="background:' + t.color + '"></span>' +
+    '<span class="clabel" style="color:' + t.color + '">' + esc(t.label || c.type) + "</span></span>" +
+    '<span class="cname">' + esc(c.other) + "</span>" +
+    (c.note ? '<span class="cnote' + (c.type === "curator" ? " quoted" : "") + '">' + note + "</span>" : "") +
+    "</span></a>"
+  );
+}
+
+function connStripHtml(name, conns, total) {
+  const cards = conns.map(connCardHtml).join("");
+  const ghost =
+    '<a class="conncard ghost" href="#/connections?artist=' + encodeURIComponent(name) + '">' +
+    '<span class="star">✳</span><span class="glabel">See ' + esc(name) +
+    " among all the painters<br>on the connections map</span></a>";
+  const explain = conns.length
+    ? "how " + esc(name.split(" ").pop()) + " relates to painters in this museum"
+    : "";
+  return (
+    '<section class="connstrip"><div class="sechead">' +
+    '<div class="titlegroup"><h2>Connections</h2>' +
+    (explain ? '<span class="note">' + explain + "</span>" : "") + "</div>" +
+    '<a class="conn-open" href="#/connections?artist=' + encodeURIComponent(name) + '">' +
+    "Open the connections map →</a></div>" +
+    '<div class="conngrid">' + cards + ghost + "</div></section>"
+  );
 }
 
 async function artistView(name) {
   setNav("home");
   try {
-    const [d, infoResp, relResp] = await Promise.all([
+    const [d, ov] = await Promise.all([
       api("/api/works?artist=" + encodeURIComponent(name)),
-      api("/api/artist_info?name=" + encodeURIComponent(name)).catch(() => ({ info: null })),
-      api("/api/artist/" + encodeURIComponent(name) + "/related").catch(() => ({ related: [] })),
+      api("/api/artist/" + encodeURIComponent(name) + "/overview")
+        .catch(() => ({ info: null, connections: [], stats: {} })),
     ]);
     const works = d.works;
     if (!works.length) {
-      app.innerHTML = '<div class="emptybox">No works found for ' + esc(name) + ".</div>";
+      app.innerHTML = page('<div class="emptybox">No works found for ' + esc(name) + ".</div>");
       return;
     }
+    const info = ov.info || {}, stats = ov.stats || {};
     const years = works.map((w) => w.year).filter(Boolean);
     const span = years.length
       ? Math.min.apply(null, years) + (years.length > 1 ? "–" + Math.max.apply(null, years) : "")
       : "";
-    const ownerBtns = isOwner()
-      ? '<button class="linkbtn" id="rename-btn" title="Edit this artist’s name.">edit</button>' +
-        '<button class="linkbtn" id="repoint-btn" title="Merge this artist into another artist already in your library — fixes the same painter appearing under different name spellings.">repoint to artist</button>'
+    const life = [info.born, info.died].filter(Boolean).join("–");
+    // nationality · movement · city — the one gold line on the page.
+    const eyebrow = [info.nationality, (info.movements || [])[0], info.birthplace]
+      .filter(Boolean).join(" · ");
+    const ownerTools = isOwner()
+      ? '<div class="ownertools"><span class="otlabel">Owner tools</span>' +
+        '<button class="linkbtn" id="rename-btn" title="Edit this artist’s name.">Edit artist</button>' +
+        '<button class="linkbtn" id="repoint-btn" title="Merge this artist into another artist already in your library — fixes the same painter appearing under different name spellings.">Repoint</button>' +
+        '<button class="linkbtn" id="bio-toggle" aria-expanded="false">Bio &amp; details<span class="caret">▾</span></button>' +
+        "</div>"
+      : (info.movements || info.born
+          ? '<button class="disclosure" id="bio-toggle" aria-expanded="false">' +
+            'Read full biography<span class="caret">▾</span></button>'
+          : "");
+    const addMore = (isOwner() && !isPublic())
+      ? '<a class="cta-btn" href="#/add/' + encodeURIComponent(name) + '">+ Add more from this artist</a>'
       : "";
-    const addMore = isOwner()
-      ? ' <a class="inline-add" href="#/add/' + encodeURIComponent(name) + '">+ Add more from this artist</a>'
-      : "";
-    const bioToggle = (infoResp.info || isOwner())
-      ? '<button class="disclosure" id="bio-toggle" aria-expanded="false">Bio<span class="caret">▾</span></button>'
-      : "";
-    app.innerHTML =
-      '<div class="pagehead"><a class="back" href="#/">← All artists</a>' +
+    const statRow = (k, v, lead) =>
+      '<div class="statrow' + (lead ? " lead" : "") + '"><span class="k">' + k +
+      '</span><span class="v">' + esc(String(v)) + "</span></div>";
+
+    app.innerHTML = page(
+      '<a class="back" href="#/">← All artists</a>' +
+      '<section class="artist-head"><div>' +
       '<div class="artist-title" id="artist-title"><h1>' + esc(name) + "</h1>" +
-      ownerBtns + bioToggle + "</div>" +
-      '<p class="sub">' + works.length + (works.length === 1 ? " work" : " works") +
-      (span ? " · " + span : "") + addMore + "</p>" +
-      '<div id="biobar" hidden></div></div>' +
-      relatedDisclosureHtml(relResp.related) +
-      worksSection(works, false, browseCtx({ artist: name }));
-    renderBio(name, infoResp.info);
+      (life ? '<span class="artist-life">' + esc(life) + "</span>" : "") + "</div>" +
+      (eyebrow ? '<p class="artist-eyebrow">' + esc(eyebrow) + "</p>" : "") +
+      (info.description ? '<p class="artist-bio">' + esc(info.description) + "</p>" : "") +
+      ownerTools +
+      '<div id="biobar" hidden></div>' +
+      "</div>" +
+      '<div class="statcard">' +
+      statRow("Works", works.length, true) +
+      (span ? statRow("Dates in collection", span) : "") +
+      statRow("In collections", stats.collections || 0) +
+      statRow("Connections", stats.connections || 0) +
+      addMore + "</div></section>" +
+      connStripHtml(name, ov.connections || [], stats.connections || 0) +
+      '<section class="works-sec">' +
+      worksSection(works, false, browseCtx({ artist: name }),
+        "<h2>Works <span class=\"note\">" + works.length +
+        (span ? " · " + span : "") + "</span></h2>") +
+      "</section>", "tight");
+
+    renderBio(name, ov.info);
     wireDisclosure("bio-toggle", "biobar");
-    wireDisclosure("rel-toggle", "rel-strip");
     if (isOwner()) { wireRename(name); wireRepoint(name); }
     bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
     const g = document.getElementById("grid");
@@ -669,7 +853,7 @@ async function artistView(name) {
   } catch (e) { errbox(e); }
 }
 
-/* ---------- disclosures (collapsible bio + related) ---------- */
+/* ---------- disclosures (collapsible bio) ---------- */
 
 /* Toggle a hidden panel from a caret button; rotates the caret when open. */
 function wireDisclosure(toggleId, panelId) {
@@ -682,23 +866,6 @@ function wireDisclosure(toggleId, panelId) {
     btn.classList.toggle("open", willOpen);
     btn.setAttribute("aria-expanded", String(willOpen));
   });
-}
-
-function relatedDisclosureHtml(list) {
-  if (!list || !list.length) return "";
-  const cards = list.map((a) =>
-    '<a class="rel-card" href="#/artist/' + encodeURIComponent(a.name) + '">' +
-      '<div class="rel-cover"><img src="/thumb/' + a.cover + '" loading="lazy" alt=""></div>' +
-      '<div class="rel-meta"><span class="rel-name">' + esc(a.name) + "</span>" +
-      (a.why ? '<span class="rel-why">' + esc(a.why) + "</span>" : "") +
-      "</div></a>"
-  ).join("");
-  return (
-    '<div class="related">' +
-    '<button class="disclosure rel-toggle" id="rel-toggle" aria-expanded="false">' +
-    "Related artists<span class=\"caret\">▾</span></button>" +
-    '<div class="rel-strip" id="rel-strip" hidden>' + cards + "</div></div>"
-  );
 }
 
 /* ---------- artist bio (movements, dates, birthplace) ---------- */
@@ -926,11 +1093,37 @@ function wireRepoint(name) {
 const FACETS = [["era", "Era"], ["medium", "Medium"], ["style", "Style"],
                 ["genre", "Genre"], ["school", "School"]];
 
+/* ============================== connections ============================== */
+
+/* The five kinds of thread. Mirrors links.TYPE_META on the server; the colours
+   are design tokens and also appear in style.css, so they're stated where each
+   surface draws them rather than plumbed through every response. */
+const LINK_TYPES = {
+  movement:   { label: "Movement",     color: "#7f96ad", dash: "",    w: 1.4 },
+  influence:  { label: "Influence",    color: "#c2a061", dash: "",    w: 1.9 },
+  place_time: { label: "Place & time", color: "#7fa389", dash: "7 5", w: 1.4 },
+  subject:    { label: "Subject",      color: "#a884a3", dash: "2 5", w: 1.6 },
+  curator:    { label: "Curator note", color: "#bf7e63", dash: "",    w: 2.4 },
+};
+const LINK_ORDER = ["movement", "influence", "place_time", "subject", "curator"];
+
+/* #rrggbb + alpha -> #rrggbbaa, so a type's colour can be handed to CSS at the
+   design's exact opacities without keeping a parallel rgba() table. */
+function hexA(hex, alpha) {
+  return hex + Math.round(alpha * 255).toString(16).padStart(2, "0");
+}
+function typeVars(t) {
+  return "--tc:" + t.color + ";--tcb:" + hexA(t.color, .55) + ";--tcbg:" + hexA(t.color, .05);
+}
+
 async function browseView(facet, value) {
   setNav("browse");
   if (!FACETS.some((f) => f[0] === facet)) facet = "era";
   try {
-    const facets = await api("/api/facets");
+    const [facets, arts] = await Promise.all([
+      api("/api/facets"),
+      api("/api/artists").catch(() => ({ total_works: null })),
+    ]);
     const tabs = FACETS.map((f) =>
       '<a href="#/browse/' + f[0] + '" class="' + (f[0] === facet ? "active" : "") + '">' + f[1] + "</a>"
     ).join("");
@@ -939,36 +1132,529 @@ async function browseView(facet, value) {
       '" href="#/browse/' + facet + "/" + encodeURIComponent(v.value) + '">' +
       esc(v.value) + ' <span class="n">' + v.count + "</span></a>"
     ).join("");
-    let body = '<div class="emptybox">Pick a ' + facet + " above to see its works.</div>";
-    app.innerHTML =
-      '<div class="pagehead"><h1>Browse</h1></div>' +
+    const sub = arts.total_works != null
+      ? arts.total_works + " works across the collection" : "";
+    app.innerHTML = page(
+      '<div class="pagehead"><div><h1>Browse</h1>' +
+      (sub ? '<p class="sub">' + esc(sub) + "</p>" : "") + "</div></div>" +
       '<div class="facet-tabs">' + tabs + "</div>" +
-      '<div class="chips">' + chips + "</div><div id='browse-body'>" + body + "</div>";
-    if (value) {
-      const d = await api("/api/works?" + facet + "=" + encodeURIComponent(value));
-      const works = d.works;
-      $("#browse-body").innerHTML = works.length
-        ? '<div class="pagehead"><p class="sub">' + esc(value) + " · " +
-          works.length + (works.length === 1 ? " work" : " works") + "</p></div>" +
-          worksSection(works, true, browseCtx())
-        : '<div class="emptybox">Nothing here yet.</div>';
-      if (works.length) bindWorks(works, true, () => browseView(facet, value), browseCtx());
+      '<div class="chips">' + chips + '<span class="chip-summary" id="browse-sum"></span></div>' +
+      "<div id='browse-body'></div>");
+    const body = $("#browse-body");
+    if (!value) {
+      body.innerHTML = '<div class="emptybox">Pick a ' + esc(facet) + " above to see its works.</div>";
+      return;
     }
+    const d = await api("/api/works?" + facet + "=" + encodeURIComponent(value));
+    const works = d.works;
+    // The chip already names the filter; the summary line says how much of the
+    // collection it turned out to be.
+    $("#browse-sum").textContent = works.length
+      ? esc(value) + " — " + works.length + (works.length === 1 ? " work" : " works")
+      : "";
+    body.innerHTML = works.length
+      ? worksSection(works, true, browseCtx())
+      : '<div class="emptybox">Nothing here yet.</div>';
+    if (works.length) bindWorks(works, true, () => browseView(facet, value), browseCtx());
   } catch (e) { errbox(e); }
+}
+
+/* ============================== connections page ============================== */
+
+/* Survives re-renders within the page; `off` is the set of type filters the
+   viewer has switched off, and selection deliberately persists across a mode
+   switch so you keep your painter when you jump from map to timeline. */
+const CONN = { mode: "map", sel: null, off: new Set(), data: null, threads: [] };
+const CONN_MODES = ["map", "timeline", "threads"];
+const SUBLINE = {
+  map: "every painter, five kinds of thread",
+  timeline: "four centuries, side by side",
+  threads: "curated paths through the collection",
+};
+
+function connNode(id) { return (CONN.data.nodes || []).find((n) => n.id === id); }
+function nodeSize(n) { return 44 + Math.min(n.works, 20) * 2; }   // 44–84px
+function activeLinks() { return CONN.data.links.filter((l) => !CONN.off.has(l.type)); }
+
+/* Keep the address bar shareable without re-routing: assigning location.hash
+   would fire hashchange and reload the whole graph on every click. */
+function connSyncUrl() {
+  const q = new URLSearchParams();
+  if (CONN.sel) q.set("artist", connNode(CONN.sel) ? connNode(CONN.sel).name : CONN.sel);
+  if (CONN.mode !== "map") q.set("mode", CONN.mode);
+  const s = q.toString();
+  history.replaceState(null, "", "#/connections" + (s ? "?" + s : ""));
+}
+
+function connSelect(id) {
+  CONN.sel = CONN.sel === id ? null : id;
+  connSyncUrl();
+  renderConnections();
+}
+
+async function connectionsView(artist, mode) {
+  setNav("connections");
+  if (CONN_MODES.includes(mode)) CONN.mode = mode;
+  try {
+    const [g, th] = await Promise.all([
+      api("/api/connections"),
+      api("/api/threads").catch(() => ({ threads: [] })),
+    ]);
+    CONN.data = g;
+    CONN.threads = th.threads || [];
+    if (artist) {
+      const hit = g.nodes.find((n) => n.name.toLowerCase() === artist.toLowerCase());
+      CONN.sel = hit ? hit.id : null;
+    }
+    if (CONN.sel && !connNode(CONN.sel)) CONN.sel = null;   // artist since removed
+    renderConnections();
+  } catch (e) { errbox(e); }
+}
+
+function renderConnections() {
+  const g = CONN.data;
+  if (!g.nodes.length) {
+    app.innerHTML = page(
+      '<div class="pagehead"><div><h1>Connections</h1></div></div>' +
+      '<div class="emptybox"><div class="big">No painters to connect yet.</div>' +
+      "Once the gallery has a few artists, this map draws the threads between them.</div>");
+    return;
+  }
+  const seg = CONN_MODES.map((m) =>
+    '<button type="button" data-mode="' + m + '" class="' + (CONN.mode === m ? "on" : "") + '">' +
+    m.charAt(0).toUpperCase() + m.slice(1) + "</button>").join("");
+  const chips = LINK_ORDER.map((t) => {
+    const meta = LINK_TYPES[t], on = !CONN.off.has(t);
+    const count = (g.types[t] || {}).count || 0;
+    return '<button type="button" class="typechip' + (on ? " on" : "") + '" data-type="' + t +
+      '" style="' + (on ? "border-color:" + hexA(meta.color, .47) + ";" : "") + '"' +
+      ' aria-pressed="' + on + '">' +
+      '<span class="dot"' + (on ? ' style="background:' + meta.color + '"' : "") + "></span>" +
+      esc(meta.label) + " <span class=\"tc-n\">" + count + "</span></button>";
+  }).join("");
+
+  const body = CONN.mode === "map" ? mapHtml()
+             : CONN.mode === "timeline" ? timelineHtml()
+             : threadsHtml();
+
+  app.innerHTML =
+    '<div class="conn-sub"><div class="titlegroup"><h1>Connections</h1>' +
+    '<span class="conn-subline">' + esc(SUBLINE[CONN.mode]) + "</span></div>" +
+    '<div class="conn-ctl"><div class="segmented">' + seg + "</div>" +
+    '<div class="typechips">' + chips + "</div></div></div>" +
+    '<div class="conn-body"><div class="conn-main">' + body + "</div>" +
+    '<aside class="conn-aside">' + asideHtml() + "</aside></div>";
+
+  app.querySelectorAll(".segmented button").forEach((b) =>
+    b.addEventListener("click", () => {
+      CONN.mode = b.dataset.mode; connSyncUrl(); renderConnections();
+    }));
+  app.querySelectorAll(".typechip").forEach((b) =>
+    b.addEventListener("click", () => {
+      const t = b.dataset.type;
+      if (CONN.off.has(t)) CONN.off.delete(t); else CONN.off.add(t);
+      renderConnections();
+    }));
+  app.querySelectorAll("[data-select]").forEach((el) =>
+    el.addEventListener("click", (e) => { e.preventDefault(); connSelect(el.dataset.select); }));
+  wireAside();
+}
+
+/* ---------- map ---------- */
+
+/* A quadratic bézier between two nodes, trimmed to each rim so the curve starts
+   at the edge of the portrait rather than under it. The control point is pushed
+   perpendicular to the chord — a straight line between every pair would collapse
+   parallel links on top of each other. */
+function edgePath(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+  const r1 = nodeSize(a) / 2 + 6, r2 = nodeSize(b) / 2 + 6;
+  const x1 = a.x + dx * (r1 / len), y1 = a.y + dy * (r1 / len);
+  const x2 = b.x - dx * (r2 / len), y2 = b.y - dy * (r2 / len);
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  const k = Math.min(60, Math.max(18, len * 0.13));
+  return "M " + x1 + " " + y1 + " Q " + (mx - dy / len * k) + " " + (my + dx / len * k) +
+         " " + x2 + " " + y2;
+}
+
+function mapHtml() {
+  const g = CONN.data, sel = CONN.sel;
+  const links = activeLinks();
+  const nbr = new Set();
+  if (sel) links.forEach((l) => {
+    if (l.a_id === sel) nbr.add(l.b_id);
+    if (l.b_id === sel) nbr.add(l.a_id);
+  });
+
+  const paths = links.map((l) => {
+    const a = connNode(l.a_id), b = connNode(l.b_id);
+    if (!a || !b) return "";
+    const t = LINK_TYPES[l.type] || LINK_TYPES.movement;
+    const touches = sel && (l.a_id === sel || l.b_id === sel);
+    const op = sel ? (touches ? .95 : .07) : (l.type === "curator" ? .7 : .45);
+    return '<path d="' + edgePath(a, b) + '" stroke="' + t.color + '" stroke-width="' + t.w +
+      '"' + (t.dash ? ' stroke-dasharray="' + t.dash + '"' : "") +
+      ' opacity="' + op + '" fill="none"></path>';
+  }).join("");
+
+  const nodes = g.nodes.map((n) => {
+    const s = nodeSize(n), isSel = sel === n.id;
+    const dim = sel && !isSel && !nbr.has(n.id);
+    return '<button type="button" class="map-node' + (isSel ? " sel" : "") + (dim ? " dim" : "") +
+      '" data-select="' + esc(n.id) + '" style="left:' + (n.x / g.canvas.w * 100).toFixed(2) +
+      "%;top:" + (n.y / g.canvas.h * 100).toFixed(2) + '%">' +
+      '<img src="/thumb/' + n.cover + '" loading="lazy" alt="" style="width:' + s +
+      "px;height:" + s + 'px">' +
+      '<span class="nlabel">' + esc(n.name) + "</span></button>";
+  }).join("");
+
+  const clusters = (g.clusters || []).map((c) =>
+    '<span class="cluster-label" style="left:' + (c.x / g.canvas.w * 100).toFixed(2) +
+    "%;top:" + (c.y / g.canvas.h * 100).toFixed(2) + '%">' + esc(c.label) + "</span>").join("");
+
+  return (
+    '<div class="map-canvas">' +
+    '<svg viewBox="0 0 ' + g.canvas.w + " " + g.canvas.h +
+    '" preserveAspectRatio="none" aria-hidden="true">' + paths + "</svg>" +
+    clusters + nodes + "</div>" +
+    '<p class="conn-caption">Click a painter to trace their connections · node size follows ' +
+    "works in the collection" +
+    (g.truncated ? " · showing the " + g.nodes.length + " best-connected of " +
+      (g.nodes.length + g.truncated) + " painters" : "") + "</p>"
+  );
+}
+
+/* ---------- timeline ---------- */
+
+function timelineHtml() {
+  const g = CONN.data;
+  const dated = g.nodes.filter((n) => n.born && n.died);
+  if (!dated.length) {
+    return '<div class="emptybox"><div class="big">No life dates yet.</div>' +
+      "The timeline plots birth and death years — look an artist up from their page " +
+      "(<b>Owner tools → Bio &amp; details</b>) and they'll appear here.</div>";
+  }
+  const Y0 = Math.floor(Math.min.apply(null, dated.map((n) => n.born)) / 50) * 50;
+  const Y1 = Math.ceil(Math.max.apply(null, dated.map((n) => n.died)) / 50) * 50;
+  const span = Math.max(1, Y1 - Y0);
+  const pct = (y) => ((y - Y0) / span * 100).toFixed(2);
+
+  let ticks = "";
+  for (let y = Y0; y <= Y1; y += 50) {
+    ticks += '<span class="tl-line" style="left:' + pct(y) + '%"></span>' +
+             '<span class="tl-year" style="left:' + pct(y) + '%">' + y + "</span>";
+  }
+  // Group under movement headings, oldest movement first — the same reading order
+  // the map lays out left-to-right.
+  const groups = {};
+  dated.forEach((n) => (groups[n.movement] = groups[n.movement] || []).push(n));
+  const order = Object.keys(groups).sort((a, b) =>
+    Math.min.apply(null, groups[a].map((n) => n.born)) -
+    Math.min.apply(null, groups[b].map((n) => n.born)) || a.localeCompare(b));
+
+  const rows = order.map((m) =>
+    '<div class="tl-head">' + esc(m) + "</div>" +
+    groups[m].slice().sort((a, b) => a.born - b.born).map((n) => {
+      const life = Math.max(1, n.died - n.born);
+      const tick = n.year_min
+        ? '<span class="tl-tick" style="left:' + ((n.year_min - n.born) / life * 100).toFixed(2) +
+          "%;width:" + Math.max(1.5, ((n.year_max - n.year_min) / life * 100)).toFixed(2) + '%"></span>'
+        : "";
+      return '<div class="tl-row"><button type="button" class="tl-bar' +
+        (CONN.sel === n.id ? " sel" : "") + '" data-select="' + esc(n.id) +
+        '" style="left:' + pct(n.born) + "%;width:" + ((life / span) * 100).toFixed(2) + '%">' +
+        '<img src="/thumb/' + n.cover + '" loading="lazy" alt="">' +
+        '<span class="nm">' + esc(n.name) + "</span>" +
+        '<span class="yr">' + n.born + "–" + n.died + "</span>" + tick + "</button></div>";
+    }).join("")).join("");
+
+  const undated = g.nodes.length - dated.length;
+  return '<div class="tl-wrap">' + ticks + "<div>" + rows + "</div>" +
+    '<p class="conn-caption">Bars span lifetimes · the gold tick marks the years ' +
+    "represented in this collection" +
+    (undated ? " · " + undated + " painter" + (undated === 1 ? "" : "s") +
+      " without life dates aren't plotted" : "") + "</p></div>";
+}
+
+/* ---------- threads ---------- */
+
+function threadsHtml() {
+  const mine = canCurate();
+  if (!CONN.threads.length) {
+    return '<div class="emptybox"><div class="big">No threads yet.</div>' +
+      "A thread is a path someone walked through the collection — a handful of painters " +
+      "in order, each with a line saying why they follow the last." +
+      (mine ? '<div style="margin-top:18px"><button class="cta-btn" id="th-new">+ New thread</button></div>' : "") +
+      "</div>";
+  }
+  const items = CONN.threads.map((t, i) => {
+    const steps = t.steps.map((s, j) => {
+      // Resolve the step to a real node rather than lowercasing the name into an
+      // id — a step whose painter isn't on the map just isn't clickable.
+      const node = CONN.data.nodes.find((n) => n.name.toLowerCase() === s.artist.toLowerCase());
+      return (j ? '<span class="th-arrow">→</span>' : "") +
+        '<button type="button" class="th-step"' +
+        (node ? ' data-select="' + esc(node.id) + '"' : " disabled") + ">" +
+        '<img src="/thumb/' + s.cover + '" loading="lazy" alt="">' +
+        '<span><span class="nm">' + esc(s.artist) + "</span>" +
+        (s.note ? '<span class="note">' + esc(s.note) + "</span>" : "") + "</span></button>";
+    }).join("");
+    return '<div class="thread">' +
+      '<div class="th-eyebrow">Thread ' + String(i + 1).padStart(2, "0") + "</div>" +
+      '<div class="th-title">' + esc(t.title) + "</div>" +
+      (t.description ? '<div class="th-desc">' + esc(t.description) + "</div>" : "") +
+      '<div class="th-chain">' + steps + "</div>" +
+      (t.can_edit
+        ? '<div class="th-act"><button class="linkbtn" data-edit-thread="' + esc(t.id) +
+          '">edit</button><button class="linkbtn" data-del-thread="' + esc(t.id) +
+          '">delete</button></div>'
+        : "") + "</div>";
+  }).join("");
+  return '<div class="threads-wrap">' + items +
+    '<p class="conn-caption">Threads are curator-written paths through the collection — ' +
+    "click any step for details</p>" +
+    (mine ? '<div style="margin-top:18px"><button class="cta-btn" id="th-new">+ New thread</button></div>' : "") +
+    "</div>";
+}
+
+/* ---------- side panel ---------- */
+
+function asideHtml() {
+  const g = CONN.data;
+  if (!CONN.sel || !connNode(CONN.sel)) {
+    const rows = LINK_ORDER.map((t) => {
+      const meta = LINK_TYPES[t], info = g.types[t] || {};
+      const style = t === "place_time" ? "dashed" : t === "subject" ? "dotted" : "solid";
+      return '<span class="legend-row"><span class="lr">' +
+        '<span class="swatch" style="border-top:' + (t === "curator" ? 3 : 2) + "px " + style +
+        " " + meta.color + '"></span>' +
+        '<span class="lname">' + esc(meta.label) + "</span>" +
+        '<span class="lcount">' + (info.count || 0) +
+        ((info.count || 0) === 1 ? " link" : " links") + "</span></span>" +
+        '<span class="ldesc">' + esc(info.desc || "") + "</span></span>";
+    }).join("");
+    const first = g.nodes.slice().sort((a, b) => b.works - a.works)[0];
+    return '<p class="aside-label">Reading the map</p>' + rows +
+      '<p class="aside-explain">Click any painter to see who they knew, followed, or ' +
+      "answered. Owners and curators can add their own links with a note — the " +
+      "terracotta threads.</p>" +
+      (first ? '<button type="button" class="cta-btn" data-select="' + esc(first.id) +
+        '">Try it — start with ' + esc(first.name.split(" ").pop()) + "</button>" : "");
+  }
+
+  const n = connNode(CONN.sel);
+  const conns = activeLinks().filter((l) => l.a_id === CONN.sel || l.b_id === CONN.sel);
+  const rows = conns.map((l) => {
+    const other = connNode(l.a_id === CONN.sel ? l.b_id : l.a_id);
+    const t = LINK_TYPES[l.type] || LINK_TYPES.movement;
+    if (!other) return "";
+    const mineToEdit = l.id && canCurate();
+    return '<button type="button" class="aside-conn" data-select="' + esc(other.id) + '">' +
+      '<span class="ct"><span class="cdot" style="background:' + t.color + '"></span>' +
+      '<span class="clabel" style="color:' + t.color + '">' + esc(t.label) + "</span>" +
+      (mineToEdit ? '<span class="cedit" data-del-link="' + esc(l.id) + '" role="button">remove</span>' : "") +
+      "</span>" +
+      '<span class="cname">' + esc(other.name) + "</span>" +
+      (l.note ? '<span class="cnote">' + esc(l.note) + "</span>" : "") + "</button>";
+  }).join("");
+  const dates = [n.born && n.died ? n.born + "–" + n.died : "",
+                 n.works + (n.works === 1 ? " work" : " works") + " in the collection"]
+                .filter(Boolean).join(" · ");
+  return (
+    '<div class="aside-head"><img src="/thumb/' + n.cover + '" alt="">' +
+    '<button type="button" class="aside-x" id="aside-x" aria-label="Deselect">✕</button></div>' +
+    "<h2>" + esc(n.name) + "</h2>" +
+    '<p class="aside-dates">' + esc(dates) + "</p>" +
+    (n.movement ? '<p class="aside-mov">' + esc(n.movement) + "</p>" : "") +
+    '<div class="aside-rule"></div>' +
+    '<p class="aside-label">' + conns.length + " connection" + (conns.length === 1 ? "" : "s") + "</p>" +
+    (rows || '<p class="tiny">No connections of the kinds you\'re showing.</p>') +
+    '<a class="cta-btn" href="#/artist/' + encodeURIComponent(n.name) + '">View artist page →</a>' +
+    (canCurate() ? '<button type="button" class="ghost-btn" id="aside-add">+ Add a curator link</button>' : "")
+  );
+}
+
+function wireAside() {
+  const x = $("#aside-x");
+  if (x) x.addEventListener("click", () => { CONN.sel = null; connSyncUrl(); renderConnections(); });
+  const add = $("#aside-add");
+  if (add) add.addEventListener("click", () => addLinkDialog(connNode(CONN.sel)));
+  const nt = $("#th-new");
+  if (nt) nt.addEventListener("click", () => threadDialog(null));
+  app.querySelectorAll("[data-edit-thread]").forEach((b) =>
+    b.addEventListener("click", () =>
+      threadDialog(CONN.threads.find((t) => t.id === b.dataset.editThread))));
+  app.querySelectorAll("[data-del-thread]").forEach((b) =>
+    b.addEventListener("click", async () => {
+      if (!confirm("Delete this thread? The paintings stay where they are.")) return;
+      try {
+        await api("/api/threads/" + encodeURIComponent(b.dataset.delThread), { method: "DELETE" });
+        CONN.threads = (await api("/api/threads")).threads;
+        renderConnections();
+      } catch (e) { toast(e.message); }
+    }));
+  // The remove affordance sits inside a button that selects the other artist, so
+  // it has to claim the click before the selection handler sees it.
+  app.querySelectorAll("[data-del-link]").forEach((el) =>
+    el.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!confirm("Remove this link?")) return;
+      try {
+        await api("/api/links/" + encodeURIComponent(el.dataset.delLink), { method: "DELETE" });
+        CONN.data = await api("/api/connections");
+        renderConnections();
+        toast("Link removed.");
+      } catch (err) { toast(err.message); }
+    }));
+}
+
+/* ---------- authoring ---------- */
+
+function addLinkDialog(from) {
+  if (!from) return;
+  const others = CONN.data.nodes.filter((n) => n.id !== from.id);
+  const opts = others.map((n) =>
+    '<option value="' + esc(n.id) + '">' + esc(n.name) + "</option>").join("");
+  const m = modal(
+    "<h2>Link " + esc(from.name) + " to…</h2>" +
+    '<form class="authform" id="lkform">' +
+    "<label>Painter<select id=\"lk-b\">" + opts + "</select></label>" +
+    '<label>Kind<select id="lk-type">' +
+    '<option value="curator">Curator note — your own sentence</option>' +
+    '<option value="influence">Influence — one shaped the other</option></select></label>' +
+    '<label class="lk-dir" hidden><span class="optrow">' +
+    '<input type="checkbox" id="lk-dir"><span>' + esc(from.name) +
+    " influenced them (rather than the other way round)</span></span></label>" +
+    "<label>Note<textarea id=\"lk-note\" rows=\"3\" placeholder=\"" +
+    "e.g. Degas admired Menzel and painted a copy of The Dinner at the Ball from memory, 1879." +
+    "\"></textarea></label>" +
+    '<div class="bf-actions"><button type="submit" class="cta-btn">Add link</button>' +
+    '<button type="button" class="linkbtn" id="lk-cancel">cancel</button>' +
+    '<span class="formmsg err" id="lk-msg"></span></div></form>');
+  const q = (s) => m.el.querySelector(s);
+  const type = q("#lk-type");
+  type.addEventListener("change", () => {
+    q(".lk-dir").hidden = type.value !== "influence";
+  });
+  q("#lk-cancel").addEventListener("click", m.close);
+  q("#lkform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const b = others.find((n) => n.id === q("#lk-b").value);
+    try {
+      await api("/api/links", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          a: from.name, b: b.name, type: type.value, note: q("#lk-note").value,
+          directed: q("#lk-dir").checked,
+        }),
+      });
+      m.close();
+      CONN.data = await api("/api/connections");
+      renderConnections();
+      toast("Linked " + from.name + " and " + b.name + ".");
+    } catch (err) { q("#lk-msg").textContent = err.message; }
+  });
+}
+
+/* Compose a thread: a title, a why, and an ordered chain of painters. Steps are
+   added one at a time rather than through a multi-select, because the order is
+   the whole argument. */
+function threadDialog(existing) {
+  const nodes = CONN.data.nodes;
+  const steps = existing
+    ? existing.steps.map((s) => ({ artist: s.artist, note: s.note }))
+    : [];
+  const m = modal(
+    "<h2>" + (existing ? "Edit thread" : "New thread") + "</h2>" +
+    '<form class="authform" id="thform">' +
+    '<label>Title<input id="th-title" placeholder="The road to plein air"></label>' +
+    "<label>What it argues <span class=\"tiny\">optional</span>" +
+    '<textarea id="th-desc" rows="2" placeholder="How open-air river painting left ' +
+    'Barbizon and ended up beside the Yarra."></textarea></label>' +
+    '<label>Steps <span class="tiny">in order — at least two</span></label>' +
+    '<div id="th-steps" class="th-steps"></div>' +
+    '<div class="th-addrow"><select id="th-pick">' +
+    nodes.map((n) => '<option value="' + esc(n.name) + '">' + esc(n.name) + "</option>").join("") +
+    '</select><button type="button" class="toolbtn" id="th-add">Add step</button></div>' +
+    '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
+    '<button type="button" class="linkbtn" id="th-cancel">cancel</button>' +
+    '<span class="formmsg err" id="th-msg"></span></div></form>');
+  m.el.querySelector(".modal").classList.add("modal-wide");
+  const q = (s) => m.el.querySelector(s);
+  if (existing) { q("#th-title").value = existing.title; q("#th-desc").value = existing.description || ""; }
+
+  const paint = () => {
+    q("#th-steps").innerHTML = steps.map((s, i) =>
+      '<div class="th-srow"><span class="th-n">' + (i + 1) + "</span>" +
+      '<span class="th-sa">' + esc(s.artist) + "</span>" +
+      '<input class="th-sn" data-i="' + i + '" value="' + esc(s.note) +
+      '" placeholder="why they follow the last one">' +
+      '<button type="button" class="linkbtn" data-up="' + i + '"' + (i ? "" : " disabled") + ">↑</button>" +
+      '<button type="button" class="linkbtn" data-rm="' + i + '">remove</button></div>').join("") ||
+      '<p class="tiny">No steps yet — pick a painter below.</p>';
+    q("#th-steps").querySelectorAll(".th-sn").forEach((inp) =>
+      inp.addEventListener("input", () => { steps[+inp.dataset.i].note = inp.value; }));
+    q("#th-steps").querySelectorAll("[data-rm]").forEach((b) =>
+      b.addEventListener("click", () => { steps.splice(+b.dataset.rm, 1); paint(); }));
+    q("#th-steps").querySelectorAll("[data-up]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const i = +b.dataset.up;
+        steps.splice(i - 1, 0, steps.splice(i, 1)[0]);
+        paint();
+      }));
+  };
+  paint();
+  q("#th-add").addEventListener("click", () => {
+    steps.push({ artist: q("#th-pick").value, note: "" });
+    paint();
+  });
+  q("#th-cancel").addEventListener("click", m.close);
+  q("#thform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = { title: q("#th-title").value, description: q("#th-desc").value, steps: steps };
+    try {
+      await api(existing ? "/api/threads/" + encodeURIComponent(existing.id) : "/api/threads", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      m.close();
+      CONN.threads = (await api("/api/threads")).threads;
+      CONN.mode = "threads";
+      renderConnections();
+      toast(existing ? "Thread updated." : "Thread created.");
+    } catch (err) { q("#th-msg").textContent = err.message; }
+  });
 }
 
 /* ============================== collections ============================== */
 
+/* The cover mosaic: a lead image full-height beside two stacked and dimmed, so a
+   collection reads as a room rather than a single painting. Degrades to whatever
+   it has — three, two, one, or the empty glyph. */
+function mosaicHtml(covers) {
+  if (!covers || !covers.length) return '<span class="col-nocover">◫</span>';
+  const cell = (id, cls) =>
+    '<span class="' + cls + '"><img src="/thumb/' + id + '" loading="lazy" alt=""></span>';
+  if (covers.length === 1) return cell(covers[0], "m1 wide");
+  return cell(covers[0], "m1") + cell(covers[1], "m2") +
+    (covers[2] ? cell(covers[2], "m3") : '<span class="m3"></span>');
+}
+
 function collectionCard(c) {
-  const cover = c.cover
-    ? '<img src="/thumb/' + c.cover + '" loading="lazy" alt="">'
-    : '<span class="nocover">◫</span>';
+  const role = c.owner_role
+    ? '<span class="role-badge ' + esc(c.owner_role) + '">' + esc(c.owner_role) + "</span>"
+    : "";
   return (
-    '<a class="artist-card collection-card" href="#/collection/' + encodeURIComponent(c.id) + '">' +
-      '<div class="cover">' + cover + "</div>" +
-      '<div class="meta"><span class="name">' + esc(c.title) + "</span>" +
-      '<span class="sub">' + c.count + (c.count === 1 ? " work" : " works") +
-      (c.owner_display ? " · " + esc(c.owner_display) : "") + "</span></div></a>"
+    '<a class="col-card" href="#/collection/' + encodeURIComponent(c.id) + '">' +
+      '<span class="col-mosaic' + ((c.covers || []).length === 1 ? " single" : "") + '">' +
+      mosaicHtml(c.covers) + "</span>" +
+      '<span class="cbody"><span class="ctitle">' + esc(c.title) + "</span>" +
+      '<span class="col-byline"><span class="by">' +
+      c.count + (c.count === 1 ? " work" : " works") +
+      (c.owner_display ? " · " + esc(c.owner_display) : "") + "</span>" + role + "</span>" +
+      (c.description ? '<span class="col-note">“' + esc(c.description) + "”</span>" : "") +
+      "</span></a>"
   );
 }
 
@@ -978,19 +1664,25 @@ async function collectionsView() {
     const d = await api("/api/collections");
     const cards = d.collections.map(collectionCard).join("");
     const newCard = canCurate()
-      ? '<a class="artist-card add-card" id="newcol" href="#/collections">' +
-        '<div class="cover"><span>+</span></div>' +
-        '<div class="meta"><span class="name">New collection</span>' +
-        '<span class="sub">curate your own</span></div></a>'
+      ? '<a class="col-card col-new" id="newcol" href="#/collections">' +
+        '<span class="col-mosaic"><span class="plus">+</span>' +
+        '<span class="nlabel">New collection</span></span>' +
+        '<span class="cbody"><span class="col-note">Pick works from Browse with Select, ' +
+        "then gather them under a title and a short note.</span></span></a>"
       : "";
     const count = d.collections.length;
-    app.innerHTML =
-      '<div class="pagehead"><h1>Collections</h1><p class="sub">' +
-      count + (count === 1 ? " collection" : " collections") + "</p></div>" +
+    app.innerHTML = page(
+      '<div class="pagehead"><div><h1>Collections</h1><p class="sub">' +
+      count + (count === 1 ? " collection" : " collections") +
+      " · Curators can gather works into their own rooms</p></div>" +
+      (isOwner()
+        ? '<div class="headact"><a class="conn-open" href="#/settings">' +
+          "Invite a curator from settings →</a></div>"
+        : "") + "</div>" +
       (count || canCurate()
-        ? '<div class="artist-grid">' + cards + newCard + "</div>"
+        ? '<div class="col-grid">' + cards + newCard + "</div>"
         : '<div class="emptybox"><div class="big">No collections yet.</div>' +
-          "Curators gather works into themed collections that everyone can browse.</div>");
+          "Curators gather works into themed collections that everyone can browse.</div>"));
     const nc = $("#newcol");
     if (nc) nc.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1011,20 +1703,20 @@ async function collectionView(cid) {
         '<button class="danger" id="col-delete">Delete collection</button></div>'
       : "";
     const head =
-      '<div class="pagehead"><a class="back" href="#/collections">← All collections</a>' +
-      "<h1>" + esc(c.title) + "</h1>" +
+      '<a class="back" href="#/collections">← All collections</a>' +
+      '<div class="pagehead" style="margin-top:26px"><div><h1>' + esc(c.title) + "</h1>" +
       '<p class="sub">' + works.length + (works.length === 1 ? " work" : " works") +
       (c.owner_display ? " · curated by " + esc(c.owner_display) : "") + "</p>" +
-      (c.description ? '<p class="col-desc">' + esc(c.description) + "</p>" : "") +
-      ctl + "</div>";
+      (c.description ? '<p class="col-desc">“' + esc(c.description) + "”</p>" : "") +
+      ctl + "</div></div>";
     if (!works.length) {
-      app.innerHTML = head + '<div class="emptybox">' +
+      app.innerHTML = page(head + '<div class="emptybox">' +
         (editable
           ? "This collection is empty. Browse the museum, hit <b>Select</b>, then " +
             "<b>Add to collection</b> to gather works here."
-          : "Nothing here yet.") + "</div>";
+          : "Nothing here yet.") + "</div>", "tight");
     } else {
-      app.innerHTML = head + worksSection(works, true, collectionCtx(c));
+      app.innerHTML = page(head + worksSection(works, true, collectionCtx(c)), "tight");
       bindWorks(works, true, () => collectionView(cid), collectionCtx(c));
     }
     if (editable) {
@@ -1104,9 +1796,9 @@ async function addView(prefill) {
     const options = sources.map((s) =>
       '<option value="' + esc(s.id) + '">' + esc(s.label) + (s.available ? "" : " (unavailable)") + "</option>"
     ).join("");
-    app.innerHTML =
-      '<div class="pagehead"><h1>Add an artist</h1>' +
-      '<p class="sub">Download every painting by an artist from a source into your library.</p></div>' +
+    app.innerHTML = page(
+      '<div class="pagehead"><div><h1>Add an artist</h1>' +
+      '<p class="sub">Download every painting by an artist from a source into your library.</p></div></div>' +
       '<div class="addwrap">' +
       '<form class="dlform" id="dlform">' +
         "<label>Source</label><select id=\"f-source\">" + options + "</select>" +
@@ -1119,8 +1811,8 @@ async function addView(prefill) {
         '<p class="hint" id="f-hint"></p><p class="warn" id="f-warn"></p>' +
         '<p class="formmsg" id="f-msg"></p>' +
       "</form>" +
-      '<div><div class="pagehead" style="margin-bottom:14px"><p class="sub">Downloads</p></div>' +
-      '<div id="jobs"></div></div></div>';
+      '<div><div class="sechead" style="margin-bottom:16px"><h2>Downloads</h2></div>' +
+      '<div id="jobs"></div></div></div>');
 
     const sel = $("#f-source"), hint = $("#f-hint"), warn = $("#f-warn"), q = $("#f-query");
     function syncSource() {
@@ -1247,6 +1939,39 @@ function settingsHeadHtml(s) {
     "</div></div></div>";
 }
 
+/* Settings is one long page, so it carries its own index. Only lists the sections
+   this box actually has — the public server has no downloads or AI to jump to. */
+function setNavHtml(sections) {
+  return '<nav class="setnav">' + sections.map(([id, label]) =>
+    '<a href="#set-' + id + '" data-sec="' + id + '">' + esc(label) + "</a>").join("") + "</nav>";
+}
+
+function wireSetNav() {
+  const links = Array.from(document.querySelectorAll(".setnav a"));
+  if (!links.length) return;
+  links.forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();     // a bare #hash would be read as a route
+    const t = document.getElementById("set-" + a.dataset.sec);
+    if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  // Light the section whose heading last crossed the index bar.
+  const secs = links.map((a) => document.getElementById("set-" + a.dataset.sec)).filter(Boolean);
+  const sync = () => {
+    let cur = secs[0];
+    for (const s of secs) if (s.getBoundingClientRect().top <= 140) cur = s;
+    links.forEach((a) => a.classList.toggle("active", cur && ("set-" + a.dataset.sec) === cur.id));
+  };
+  window.addEventListener("scroll", sync, { passive: true });
+  sync();
+}
+
+/* Every settings section wears the same head: serif title, one line of sans
+   explaining it, hairline rule. */
+function setSec(id, title, note, body) {
+  return '<section class="setsec" id="set-' + id + '"><div class="sechead"><h2>' + esc(title) +
+    "</h2>" + (note ? '<p class="note">' + note + "</p>" : "") + "</div>" + body + "</section>";
+}
+
 async function settingsView() {
   setNav("settings");
   if (isPublic()) return settingsPublicView();
@@ -1261,21 +1986,22 @@ async function settingsView() {
     ]);
     if (srcData.field_keys) fieldKeys = srcData.field_keys;
     const presets = srcData.presets || [];
-    app.innerHTML =
+    app.innerHTML = page(
       settingsHeadHtml(statsData) +
+      setNavHtml([["display", "Display"], ["people", "People"], ["public", "Public server"],
+                  ["ai", "Auto-fill"], ["builtin", "Built-in sources"], ["sources", "Download sources"]]) +
       displayPanelHtml() +
       usersPanelHtml() +
       publishPanelHtml(pubData) +
       aiPanelHtml(aiData) +
       builtinSourcesHtml(builtinData.sources || []) +
-      '<section class="settings-sources"><div class="pagehead" style="margin:32px 0 12px">' +
-      '<h2 class="sec">Download sources</h2>' +
-      '<p class="sub">Add JSON-API museum sources to scan for works. The built-in sources ' +
-      "(Google Arts &amp; Culture, The Met, Art Institute of Chicago, Cleveland) are always available.</p></div>" +
-      '<div class="setwrap">' +
-      '<div id="srccol"><div class="pagehead" style="margin-bottom:12px"><p class="sub">Your custom sources</p></div>' +
-      '<div id="srclist"></div></div>' +
-      "<div>" + sourceFormHtml(presets) + "</div></div></section>";
+      setSec("sources", "Download sources",
+        "Add JSON-API museum sources to scan for works. The built-in sources " +
+        "(Google Arts &amp; Culture, The Met, Art Institute of Chicago, Cleveland) are always available.",
+        '<div class="setwrap">' +
+        '<div id="srccol"><p class="aside-label" style="margin-bottom:10px">Your custom sources</p>' +
+        '<div id="srclist"></div></div>' +
+        "<div>" + sourceFormHtml(presets) + "</div></div>"));
     renderUsers(usersData.users);
     wireAddUser();
     wireInvites();
@@ -1285,6 +2011,7 @@ async function settingsView() {
     wireSourceForm(presets);
     wireBuiltinSources();
     wirePublishPanel();
+    wireSetNav();
   } catch (e) { errbox(e); }
 }
 
@@ -1297,16 +2024,18 @@ async function settingsPublicView() {
       api("/api/stats"),
       api("/api/publish/status").catch(() => null),
     ]);
-    app.innerHTML =
+    app.innerHTML = page(
       settingsHeadHtml(statsData) +
+      setNavHtml([["pull", "Pull artwork"], ["display", "Display"], ["people", "People"]]) +
       pullPanelHtml(pubData) +
       displayPanelHtml() +
-      usersPanelHtml();
+      usersPanelHtml());
     renderUsers(usersData.users);
     wireAddUser();
     wireInvites();
     wireDisplayPanel();
     wirePullPanel();
+    wireSetNav();
   } catch (e) { errbox(e); }
 }
 
@@ -1334,12 +2063,11 @@ function publishPanelHtml(st) {
   const newTxt = newN == null ? ""
     : (newN === 0 ? "Nothing new since your last export. "
                   : newN + " work(s) added since your last export. ");
-  return (
-    '<section class="publishpanel"><div class="pagehead" style="margin:32px 0 12px">' +
-    '<h2 class="sec">Public server</h2>' +
-    '<p class="sub"><b>Push to public</b> (on an artist page) copies the reduced-size images and ' +
+  return setSec("public", "Public server",
+    "<b>Push to public</b> (on an artist page) copies the reduced-size images and " +
     "placards of the selected works into your content repo and pushes them to GitHub; the public " +
-    "site then pulls them in. " + repoPill(st) + "</p></div>" +
+    "site then pulls them in. " + repoPill(st),
+    '<div class="publishpanel">' +
     '<div class="exportbox"><div class="bf-actions">' +
     '<button type="button" class="cta-btn" id="export-new"' + (newN === 0 ? " disabled" : "") + ">" +
     "Export all new artwork" + (newN ? " (" + newN + ")" : "") + "</button>" +
@@ -1352,11 +2080,10 @@ function publishPanelHtml(st) {
     ' placeholder="/path/to/gallery-content">' +
     (pinned
       ? '<p class="tiny">Set by the <code>GALLERY_PUBLISH_REPO</code> environment variable.</p>'
-      : '<button type="submit">Save path</button>') +
+      : '<button type="submit" class="toolbtn">Save path</button>') +
     '<p class="tiny">Remote: <code>' + esc(remote) + "</code> · " + esc(String(worksN)) +
     " work(s) published</p>" +
-    '<p class="formmsg" id="repo-msg"></p></form></section>'
-  );
+    '<p class="formmsg" id="repo-msg"></p></form></div>');
 }
 
 function wirePublishPanel() {
@@ -1394,14 +2121,12 @@ function wirePublishPanel() {
 
 // Public box: pull the latest published works into the gallery.
 function pullPanelHtml(st) {
-  return (
-    '<section class="pullpanel"><div class="pagehead" style="margin:24px 0 12px">' +
-    '<h2 class="sec">Pull new artwork</h2>' +
-    '<p class="sub">Fetch the latest works your local gallery pushed and import them here. ' +
-    repoPill(st) + (st && st.works != null ? " · " + st.works + " in the repo" : "") + "</p></div>" +
-    '<div class="bf-actions"><button type="button" class="cta-btn" id="pull-btn">Pull new artwork</button>' +
-    '<span class="formmsg" id="pull-msg"></span></div></section>'
-  );
+  return setSec("pull", "Pull new artwork",
+    "Fetch the latest works your local gallery pushed and import them here. " +
+    repoPill(st) + (st && st.works != null ? " · " + st.works + " in the repo" : ""),
+    '<div class="pullpanel"><div class="bf-actions">' +
+    '<button type="button" class="cta-btn" id="pull-btn">Pull new artwork</button>' +
+    '<span class="formmsg" id="pull-msg"></span></div></div>');
 }
 
 function wirePullPanel() {
@@ -1431,13 +2156,11 @@ function aiKeyStateHtml(cfg) {
 
 function aiPanelHtml(cfg) {
   const opts = (cfg.known_models || []).map((mm) => '<option value="' + esc(mm) + '">').join("");
-  return (
-    '<section class="aipanel"><div class="pagehead" style="margin:32px 0 12px">' +
-    '<h2 class="sec">Auto-fill</h2>' +
-    "<p class=\"sub\">The placard editor's <b>Auto fill</b> button researches a painting and fills " +
+  return setSec("ai", "Auto-fill",
+    "The placard editor's <b>Auto fill</b> button researches a painting and fills " +
     "in its details. It calls an OpenAI-compatible chat API (<code>" + esc(cfg.endpoint || "") + "</code>). " +
     "Date, medium and genre may draw on Wikipedia; the description is required to come from a " +
-    "primary source.</p></div>" +
+    "primary source.",
     '<form class="dlform aiform" id="aiform">' +
     "<label>Model</label>" +
     '<input id="ai-model" list="ai-models" autocomplete="off" placeholder="' + esc(cfg.default_model || "arya") + '">' +
@@ -1446,9 +2169,8 @@ function aiPanelHtml(cfg) {
     '<input id="ai-key" type="password" autocomplete="off" placeholder="' +
     (cfg.has_key ? "leave blank to keep current" : "paste your API key") + '">' +
     '<p class="tiny aikeystate">' + aiKeyStateHtml(cfg) + "</p>" +
-    "<button type=\"submit\">Save</button>" +
-    '<p class="formmsg" id="ai-msg"></p></form></section>'
-  );
+    '<button type="submit" class="cta-btn">Save</button>' +
+    '<p class="formmsg" id="ai-msg"></p></form>');
 }
 
 function wireAiPanel(cfg) {
@@ -1509,11 +2231,10 @@ function builtinSourcesHtml(configs) {
       '<button type="button" class="linkbtn" data-reset="' + esc(c.id) + '">Reset to defaults</button>' +
       '<span class="formmsg" data-msg="' + esc(c.id) + '"></span></div></div>';
   }).join("");
-  return '<section class="builtinsources"><div class="pagehead" style="margin:32px 0 12px">' +
-    '<h2 class="sec">Built-in sources</h2>' +
-    '<p class="sub">How each bundled museum source searches and filters. Endpoints are fixed; the ' +
-    "knobs below are yours to tune and are saved as overrides.</p></div>" +
-    '<div class="bsrc-grid">' + cards + "</div></section>";
+  return setSec("builtin", "Built-in sources",
+    "How each bundled museum source searches and filters. Endpoints are fixed; the " +
+    "knobs below are yours to tune and are saved as overrides.",
+    '<div class="bsrc-grid">' + cards + "</div>");
 }
 
 function applyBuiltinValues(card, cfg) {
@@ -1564,21 +2285,24 @@ function wireBuiltinSources() {
 /* ---------- display options ---------- */
 
 function displayPanelHtml() {
-  return (
-    '<section class="displaypanel"><div class="pagehead" style="margin-bottom:12px">' +
-    '<h2 class="sec">Display</h2></div>' +
+  return setSec("display", "Display",
+    "How this gallery names and presents itself.",
+    '<div class="displaypanel">' +
+    '<div class="siterow"><label for="opt-eyebrow">Wordmark line</label>' +
+    '<input id="opt-eyebrow" type="text" maxlength="40" value="' + esc(siteEyebrow()) +
+    '" placeholder="e.g. your name — optional"></div>' +
     '<div class="siterow"><label for="opt-title">Site title</label>' +
     '<input id="opt-title" type="text" maxlength="80" value="' + esc(siteTitle()) + '">' +
-    '<button type="button" class="toolbtn" id="opt-title-save">Save</button>' +
+    '<button type="button" class="cta-btn" id="opt-title-save">Save</button>' +
     '<span class="formmsg" id="opt-title-msg"></span></div>' +
-    '<p class="sub optnote">The name shown in the browser tab and the top-left header. ' +
+    '<p class="optnote">The two-tier wordmark in the top-left, and the name in the browser tab. ' +
+    "The line above the title is optional — leave it blank and the title stands alone. " +
     "Set per server, so your public site can carry a different name from your local one.</p>" +
-    '<label class="optrow"><input type="checkbox" id="opt-placards">' +
+    '<label class="optrow" style="margin-top:24px"><input type="checkbox" id="opt-placards">' +
     "<span>Show placards in the viewer</span></label>" +
-    '<p class="sub optnote">A museum-style label — piece name, artist, date and description — ' +
+    '<p class="optnote">A museum-style label — piece name, artist, date and description — ' +
     "shown over each painting in fullscreen. Toggle any time with the <kbd>p</kbd> key while " +
-    "viewing a work.</p></section>"
-  );
+    "viewing a work.</p></div>");
 }
 
 function wireDisplayPanel() {
@@ -1587,15 +2311,19 @@ function wireDisplayPanel() {
   const save = document.getElementById("opt-title-save");
   if (save) save.addEventListener("click", async () => {
     const inp = document.getElementById("opt-title");
+    const eb = document.getElementById("opt-eyebrow");
     const msg = document.getElementById("opt-title-msg"); msg.className = "formmsg";
     try {
       const r = await api("/api/site", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: inp.value }),
+        body: JSON.stringify({ title: inp.value, eyebrow: eb.value }),
       });
       SESSION.site_title = r.site_title;
+      SESSION.site_eyebrow = r.site_eyebrow;
       inp.value = r.site_title;
+      eb.value = r.site_eyebrow;
       applyTitle();
+      renderFoot();
       msg.className = "formmsg ok"; msg.textContent = "Saved.";
     } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
   });
@@ -1604,35 +2332,33 @@ function wireDisplayPanel() {
 /* ---------- users ---------- */
 
 function usersPanelHtml() {
-  return (
-    '<section class="userspanel"><div class="pagehead" style="margin-bottom:12px">' +
-    '<h2 class="sec">People</h2><p class="sub">Owners run the museum · Curators build collections · ' +
-    "Visitors can only browse.</p></div>" +
+  return setSec("people", "People",
+    "Owners run the museum · Curators build collections · Visitors can only browse.",
     '<div class="usersgrid"><div id="userlist"></div>' +
     '<form class="dlform userform" id="adduser">' +
-    '<div class="pagehead" style="margin-bottom:6px"><p class="sub">Add a person</p></div>' +
+    '<p class="aside-label" style="margin-bottom:14px">Add a person</p>' +
     "<label>Username</label><input id=\"nu-user\" autocomplete=\"off\">" +
     "<label>Password</label><input id=\"nu-pass\" type=\"password\" autocomplete=\"new-password\">" +
     "<label>Role</label><select id=\"nu-role\">" +
     '<option value="visitor">Visitor</option><option value="curator">Curator</option>' +
     '<option value="owner">Owner</option></select>' +
-    "<button type=\"submit\">Add user</button>" +
+    '<button type="submit" class="cta-btn">Add user</button>' +
     '<p class="formmsg" id="nu-msg"></p></form></div>' +
-    inviteBoxHtml() +
-    "</section>"
-  );
+    inviteBoxHtml());
 }
 
 /* Invite a Curator by emailing them a one-time link (no self-registration).
    Works on both the private and public boxes. */
 function inviteBoxHtml() {
   return (
-    '<div class="invitebox"><div class="pagehead" style="margin:22px 0 6px">' +
-    '<p class="sub">Invite a Curator — they set their own username &amp; password from the link.</p></div>' +
+    '<div class="invitebox">' +
+    '<p class="aside-label" style="margin-bottom:6px">Invite a curator</p>' +
+    '<p class="optnote" style="margin-bottom:14px">They set their own username and password ' +
+    "from the link. It's single-use and expires in 14 days.</p>" +
     '<form class="dlform inviteform" id="invcreate">' +
     "<label>Email</label>" +
     '<input id="inv-email" type="email" autocomplete="off" placeholder="name@example.com">' +
-    "<button type=\"submit\">Create invite link</button>" +
+    '<button type="submit" class="cta-btn">Create invite link</button>' +
     '<p class="formmsg" id="inv-msg"></p></form>' +
     '<div id="invitelist"></div></div>'
   );
@@ -1707,13 +2433,17 @@ function renderUsers(list) {
   const me = SESSION.user ? SESSION.user.username.toLowerCase() : "";
   box.innerHTML = list.map((u) => {
     const self = (u.username || "").toLowerCase() === me;
+    // Your own role isn't yours to change, so it reads as a pill rather than a
+    // control you can't use.
+    const roleCtl = self
+      ? '<span class="role-badge ' + esc(u.role) + '">' + esc(u.role) + "</span>"
+      : '<select class="urole" data-user="' + esc(u.username) + '">' +
+        roleOptions(u.role) + "</select>";
     return (
       '<div class="urow"><div class="umeta"><span class="uname">' + esc(u.username) +
       (self ? ' <span class="tiny">(you)</span>' : "") + "</span>" +
       '<span class="tiny">since ' + esc((u.created || "").split(" ")[0]) + "</span></div>" +
-      '<div class="uact">' +
-      '<select class="urole" data-user="' + esc(u.username) + '"' + (self ? " disabled" : "") + ">" +
-      roleOptions(u.role) + "</select>" +
+      '<div class="uact">' + roleCtl +
       '<button class="linkbtn" data-pw="' + esc(u.username) + '">reset password</button>' +
       (self ? "" : '<button class="danger" data-del="' + esc(u.username) + '">delete</button>') +
       "</div></div>"
@@ -2167,22 +2897,34 @@ function italicizeTitle(html, title) {
   return tpl.innerHTML;
 }
 
+/* The wall label. Artist in small caps at the head, the work's own name in
+   italic, then the facts, a rule, and the reading. */
 function placardHtml(w) {
   const date = w.date || (w.year ? String(w.year) : "");
+  const meta = [date, w.medium].filter(Boolean).join(" · ");
   const desc = w.description
     ? '<div class="pl-desc">' + italicizeTitle(richDescHtml(w.description), w.title) + "</div>"
     : (isOwner() ? '<div class="pl-desc pl-empty">No description yet.</div>' : "");
-  const edit = isOwner() ? '<button class="pl-edit" id="pl-edit" type="button">Edit</button>' : "";
+  // Owner only, matching the route that saves it — the design says owner/curator,
+  // but /api/work/<id> is owner-gated and widening who may rewrite a placard is
+  // not a call to make in passing.
+  const edit = isOwner()
+    ? '<button class="pl-edit" id="pl-edit" type="button">Edit placard</button>' : "";
+  const src = w.source_url
+    ? '<span class="pl-src"><a href="' + esc(w.source_url) +
+      '" target="_blank" rel="noopener">Source ↗</a></span>'
+    : "";
+  const foot = (edit || src) ? '<div class="pl-foot">' + edit + src + "</div>" : "";
   const artist = w.artist
     ? '<a class="pl-artist" id="pl-artist" href="#/artist/' + encodeURIComponent(w.artist) + '">' + esc(w.artist) + "</a>"
     : '<div class="pl-artist">Unknown artist</div>';
   return '<div class="pl-card">' +
-    '<button class="pl-close" id="pl-close" type="button" aria-label="Hide placard">×</button>' +
+    '<button class="pl-close" id="pl-close" type="button" aria-label="Hide placard">✕</button>' +
     artist +
-    '<div class="pl-title"><span class="pl-name">' + esc(w.title) + "</span>" +
-    (date ? '<span class="pl-date">, ' + esc(date) + "</span>" : "") + "</div>" +
-    (w.medium ? '<div class="pl-medium">' + esc(w.medium) + "</div>" : "") +
-    desc + edit + "</div>";
+    '<div class="pl-title">' + esc(w.title) + "</div>" +
+    (meta ? '<div class="pl-medium">' + esc(meta) + "</div>" : "") +
+    '<div class="pl-rule"></div>' +
+    desc + foot + "</div>";
 }
 
 /* The "i" on a tile: read a piece's placard without opening the viewer. Same card
@@ -2205,18 +2947,30 @@ function workInfoDialog(w) {
   });
 }
 
+/* Collapsed placards persist for the session only: the checkbox in Settings is
+   the standing preference, this is "get out of the way for a minute". */
+function placardCollapsed() { return sessionStorage.getItem("pl-collapsed") === "1"; }
+function setPlacardCollapsed(on) {
+  sessionStorage.setItem("pl-collapsed", on ? "1" : "0");
+  syncPlacard();
+}
+
 function syncPlacard() {
   const on = placardsOn();
+  const collapsed = placardCollapsed();
   viewer.classList.toggle("placards", on);
+  viewer.classList.toggle("collapsed", on && collapsed);
   const el = document.getElementById("placard");
   if (!el) return;
-  if (on && viewer.classList.contains("open") && V.list[V.i]) {
+  if (on && !collapsed && viewer.classList.contains("open") && V.list[V.i]) {
     el.innerHTML = placardHtml(V.list[V.i]);
     el.hidden = false;
     const eb = document.getElementById("pl-edit");
     if (eb) eb.addEventListener("click", () => editWorkDialog(V.list[V.i]));
+    // ✕ folds the placard to its pill for now; the Settings checkbox and the
+    // "p" key remain the way to turn placards off for good.
     const cb = document.getElementById("pl-close");
-    if (cb) cb.addEventListener("click", () => { setPlacards(false); syncPlacard(); });
+    if (cb) cb.addEventListener("click", () => setPlacardCollapsed(true));
     const pa = document.getElementById("pl-artist");
     if (pa) pa.addEventListener("click", (e) => {   // leave the viewer, then open the artist
       e.preventDefault();
@@ -2226,6 +2980,20 @@ function syncPlacard() {
   } else {
     el.hidden = true;
   }
+}
+
+/* The sibling works, so you can see where you are in a room without leaving it. */
+function syncFilm() {
+  const film = document.getElementById("vfilm");
+  if (!film) return;
+  if (V.list.length < 2) { film.innerHTML = ""; return; }
+  film.innerHTML = V.list.map((w, i) =>
+    '<img src="' + thumbSrc(w) + '" alt="" data-i="' + i + '"' +
+    (i === V.i ? ' class="on"' : "") + ">").join("");
+  film.querySelectorAll("img").forEach((im) =>
+    im.addEventListener("click", (e) => { e.stopPropagation(); showWork(+im.dataset.i); }));
+  const cur = film.querySelector("img.on");
+  if (cur) cur.scrollIntoView({ block: "nearest", inline: "center" });
 }
 
 /* Owner-only: edit a work's placard details, saved to its sidecar.
@@ -2388,7 +3156,10 @@ function showWork(i) {
   vimg.src = viewSrc(w);
   vcap.innerHTML = caption(w);
   syncPlacard();
+  syncFilm();
   vcount.textContent = n > 1 ? (V.i + 1) + " / " + n : "";
+  const va = document.getElementById("vartist");
+  if (va) va.textContent = w.artist || "";
   if (n > 1) {
     [V.i + 1, V.i - 1].forEach((k) => {
       const pw = V.list[((k % n) + n) % n];
@@ -2429,6 +3200,7 @@ document.addEventListener("fullscreenchange", () => {
 $("#vprev").addEventListener("click", (e) => { e.stopPropagation(); showWork(V.i - 1); });
 $("#vnext").addEventListener("click", (e) => { e.stopPropagation(); showWork(V.i + 1); });
 $("#vclose").addEventListener("click", (e) => { e.stopPropagation(); closeViewer(); });
+$("#plpill").addEventListener("click", (e) => { e.stopPropagation(); setPlacardCollapsed(false); });
 
 document.addEventListener("keydown", (e) => {
   if (!viewer.classList.contains("open")) return;
@@ -2437,7 +3209,14 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowLeft") showWork(V.i - 1);
   else if (e.key === "Escape") closeViewer();
   else if (e.key === "c" || e.key === "C") collectHotkey();
-  else if (e.key === "p" || e.key === "P") { setPlacards(!placardsOn()); syncPlacard(); }
+  else if (e.key === "p" || e.key === "P") {
+    // Turning placards on should actually show one, even if the last one was
+    // folded away to its pill.
+    const on = !placardsOn();
+    setPlacards(on);
+    if (on) sessionStorage.setItem("pl-collapsed", "0");
+    syncPlacard();
+  }
   else if (e.key === "f" || e.key === "F") {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else if (viewer.requestFullscreen)

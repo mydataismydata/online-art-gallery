@@ -38,6 +38,12 @@ AI_CONFIG_FILE = DATA_DIR / "ai_config.json"
 SITE_FILE = DATA_DIR / "site.json"
 # Pending Curator invites (owner-issued one-time links). Kept out of the library.
 INVITES_FILE = DATA_DIR / "invites.json"
+# Connections: hand-written artist links (influence + curator notes) and the
+# curator-authored "threads" that string painters into a narrative. Movement /
+# place & time / subject links aren't stored — they're derived from artist
+# metadata on read, so they follow the library instead of going stale.
+LINKS_FILE = DATA_DIR / "artist_links.json"
+THREADS_FILE = DATA_DIR / "threads.json"
 # Where the publish "content" repo working tree lives — the git checkout the local
 # box pushes 2560px snapshots into and the VPS pulls from. Resolved by publish.py
 # as: env GALLERY_PUBLISH_REPO -> publish_config.json -> a sibling of the project.
