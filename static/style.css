@@ -346,6 +346,12 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
   margin: 22px 0 0; max-width: 640px;
   font: 400 15.5px/1.75 var(--serif); color: #c9bda9; text-wrap: pretty;
 }
+/* The bio carries the same small allowlist as a placard: work titles arrive
+   italicised, and paragraphs are a blank line (<br><br>) rather than <p>. */
+.artist-bio em, .artist-bio i, .bio-rich em, .bio-rich i { font-style: italic; }
+.artist-bio font[size="2"] { font-size: .85em; }
+.artist-bio font[size="3"] { font-size: 1em; }
+.artist-bio font[size="5"] { font-size: 1.35em; }
 .artist-title.editing { align-items: center; }
 .artist-title #ren-in {
   font: 400 34px var(--serif); padding: 4px 10px; min-width: 320px;
@@ -711,7 +717,6 @@ select {
   color: var(--faint); font: 600 10px var(--sans); letter-spacing: .18em;
   text-transform: uppercase;
 }
-.bio .desc { font: italic 400 14px/1.7 var(--serif); color: var(--dim); margin-top: 12px; }
 .bio .bioctl { display: flex; align-items: center; gap: 18px; margin-top: 16px; }
 .bio-msg { font: 400 12px var(--sans); color: var(--faint); }
 .bioform { border-top: 1px solid var(--hair); padding-top: 18px; max-width: 640px; }
@@ -1041,6 +1046,8 @@ a.pl-artist:hover { color: #262019; }
 .fmtbtn:hover { border-color: var(--gold-line); color: var(--gold); }
 .fmtbar select { width: auto; height: 28px; padding: 0 26px 0 8px; font-size: 12px; }
 .richtext { min-height: 150px; max-height: 280px; overflow: auto; font-size: 14px; line-height: 1.6; }
+/* A bio runs longer than a placard's note — give it room before it scrolls. */
+.bio-rich { min-height: 190px; max-height: 340px; font-family: var(--serif); font-size: 14.5px; line-height: 1.7; }
 .pl-desc font[size="2"], .richtext font[size="2"] { font-size: .85em; }
 .pl-desc font[size="3"], .richtext font[size="3"] { font-size: 1em; }
 .pl-desc font[size="5"], .richtext font[size="5"] { font-size: 1.35em; }

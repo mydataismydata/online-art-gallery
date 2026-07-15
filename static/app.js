@@ -810,9 +810,11 @@ async function artistView(name) {
         '<button class="linkbtn" id="repoint-btn" title="Merge this artist into another artist already in your library — fixes the same painter appearing under different name spellings.">Repoint</button>' +
         '<button class="linkbtn" id="bio-toggle" aria-expanded="false">Bio &amp; details<span class="caret">▾</span></button>' +
         "</div>"
+      // The prose is already above; this reveals the movements and life dates, so
+      // it doesn't promise a biography it isn't holding.
       : (info.movements || info.born
           ? '<button class="disclosure" id="bio-toggle" aria-expanded="false">' +
-            'Read full biography<span class="caret">▾</span></button>'
+            'Details<span class="caret">▾</span></button>'
           : "");
     const addMore = (isOwner() && !isPublic())
       ? '<a class="cta-btn" href="#/add/' + encodeURIComponent(name) + '">+ Add more from this artist</a>'
@@ -827,7 +829,8 @@ async function artistView(name) {
       '<div class="artist-title" id="artist-title"><h1>' + esc(name) + "</h1>" +
       (life ? '<span class="artist-life">' + esc(life) + "</span>" : "") + "</div>" +
       (eyebrow ? '<p class="artist-eyebrow">' + esc(eyebrow) + "</p>" : "") +
-      (info.description ? '<p class="artist-bio">' + esc(info.description) + "</p>" : "") +
+      (info.description
+        ? '<div class="artist-bio">' + richDescHtml(info.description) + "</div>" : "") +
       ownerTools +
       '<div id="biobar" hidden></div>' +
       "</div>" +
@@ -898,7 +901,6 @@ function renderBio(name, info) {
     '<div class="bio">' +
     (movements ? '<div class="movements">' + movements + "</div>" : "") +
     (facts.length ? '<div class="facts">' + facts.join("") + "</div>" : "") +
-    (info.description ? '<div class="desc">' + esc(info.description) + "</div>" : "") +
     ctl + "</div>";
   if (isOwner()) wireBio(name, info);
 }
@@ -937,12 +939,16 @@ function renderBioForm(name, info) {
       f("nationality", "Nationality", info.nationality) + "</div>" +
     f("mv", "Movements", (info.movements || []).join(", "),
       ' <span class="tiny">comma-separated · these cluster the connections map</span>') +
-    "<label>Biography<textarea id=\"bf-desc\" rows=\"8\">" + esc(info.description || "") +
-    "</textarea></label>" +
+    "<label>Biography</label>" + fmtBarHtml() +
+    '<div class="richtext bio-rich" id="bf-desc" contenteditable="true"></div>' +
     '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
     '<button type="button" id="bf-cancel" class="linkbtn">cancel</button>' +
     '<span id="bio-msg" class="bio-msg"></span></div></form>';
   $("#bf-cancel").addEventListener("click", () => reloadBio(name));
+
+  const bioEd = $("#bf-desc");
+  bioEd.innerHTML = richDescHtml(info.description || "");   // legacy plain text keeps its breaks
+  wireFmtBar(box, bioEd, (msg) => { $("#bio-msg").textContent = msg; });
 
   // The Wikidata pointers ride along invisibly; a lookup can improve them.
   const refs = { wikidata_id: info.wikidata_id, wikipedia_url: info.wikipedia_url };
@@ -969,7 +975,12 @@ function renderBioForm(name, info) {
     fill("#bf-birthplace", fx.birthplace, "birthplace");
     fill("#bf-nationality", fx.nationality, "nationality");
     fill("#bf-mv", (fx.movements || []).join(", "), "movements");
-    fill("#bf-desc", fx.description, "biography");
+    // The biography is a rich editor, not an input — it takes markup, not a value.
+    if (fx.description) {
+      bioEd.innerHTML = aiTextToRich(fx.description);
+      flash(bioEd);
+      done.push("biography");
+    }
     return done.length ? "Filled " + done.join(", ") + ". Review, then Save." : "";
   };
 
@@ -1021,17 +1032,23 @@ function renderBioForm(name, info) {
       name: name,
       born: $("#bf-born").value, died: $("#bf-died").value,
       birthplace: $("#bf-birthplace").value, nationality: $("#bf-nationality").value,
-      movements: $("#bf-mv").value, description: $("#bf-desc").value,
+      movements: $("#bf-mv").value,
+      // Same allowlist the placard uses; an empty editor saves as "" rather than
+      // whatever <br> the browser left lying in it.
+      description: bioEd.textContent.trim() ? sanitizeRich(bioEd.innerHTML) : "",
       // Not shown in the form, but a Wikidata lookup may have found better ones
       // than the record started with.
       wikidata_id: refs.wikidata_id, wikipedia_url: refs.wikipedia_url,
     };
     try {
-      const r = await api("/api/artist_info/save", {
+      await api("/api/artist_info/save", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      renderBio(name, r.info);
+      // Re-render the page, not just this panel: the header prose, the gold
+      // nationality line and the connections count all read from what just changed.
+      artistView(name);
+      toast("Bio saved.");
     } catch (err) { $("#bio-msg").textContent = err.message; }
   });
 }
@@ -2932,6 +2949,80 @@ function richDescHtml(d) {
   return RICH_RE.test(d) ? sanitizeRich(d) : esc(d).replace(/\n/g, "<br>");
 }
 
+/* Prose the AI just wrote, ready to drop into a rich editor.
+
+   It hands back BOTH at once: <em> around work titles and a blank line between
+   paragraphs. So this can't branch on one or the other — escaping the markup
+   would print the tags at the reader, and treating it as markup alone would let
+   HTML collapse the newlines and run every paragraph together. Breaks become
+   <br> first, then the whole thing goes through the same allowlist a placard
+   uses. Text with no markup is escaped first, so a stray angle bracket in prose
+   stays a bracket instead of being read as a tag. */
+function aiTextToRich(s) {
+  s = (s || "").replace(/\r\n?/g, "\n");
+  const body = RICH_RE.test(s) ? s : esc(s);
+  return sanitizeRich(body.replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>"));
+}
+
+/* ---------- shared rich-text editor (placard + artist bio) ---------- */
+
+/* Classes, not ids: the bio form and the placard editor can both be on the page,
+   and two #fmt-font would make the second one unwireable. */
+function fmtBarHtml() {
+  return (
+    '<div class="fmtbar">' +
+    '<button type="button" class="fmtbtn" data-cmd="bold" title="Bold"><b>B</b></button>' +
+    '<button type="button" class="fmtbtn" data-cmd="italic" title="Italic"><i>I</i></button>' +
+    '<button type="button" class="fmtbtn" data-cmd="underline" title="Underline"><u>U</u></button>' +
+    '<button type="button" class="fmtbtn fmt-paste" title="Paste as plain text">' +
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
+    '<path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg></button>' +
+    '<select class="fmt-font" title="Font"><option value="">Font</option>' +
+    '<option value="Georgia">Serif</option><option value="Arial">Sans</option>' +
+    '<option value="Courier New">Mono</option></select>' +
+    '<select class="fmt-size" title="Size"><option value="">Size</option>' +
+    '<option value="2">Small</option><option value="3">Normal</option>' +
+    '<option value="5">Large</option></select>' +
+    "</div>"
+  );
+}
+
+/* Wire a format bar to its editor. `root` scopes the lookups, `ed` is the
+   contenteditable, `onErr` reports a blocked clipboard. */
+function wireFmtBar(root, ed, onErr) {
+  try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
+  root.querySelectorAll(".fmtbtn[data-cmd]").forEach((b) => {
+    b.addEventListener("mousedown", (e) => e.preventDefault());  // keep the text selection
+    b.addEventListener("click", () => { ed.focus(); document.execCommand(b.dataset.cmd); });
+  });
+
+  /* Paste as plain text: insert the clipboard with its markup stripped, so text
+     copied from a web page doesn't drag that page's fonts and colours in. */
+  const pasteBtn = root.querySelector(".fmt-paste");
+  pasteBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  pasteBtn.addEventListener("click", async () => {
+    ed.focus();
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) document.execCommand("insertText", false, text);
+    } catch (err) {
+      // Reading the clipboard needs a secure context + permission; fall back to
+      // telling them the keyboard shortcut that does the same thing.
+      if (onErr) onErr("Your browser blocked clipboard access — use Ctrl+Shift+V " +
+                       "to paste without formatting.");
+    }
+  });
+  const fontSel = root.querySelector(".fmt-font"), sizeSel = root.querySelector(".fmt-size");
+  fontSel.addEventListener("change", () => {
+    if (fontSel.value) { ed.focus(); document.execCommand("fontName", false, fontSel.value); fontSel.value = ""; }
+  });
+  sizeSel.addEventListener("change", () => {
+    if (sizeSel.value) { ed.focus(); document.execCommand("fontSize", false, sizeSel.value); sizeSel.value = ""; }
+  });
+}
+
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
 /* House style: a work's own name is italicised wherever it appears in its placard
@@ -3102,22 +3193,7 @@ function editWorkDialog(w) {
     "<label>School <span class=\"tiny\">regional</span><input id=\"ew-school\" autocomplete=\"off\"></label>" +
     "</div>" +
     "<label>Description</label>" +
-    '<div class="fmtbar">' +
-    '<button type="button" class="fmtbtn" data-cmd="bold" title="Bold"><b>B</b></button>' +
-    '<button type="button" class="fmtbtn" data-cmd="italic" title="Italic"><i>I</i></button>' +
-    '<button type="button" class="fmtbtn" data-cmd="underline" title="Underline"><u>U</u></button>' +
-    '<button type="button" class="fmtbtn" id="fmt-paste" title="Paste as plain text">' +
-    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
-    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-    '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
-    '<path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg></button>' +
-    '<select id="fmt-font" title="Font"><option value="">Font</option>' +
-    '<option value="Georgia">Serif</option><option value="Arial">Sans</option>' +
-    '<option value="Courier New">Mono</option></select>' +
-    '<select id="fmt-size" title="Size"><option value="">Size</option>' +
-    '<option value="2">Small</option><option value="3">Normal</option>' +
-    '<option value="5">Large</option></select>' +
-    "</div>" +
+    fmtBarHtml() +
     '<div class="richtext" id="ew-desc" contenteditable="true"></div>' +
     '<div class="bf-actions"><button type="submit" class="cta-btn">Save</button>' +
     '<button type="button" class="linkbtn" id="ew-cancel">cancel</button>' +
@@ -3128,36 +3204,7 @@ function editWorkDialog(w) {
   makeModalDraggable(m, m.el.querySelector("h2"));
   const showTrace = (t) => { q("#ew-trace-box").innerHTML = traceHtml(t); };
 
-  /* ---- format bar (description) ---- */
-  try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
-  m.el.querySelectorAll(".fmtbtn[data-cmd]").forEach((b) => {
-    b.addEventListener("mousedown", (e) => e.preventDefault());  // keep the text selection
-    b.addEventListener("click", () => { ed.focus(); document.execCommand(b.dataset.cmd); });
-  });
-
-  /* Paste as plain text: insert the clipboard with its markup stripped, so text
-     copied from a web page doesn't drag that page's fonts and colours in. */
-  const pasteBtn = q("#fmt-paste");
-  pasteBtn.addEventListener("mousedown", (e) => e.preventDefault());
-  pasteBtn.addEventListener("click", async () => {
-    ed.focus();
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) document.execCommand("insertText", false, text);
-    } catch (err) {
-      // Reading the clipboard needs a secure context + permission; fall back to
-      // telling them the keyboard shortcut that does the same thing.
-      q("#ew-msg").textContent =
-        "Your browser blocked clipboard access — use Ctrl+Shift+V to paste without formatting.";
-    }
-  });
-  const fontSel = q("#fmt-font"), sizeSel = q("#fmt-size");
-  fontSel.addEventListener("change", () => {
-    if (fontSel.value) { ed.focus(); document.execCommand("fontName", false, fontSel.value); fontSel.value = ""; }
-  });
-  sizeSel.addEventListener("change", () => {
-    if (sizeSel.value) { ed.focus(); document.execCommand("fontSize", false, sizeSel.value); sizeSel.value = ""; }
-  });
+  wireFmtBar(m.el, ed, (msg) => { q("#ew-msg").textContent = msg; });
 
   /* ---- current values ---- */
   q("#ew-title").value = w.title || "";
@@ -3188,10 +3235,7 @@ function editWorkDialog(w) {
       set("#ew-title", f.title); set("#ew-artist", f.artist); set("#ew-date", f.date);
       set("#ew-medium", f.medium); set("#ew-style", f.style);
       set("#ew-genre", f.genre); set("#ew-school", f.school);
-      if (f.description) {
-        ed.innerHTML = esc(f.description).replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>");
-        flash(ed);
-      }
+      if (f.description) { ed.innerHTML = aiTextToRich(f.description); flash(ed); }
       showTrace(r.trace);
       const names = Object.keys(f);
       msg.className = "formmsg ok";
