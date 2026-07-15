@@ -881,9 +881,24 @@ kbd {
 .invlink { margin-top: 2px; padding: 6px 9px; font-size: 11px; color: var(--faint); }
 .invact { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
 .invnone { color: var(--faint); }
+/* Wordmark editor: the two boxes on the left, a live sample of the header on the
+   right, so "these are two separate lines" is shown rather than explained. */
+.wmwrap { display: flex; align-items: flex-start; gap: 40px; flex-wrap: wrap; }
+.wmfields { flex: 1 1 380px; min-width: 0; }
+.wmspacer { flex: 0 0 92px; }
+.wmpreview {
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px;
+  border: 1px dashed var(--hair-dash); padding: 18px 22px; min-width: 220px;
+}
+.wmplabel {
+  font: 600 9px var(--sans); letter-spacing: .24em; text-transform: uppercase; color: var(--off);
+}
+.wmpreview .brand { pointer-events: none; }
+@media (max-width: 720px) { .wmspacer { display: none; } }
+
 .siterow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .siterow label {
-  font: 600 10px var(--sans); letter-spacing: .2em; text-transform: uppercase;
+  flex: 0 0 92px; font: 600 10px var(--sans); letter-spacing: .2em; text-transform: uppercase;
   color: var(--faint); margin: 0;
 }
 .siterow input { flex: 1; min-width: 200px; max-width: 340px; }

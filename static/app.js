@@ -2387,16 +2387,25 @@ function displayPanelHtml() {
   return setSec("display", "Display",
     "How this gallery names and presents itself.",
     '<div class="displaypanel">' +
-    '<div class="siterow"><label for="opt-eyebrow">Wordmark line</label>' +
+    '<div class="wmwrap"><div class="wmfields">' +
+    '<div class="siterow"><label for="opt-eyebrow">Top line</label>' +
     '<input id="opt-eyebrow" type="text" maxlength="40" value="' + esc(siteEyebrow()) +
     '" placeholder="e.g. your name — optional"></div>' +
-    '<div class="siterow"><label for="opt-title">Site title</label>' +
+    '<div class="siterow"><label for="opt-title">Second line</label>' +
     '<input id="opt-title" type="text" maxlength="80" value="' + esc(siteTitle()) + '">' +
+    "</div>" +
+    '<div class="siterow"><span class="wmspacer"></span>' +
     '<button type="button" class="cta-btn" id="opt-title-save">Save</button>' +
-    '<span class="formmsg" id="opt-title-msg"></span></div>' +
-    '<p class="optnote">The two-tier wordmark in the top-left, and the name in the browser tab. ' +
-    "The line above the title is optional — leave it blank and the title stands alone. " +
-    "Set per server, so your public site can carry a different name from your local one.</p>" +
+    '<span class="formmsg" id="opt-title-msg"></span></div></div>' +
+    // A live sample of the actual header. Two fields with prose underneath didn't
+    // say "these are two separate lines" loudly enough — this does.
+    '<div class="wmpreview"><span class="wmplabel">Your header</span>' +
+    '<span class="brand"><span class="brand-eyebrow" id="wm-eb"></span>' +
+    '<span class="brand-name" id="wm-nm"></span></span></div></div>' +
+    '<p class="optnote">The two-tier wordmark in the top-left. Put one line in each box — ' +
+    "the top line is optional, and leaving it blank lets the second stand alone. The second " +
+    "line also names the browser tab. Set per server, so your public site can carry a " +
+    "different name from your local one.</p>" +
     '<label class="optrow" style="margin-top:24px"><input type="checkbox" id="opt-placards">' +
     "<span>Show placards in the viewer</span></label>" +
     '<p class="optnote">A museum-style label — piece name, artist, date and description — ' +
@@ -2407,6 +2416,23 @@ function displayPanelHtml() {
 function wireDisplayPanel() {
   const pc = document.getElementById("opt-placards");
   if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+
+  /* Show the wordmark as it will actually render, live, while you type — same
+     markup and classes as the real header, so what you see is what you get. */
+  const eb = document.getElementById("opt-eyebrow"), ti = document.getElementById("opt-title");
+  const pvEb = document.getElementById("wm-eb"), pvNm = document.getElementById("wm-nm");
+  if (eb && ti && pvEb && pvNm) {
+    const sync = () => {
+      const v = eb.value.trim();
+      pvEb.textContent = v;
+      pvEb.hidden = !v;
+      pvNm.textContent = ti.value.trim() || "The Gallery";
+    };
+    eb.addEventListener("input", sync);
+    ti.addEventListener("input", sync);
+    sync();
+  }
+
   const save = document.getElementById("opt-title-save");
   if (save) save.addEventListener("click", async () => {
     const inp = document.getElementById("opt-title");
