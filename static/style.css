@@ -415,6 +415,9 @@ a.pl-artist:hover { text-decoration: underline; }
 .ew-autohint { flex: 1 1 180px; min-width: 0; }
 #ewform .justfilled { outline: 2px solid var(--accent); }
 /* mini format bar + rich description editor */
+/* style / genre / school side by side in the placard editor */
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+@media (max-width: 560px) { .row3 { grid-template-columns: 1fr; } }
 .fmtbar { display: flex; gap: 6px; align-items: center; margin: 6px 0 8px; }
 .fmtbtn {
   background: var(--panel2); border: 1px solid var(--line); color: var(--text);

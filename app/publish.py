@@ -33,8 +33,8 @@ WORKS_SUBDIR = "works"
 # Placard fields carried to the public site: everything the viewer shows plus
 # provenance. Width/height are intentionally omitted -- the public work's real
 # dimensions come from the (reduced) image file itself when it's scanned.
-_PLACARD_FIELDS = ("artist", "title", "date", "year", "medium", "style",
-                   "description", "type", "source", "source_url")
+_PLACARD_FIELDS = ("artist", "title", "date", "year", "medium", "style", "genre",
+                   "school", "description", "type", "source", "source_url")
 
 
 # ---------------- repo location + config ----------------

@@ -911,7 +911,8 @@ function wireRepoint(name) {
 
 /* ============================== browse ============================== */
 
-const FACETS = [["era", "Era"], ["medium", "Medium"], ["style", "Style"]];
+const FACETS = [["era", "Era"], ["medium", "Medium"], ["style", "Style"],
+                ["genre", "Genre"], ["school", "School"]];
 
 async function browseView(facet, value) {
   setNav("browse");
@@ -2150,7 +2151,11 @@ function editWorkDialog(w) {
     "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
     "<label>Date <span class=\"tiny\">optional</span><input id=\"ew-date\" autocomplete=\"off\"></label>" +
     "<label>Medium <span class=\"tiny\">optional</span><input id=\"ew-medium\" autocomplete=\"off\"></label>" +
-    "<label>Genre / School <span class=\"tiny\">optional</span><input id=\"ew-style\" autocomplete=\"off\"></label>" +
+    '<div class="row3">' +
+    "<label>Style <span class=\"tiny\">movement</span><input id=\"ew-style\" autocomplete=\"off\"></label>" +
+    "<label>Genre <span class=\"tiny\">subject</span><input id=\"ew-genre\" autocomplete=\"off\"></label>" +
+    "<label>School <span class=\"tiny\">regional</span><input id=\"ew-school\" autocomplete=\"off\"></label>" +
+    "</div>" +
     "<label>Description</label>" +
     '<div class="fmtbar">' +
     '<button type="button" class="fmtbtn" data-cmd="bold" title="Bold"><b>B</b></button>' +
@@ -2213,6 +2218,8 @@ function editWorkDialog(w) {
   q("#ew-date").value = w.date || (w.year ? String(w.year) : "");
   q("#ew-medium").value = w.medium || "";
   q("#ew-style").value = w.style || "";
+  q("#ew-genre").value = w.genre || "";
+  q("#ew-school").value = w.school || "";
   ed.innerHTML = richDescHtml(w.description || "");   // legacy plain text gets its \n as <br>
 
   const flash = (el) => { el.classList.add("justfilled"); setTimeout(() => el.classList.remove("justfilled"), 900); };
@@ -2228,6 +2235,7 @@ function editWorkDialog(w) {
       const set = (id, v) => { if (v) { const el = q(id); el.value = v; flash(el); } };
       set("#ew-title", f.title); set("#ew-artist", f.artist); set("#ew-date", f.date);
       set("#ew-medium", f.medium); set("#ew-style", f.style);
+      set("#ew-genre", f.genre); set("#ew-school", f.school);
       if (f.description) {
         ed.innerHTML = esc(f.description).replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>");
         flash(ed);
@@ -2248,7 +2256,8 @@ function editWorkDialog(w) {
     const body = {
       title: q("#ew-title").value, artist: q("#ew-artist").value,
       date: q("#ew-date").value, medium: q("#ew-medium").value,
-      style: q("#ew-style").value,
+      style: q("#ew-style").value, genre: q("#ew-genre").value,
+      school: q("#ew-school").value,
       description: ed.textContent.trim() ? sanitizeRich(ed.innerHTML) : "",
     };
     try {

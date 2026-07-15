@@ -104,7 +104,12 @@ def _work_from_file(path, artist_dir_name):
         "year": year,
         "era": era_from(year, date_text),
         "medium": meta.get("medium"),
+        # Three separate axes so each is browsable on its own: style = the movement
+        # or manner (Baroque), genre = the subject category (Marine painting),
+        # school = the national/regional school (Dutch, Heidelberg School).
         "style": meta.get("style"),
+        "genre": meta.get("genre"),
+        "school": meta.get("school"),
         "description": meta.get("description"),
         "type": meta.get("type") or "painting",
         "source": meta.get("source") or f_source,
@@ -181,7 +186,8 @@ def _matches(value, wanted):
     return have == wanted.strip().casefold()
 
 
-def query_works(artist=None, era=None, medium=None, style=None, q=None):
+def query_works(artist=None, era=None, medium=None, style=None, genre=None,
+                school=None, q=None):
     out = []
     for w in all_works():
         if artist is not None and w["artist"].casefold() != artist.casefold():
@@ -191,6 +197,10 @@ def query_works(artist=None, era=None, medium=None, style=None, q=None):
         if not _matches(w["medium"], medium):
             continue
         if not _matches(w["style"], style):
+            continue
+        if not _matches(w["genre"], genre):
+            continue
+        if not _matches(w["school"], school):
             continue
         if q and q.casefold() not in (w["title"] + " " + w["artist"]).casefold():
             continue
@@ -254,7 +264,7 @@ def _era_sort_key(pair):
 
 def facets():
     result = {}
-    for key in ("era", "medium", "style"):
+    for key in ("era", "medium", "style", "genre", "school"):
         counter = Counter()
         display = {}
         for w in all_works():
@@ -409,8 +419,9 @@ def update_work(wid, fields):
         data["year"] = parse_year(d)
     if "medium" in fields:
         data["medium"] = _clean(fields.get("medium")) or None
-    if "style" in fields:
-        data["style"] = _clean(fields.get("style")) or None
+    for k in ("style", "genre", "school"):
+        if k in fields:
+            data[k] = _clean(fields.get(k)) or None
     if "description" in fields:
         desc = fields.get("description")
         data["description"] = desc.strip() if isinstance(desc, str) and desc.strip() else None
@@ -477,7 +488,7 @@ def update_works_meta(updates):
                 d = re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v
                 data["date"] = d or None
                 data["year"] = parse_year(d)
-            elif k in ("medium", "style", "title"):
+            elif k in ("medium", "style", "genre", "school", "title"):
                 cv = re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v
                 data[k] = cv or None
             elif k == "description":

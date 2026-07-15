@@ -7,7 +7,8 @@ variable, which then takes precedence — handy for a systemd-managed deployment
 that would rather not keep the key in a file.
 
 The system prompt hard-codes the sourcing rules the owner asked for:
-  * date / medium / genre  — Wikipedia / Wikimedia / Wikidata are acceptable
+  * date / medium / style / genre / school — Wikipedia / Wikimedia / Wikidata are
+                             acceptable
   * description            — MUST come from a primary / authoritative source
                              (the holding museum's catalogue entry, a catalogue
                              raisonné, scholarly writing); Wikipedia is forbidden.
@@ -26,24 +27,31 @@ DEFAULT_MODEL = "arya"
 KNOWN_MODELS = ["arya", "gpt-5.5", "claude-opus-4.8", "gemini-3.1-pro", "deepseek", "kimi"]
 _TIMEOUT = 90
 
-# What we ask the model for, in order. 'genre' is stored in the work's 'style'
-# field (see autofill()); everything else keeps its name.
-_MODEL_FIELDS = ("artist", "title", "date", "medium", "genre", "description")
-_FIELD_MAP = {"genre": "style"}
+# What we ask the model for, in order. Style, genre and school are three separate
+# axes so each can be browsed on its own; the field names match the sidecar's.
+_MODEL_FIELDS = ("artist", "title", "date", "medium", "style", "genre", "school",
+                 "description")
+_FIELD_MAP = {}
 
 _SYSTEM = (
     "You are a museum registrar's cataloguing assistant. You are given the artist "
     "and title of a single painting held in a private gallery. Identify that exact "
     "painting and return accurate catalogue metadata as STRICT JSON.\n\n"
     "Return ONLY a JSON object with these keys, all strings: "
-    "artist, title, date, medium, genre, description.\n\n"
+    "artist, title, date, medium, style, genre, school, description.\n\n"
     "Sourcing rules — follow them exactly:\n"
-    "- date, medium, genre: Wikipedia, Wikimedia and Wikidata are acceptable "
-    "sources, as are museum catalogues. Keep each short and factual. "
+    "- date, medium, style, genre, school: Wikipedia, Wikimedia and Wikidata are "
+    "acceptable sources, as are museum catalogues. Keep each short and factual. "
     'date = the year or year-range the work was made (e.g. "1665" or "1600-1610"). '
     'medium = the materials, e.g. "Oil on canvas". '
-    "genre = the genre and/or school or movement, kept brief, e.g. "
-    '"Marine painting, Dutch Golden Age".\n'
+    "These next three are SEPARATE axes — never merge them into one field, and "
+    "leave any you are unsure of as an empty string. "
+    'style = the movement or manner only, e.g. "Baroque", "Impressionism", '
+    '"Dutch Golden Age". '
+    'genre = the subject category only, e.g. "Marine painting", "Portrait", '
+    '"Landscape", "Still life", "History painting". '
+    'school = the national or regional school only, e.g. "Dutch", "Flemish", '
+    '"Venetian", "Heidelberg School".\n'
     "- description: DO NOT use Wikipedia or Wikimedia in ANY form for the "
     "description. It MUST be drawn from a primary or authoritative source — the "
     "holding museum's own catalogue entry or curatorial text, a catalogue "
@@ -189,19 +197,23 @@ def autofill(work):
 
 # ---------- batch: one call for several works by the same artist ----------
 # Only the fill-in fields — artist and title are already known from the gallery.
-_BATCH_FIELDS = ("date", "medium", "genre", "description")
+_BATCH_FIELDS = ("date", "medium", "style", "genre", "school", "description")
 
 _BATCH_SYSTEM = (
     "You are a museum registrar's cataloguing assistant. You are given one artist "
     "and a numbered list of that artist's paintings. For EVERY item, return accurate "
     "catalogue metadata as STRICT JSON.\n\n"
     "Return ONLY a JSON array. Each element is an object with keys: "
-    "n (the item number as given), date, medium, genre, description.\n\n"
+    "n (the item number as given), date, medium, style, genre, school, description.\n\n"
     "Sourcing rules — follow them exactly:\n"
-    "- date, medium, genre: Wikipedia, Wikimedia and Wikidata are acceptable, as are "
-    "museum catalogues. Keep each short and factual. date = the year or year-range; "
-    "medium = the materials, e.g. \"Oil on canvas\"; genre = a brief genre and/or "
-    "school or movement, e.g. \"Marine painting, Dutch Golden Age\".\n"
+    "- date, medium, style, genre, school: Wikipedia, Wikimedia and Wikidata are "
+    "acceptable, as are museum catalogues. Keep each short and factual. "
+    "date = the year or year-range; medium = the materials, e.g. \"Oil on canvas\". "
+    "style, genre and school are SEPARATE axes — never merge them into one field, "
+    "and leave any you are unsure of as an empty string. "
+    "style = the movement or manner only, e.g. \"Baroque\", \"Dutch Golden Age\"; "
+    "genre = the subject category only, e.g. \"Marine painting\", \"Portrait\"; "
+    "school = the national or regional school only, e.g. \"Dutch\", \"Flemish\".\n"
     "- description: DO NOT use Wikipedia or Wikimedia in ANY form. It MUST come from a "
     "primary or authoritative source — the holding museum's catalogue entry, a "
     "catalogue raisonne, or comparable scholarship. Write ONE or TWO concise "

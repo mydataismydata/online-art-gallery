@@ -317,6 +317,8 @@ def api_works():
         era=request.args.get("era"),
         medium=request.args.get("medium"),
         style=request.args.get("style"),
+        genre=request.args.get("genre"),
+        school=request.args.get("school"),
         q=request.args.get("q"),
     )
     return jsonify({"works": works})
@@ -476,7 +478,8 @@ def api_work_find_metadata(wid):
 @auth.require_role("owner")
 def api_work_update(wid):
     data = request.get_json(silent=True) or {}
-    fields = {k: data[k] for k in ("title", "artist", "date", "medium", "style", "description") if k in data}
+    fields = {k: data[k] for k in ("title", "artist", "date", "medium", "style",
+                                   "genre", "school", "description") if k in data}
     try:
         w = library.update_work(wid, fields)
     except KeyError:
