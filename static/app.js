@@ -217,6 +217,9 @@ async function boot() {
 
 /* ============================== auth views ============================== */
 
+/* `title` is plain text and gets escaped here — callers must NOT pre-escape it,
+   or an apostrophe in the site name arrives as a visible &#39;. `sub` is trusted
+   markup (it carries <b> and links). */
 function authShell(title, sub, formHtml) {
   renderNav();
   app.innerHTML =
@@ -228,7 +231,7 @@ function authShell(title, sub, formHtml) {
 
 function setupView() {
   authShell(
-    "Welcome to " + esc(siteTitle()),
+    "Welcome to " + siteTitle(),
     "Create the first account — the <b>Owner</b>, who runs the gallery and adds everyone else.",
     '<form class="authform" id="setupform">' +
     "<label>Username<input id=\"su-user\" autocomplete=\"username\"></label>" +
@@ -256,7 +259,7 @@ function setupView() {
 
 function loginView() {
   authShell(
-    esc(siteTitle()),
+    siteTitle(),
     "Please sign in to continue.",
     '<form class="authform" id="loginform">' +
     "<label>Username<input id=\"li-user\" autocomplete=\"username\"></label>" +
@@ -293,7 +296,7 @@ async function acceptInviteView(token) {
     return;
   }
   authShell(
-    "Join " + esc(siteTitle()),
+    "Join " + siteTitle(),
     "You've been invited as a <b>" + esc(inv.role) + "</b>" +
       (inv.email ? " — " + esc(inv.email) : "") + ". Pick a username and password.",
     '<form class="authform" id="acceptform">' +

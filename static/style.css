@@ -84,8 +84,11 @@ img { display: block; }
 }
 .brand { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; }
 .brand:hover .brand-name { color: #fff; }
+/* The wordmark's top line is set in small caps, so it reads as a label rather
+   than a second title. Transformed here, not stored uppercase — the tab title and
+   the Settings field keep whatever case was typed. */
 .brand-eyebrow {
-  font: 600 9.5px var(--sans); letter-spacing: .34em;
+  font: 600 9.5px var(--sans); letter-spacing: .34em; text-transform: uppercase;
   color: var(--gold); white-space: nowrap;
 }
 .brand-name {
@@ -128,7 +131,10 @@ img { display: block; }
   padding: 26px 48px 34px; border-top: 1px solid var(--mat);
   display: flex; justify-content: space-between; align-items: center; gap: 20px;
 }
-.foot-mark { font: 600 9.5px var(--sans); letter-spacing: .3em; color: var(--off); }
+.foot-mark {
+  font: 600 9.5px var(--sans); letter-spacing: .3em; text-transform: uppercase;
+  color: var(--off);
+}
 .foot-stats { font: 400 11.5px var(--sans); color: var(--off); }
 
 /* ---------- headings ---------- */
@@ -221,14 +227,20 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
   position: relative; max-width: 1560px; margin: 0 auto; padding: 0 48px;
   height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 11px;
 }
-.hero-eyebrow { font: 600 10px var(--sans); letter-spacing: .3em; color: var(--gold); }
+.hero-eyebrow {
+  font: 600 10px var(--sans); letter-spacing: .3em; text-transform: uppercase;
+  color: var(--gold);
+}
 .hero-title {
   font: italic 400 30px/1.25 var(--serif); color: var(--display);
   max-width: 560px; text-wrap: pretty;
 }
 .hero-title:hover { color: #fff; }
 .hero-meta { font: 400 13px var(--sans); color: #b3a48b; }
-.hero-cta { font: 400 12px var(--sans); letter-spacing: .12em; color: var(--gold); margin-top: 6px; }
+.hero-cta {
+  font: 400 12px var(--sans); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--gold); margin-top: 6px;
+}
 
 /* ---------- search / sort controls ---------- */
 .searchbox {
@@ -569,7 +581,10 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
 .tl-tick { position: absolute; bottom: -1px; height: 2px; background: var(--gold); border-radius: 2px; }
 
 .thread { padding: 30px 0 36px; border-bottom: 1px solid var(--mat); }
-.thread .th-eyebrow { font: 600 9.5px var(--sans); letter-spacing: .3em; color: var(--gold); }
+.thread .th-eyebrow {
+  font: 600 9.5px var(--sans); letter-spacing: .3em; text-transform: uppercase;
+  color: var(--gold);
+}
 .thread .th-title { margin-top: 8px; font: italic 400 24px var(--serif); color: var(--display2); }
 .thread .th-desc { margin-top: 6px; font: 400 13px/1.6 var(--sans); color: var(--dim2); max-width: 640px; }
 .th-chain { display: flex; align-items: stretch; flex-wrap: wrap; margin-top: 22px; }
