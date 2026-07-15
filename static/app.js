@@ -395,6 +395,7 @@ function browseCtx(opts) {
       if (opts.artist) actions.push("publish");
     }
     if (opts.artist) actions.push("setcover");   // artist pages only
+    actions.push("pinhero");                     // any grid — it's one work, anywhere
     actions.push("delete");
   }
   return { actions, artist: opts.artist };
@@ -475,6 +476,9 @@ function renderSelCtl(works, rerender, ctx) {
   if (ctx.actions.includes("setcover"))
     html += '<button id="selcover" class="toolbtn"' + (n === 1 ? "" : " disabled") +
       ' title="Pick exactly one work">Set as thumbnail</button>';
+  if (ctx.actions.includes("pinhero"))
+    html += '<button id="selpin" class="toolbtn"' + (n === 1 ? "" : " disabled") +
+      ' title="Show this painting on the front page. Pick exactly one work.">Pin to hero</button>';
   if (ctx.actions.includes("publish"))
     html += '<button id="selpublish" class="toolbtn"' + (n ? "" : " disabled") +
       ' title="Push these works to the public server">Push to public' + tag + "</button>";
@@ -502,6 +506,8 @@ function renderSelCtl(works, rerender, ctx) {
   if (aimeta) aimeta.addEventListener("click", () => getSelectionMetadata(ctx.artist, rerender));
   const cover = $("#selcover");
   if (cover) cover.addEventListener("click", () => setArtistCover(ctx.artist, rerender));
+  const pin = $("#selpin");
+  if (pin) pin.addEventListener("click", () => pinHero(rerender));
   const pub = $("#selpublish");
   if (pub) pub.addEventListener("click", () => publishSelection(ctx.artist, rerender));
 }
@@ -520,6 +526,22 @@ async function setArtistCover(artist, rerender) {
     toast("Thumbnail set for " + artist + ".");
     if (rerender) rerender();
   } catch (e) { alert(e.message); }
+}
+
+/* "Pin to hero": make the one selected work the painting that greets visitors on
+   the front page, instead of the daily rotation. Unpin from Settings → Display. */
+async function pinHero(rerender) {
+  const ids = Array.from(SEL.ids);
+  if (ids.length !== 1) return;
+  try {
+    const r = await api("/api/featured", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ work_id: ids[0] }),
+    });
+    resetSel();
+    toast("“" + (r.featured.title || "That work") + "” now greets visitors on the front page.");
+    if (rerender) rerender();
+  } catch (e) { toast(e.message); }
 }
 
 /* "Find metadata": for each selected work, search the web and fill any missing
@@ -2131,13 +2153,14 @@ async function settingsView() {
   setNav("settings");
   if (isPublic()) return settingsPublicView();
   try {
-    const [srcData, usersData, builtinData, aiData, statsData, pubData] = await Promise.all([
+    const [srcData, usersData, builtinData, aiData, statsData, pubData, feat] = await Promise.all([
       api("/api/custom_sources"),
       api("/api/users"),
       api("/api/sources/builtin"),
       api("/api/ai/config"),
       api("/api/stats"),
       api("/api/publish/status").catch(() => null),
+      api("/api/featured").catch(() => null),
     ]);
     if (srcData.field_keys) fieldKeys = srcData.field_keys;
     const presets = srcData.presets || [];
@@ -2145,7 +2168,7 @@ async function settingsView() {
       settingsHeadHtml(statsData) +
       setNavHtml([["display", "Display"], ["people", "People"], ["public", "Public server"],
                   ["ai", "Auto-fill"], ["builtin", "Built-in sources"], ["sources", "Download sources"]]) +
-      displayPanelHtml() +
+      displayPanelHtml(feat) +
       usersPanelHtml() +
       publishPanelHtml(pubData) +
       aiPanelHtml(aiData) +
@@ -2174,16 +2197,17 @@ async function settingsView() {
    are refused there). Just the header, a Pull button, Display, and People. */
 async function settingsPublicView() {
   try {
-    const [usersData, statsData, pubData] = await Promise.all([
+    const [usersData, statsData, pubData, feat] = await Promise.all([
       api("/api/users"),
       api("/api/stats"),
       api("/api/publish/status").catch(() => null),
+      api("/api/featured").catch(() => null),
     ]);
     app.innerHTML = page(
       settingsHeadHtml(statsData) +
       setNavHtml([["pull", "Pull artwork"], ["display", "Display"], ["people", "People"]]) +
       pullPanelHtml(pubData) +
-      displayPanelHtml() +
+      displayPanelHtml(feat) +
       usersPanelHtml());
     renderUsers(usersData.users);
     wireAddUser();
@@ -2459,10 +2483,34 @@ function wireBuiltinSources() {
 
 /* ---------- display options ---------- */
 
-function displayPanelHtml() {
+/* The hero row: says which painting is on the front page and why, and offers the
+   only way back to the rotation once one is pinned. */
+function heroRowHtml(feat) {
+  if (!feat || !feat.work) {
+    return '<div class="siterow"><label>Home hero</label>' +
+      '<span class="tiny">Nothing to show yet — add some artwork.</span></div>';
+  }
+  const w = feat.work;
+  const who = [w.title, w.artist].filter(Boolean).join(" · ");
+  const state = feat.pinned
+    ? "Pinned: <b>" + esc(who) + "</b>"
+    : "Rotating daily — today it’s <b>" + esc(who) + "</b>";
+  return '<div class="siterow"><label>Home hero</label>' +
+    '<span class="tiny herostate">' + state + "</span>" +
+    (feat.pinned
+      ? '<button type="button" class="linkbtn" id="hero-unpin">Unpin</button>'
+      : "") +
+    '<span class="formmsg" id="hero-msg"></span></div>' +
+    '<p class="optnote">Pin any painting from a grid: hit <b>Select</b>, choose one, ' +
+    "then <b>Pin to hero</b>. Unpinned, the hero moves through the works that have a " +
+    "description, one a day. Pinned per server, like the title.</p>";
+}
+
+function displayPanelHtml(feat) {
   return setSec("display", "Display",
     "How this gallery names and presents itself.",
     '<div class="displaypanel">' +
+    heroRowHtml(feat) +
     '<div class="wmwrap"><div class="wmfields">' +
     '<div class="siterow"><label for="opt-eyebrow">Top line</label>' +
     '<input id="opt-eyebrow" type="text" maxlength="40" value="' + esc(siteEyebrow()) +
@@ -2500,6 +2548,23 @@ function displayPanelHtml() {
 function wireDisplayPanel() {
   const pc = document.getElementById("opt-placards");
   if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+
+  const unpin = document.getElementById("hero-unpin");
+  if (unpin) unpin.addEventListener("click", async () => {
+    const msg = document.getElementById("hero-msg"); msg.className = "formmsg";
+    unpin.disabled = true;
+    try {
+      await api("/api/featured", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ work_id: null }),
+      });
+      settingsView();                    // re-render: today's rotation is now the answer
+      toast("Unpinned — the hero rotates daily again.");
+    } catch (e) {
+      msg.className = "formmsg err"; msg.textContent = e.message;
+      unpin.disabled = false;
+    }
+  });
 
   /* Show the wordmark as it will actually render, live, while you type — same
      markup and classes as the real header, so what you see is what you get. */

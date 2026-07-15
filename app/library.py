@@ -73,9 +73,16 @@ def _parse_stem(stem):
     return clean_title_text(title), date_text, source, source_id
 
 
+def work_id_for(rel):
+    """The id the scanner gives a work at this library-relative path. A work's id
+    is a hash of where it lives, so moving it renames it — anything holding an id
+    across a move has to be told the new one."""
+    return hashlib.sha1(rel.encode("utf-8")).hexdigest()[:16]
+
+
 def _work_from_file(path, artist_dir_name):
     rel = path.relative_to(config.LIBRARY_DIR).as_posix()
-    wid = hashlib.sha1(rel.encode("utf-8")).hexdigest()[:16]
+    wid = work_id_for(rel)
     meta = {}
     sidecar = Path(str(path) + ".json")
     if sidecar.exists():
@@ -346,7 +353,8 @@ def rename_artist(sources, target):
     """Consolidate every work whose artist matches one of `sources` under the
     canonical `target`: relocate its image + sidecar into target's folder and set
     the sidecar's artist field. Renaming to an existing artist thus merges them.
-    Returns (moved, errors)."""
+    Returns (moved, errors, id_map), where id_map is {old work id: new work id} —
+    the move changes each work's id, and callers holding one need to follow it."""
     target = re.sub(r"\s+", " ", target or "").strip()
     if not target:
         raise ValueError("target name required")
@@ -358,6 +366,7 @@ def rename_artist(sources, target):
 
     st = scan(force=True)
     moved, errors, touched = 0, [], set()
+    id_map = {}
     for w in list(st["works"]):
         if w["artist"].strip().casefold() not in src_set:
             continue
@@ -375,6 +384,9 @@ def rename_artist(sources, target):
                 if sc.exists():
                     shutil.move(str(sc), str(dest) + ".json")
             _set_sidecar_artist(dest, target)
+            # The move renames the work (its id hashes its path). Report where each
+            # one went, so callers holding an id can follow it rather than guess.
+            id_map[w["id"]] = work_id_for(dest.relative_to(config.LIBRARY_DIR).as_posix())
             moved += 1
         except Exception as e:
             errors.append({"rel": w["rel"], "error": str(e)})
@@ -386,7 +398,7 @@ def rename_artist(sources, target):
         except Exception:
             pass
     invalidate()
-    return moved, errors
+    return moved, errors, id_map
 
 
 def update_work(wid, fields):

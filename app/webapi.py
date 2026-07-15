@@ -339,19 +339,59 @@ def api_facets():
     return jsonify(library.facets())
 
 
+def _pinned_work():
+    """The owner's pinned hero work, or None if the pin points at nothing any more.
+
+    Falls back from id to pid: repointing a painting to another artist moves the
+    file, and the id is a hash of the path. A pin that resolves to nothing lapses
+    quietly back to the rotation — a deleted painting shouldn't blank the front
+    page."""
+    f = site.get_featured()
+    if not f:
+        return None
+    w = library.get(f["id"])
+    if w:
+        return w
+    if f.get("pid"):
+        return next((x for x in library.all_works() if x.get("pid") == f["pid"]), None)
+    return None
+
+
 @bp.get("/api/featured")
 @auth.require_view
 def api_featured():
-    """The work in the home hero. Rotates once a day rather than per request, so
-    the front page has a 'today's painting' rather than a slot machine — and
-    everyone looking at it sees the same one. Prefers works that have a
-    description: those are the ones with something to read on the other side."""
+    """The work in the home hero: the owner's pin if there is one, otherwise a
+    daily rotation. It turns once a day rather than per request, so the front page
+    has a 'today's painting' rather than a slot machine — and everyone looking at
+    it sees the same one. The rotation prefers works that have a description:
+    those are the ones with something to read on the other side."""
+    pinned = _pinned_work()
+    if pinned:
+        return jsonify({"work": pinned, "pinned": True})
     works = library.all_works()
     if not works:
-        return jsonify({"work": None})
+        return jsonify({"work": None, "pinned": False})
     pool = [w for w in works if (w.get("description") or "").strip()] or works
     day = int(time.strftime("%Y%j"))          # year + day-of-year
-    return jsonify({"work": pool[day % len(pool)]})
+    return jsonify({"work": pool[day % len(pool)], "pinned": False})
+
+
+@bp.post("/api/featured")
+@auth.require_role("owner")
+def api_featured_set():
+    """Pin a work to the hero, or unpin (falsy work_id) to resume the rotation.
+    Allowed on the public box too: which painting greets a visitor is curation,
+    not authoring."""
+    data = request.get_json(silent=True) or {}
+    wid = (data.get("work_id") or "").strip()
+    if not wid:
+        site.set_featured(None)
+        return jsonify({"featured": None, "pinned": False})
+    w = library.get(wid)
+    if not w:
+        return jsonify({"error": "No such work."}), 404
+    site.set_featured(w["id"], w.get("pid"))
+    return jsonify({"featured": w, "pinned": True})
 
 
 @bp.get("/api/work/<wid>")
@@ -385,9 +425,11 @@ def api_artist_rename():
     if not to or not frm:
         return jsonify({"error": "'from' and 'to' are required."}), 400
     try:
-        moved, errors = library.rename_artist(frm, to)
+        moved, errors, id_map = library.rename_artist(frm, to)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    # The works just moved, so their ids changed; follow the hero pin over.
+    site.remap_featured(id_map)
     # carry the artist's saved bio (if any) over to the new name
     if to.strip().casefold() not in [f.strip().casefold() for f in frm]:
         for f in frm:
@@ -666,6 +708,8 @@ def api_work_update(wid):
         abort(404)
     if not w:
         return jsonify({"error": "update failed"}), 500
+    # Editing the artist relocates the file, which re-ids the work; keep the pin on it.
+    site.remap_featured({wid: w["id"]})
     return jsonify({"work": w})
 
 

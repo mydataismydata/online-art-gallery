@@ -67,6 +67,41 @@ def set_eyebrow(text):
     return get_eyebrow()
 
 
+def get_featured():
+    """The owner's pinned hero work as {"id": …, "pid": …}, or None for the daily
+    rotation. Two keys because neither alone is durable: a work id is the hash of
+    its path, so repointing the painting to another artist moves the file and
+    changes it — and a pid only exists once the work has been published."""
+    f = _load().get("featured")
+    return f if isinstance(f, dict) and f.get("id") else None
+
+
+def set_featured(work_id, pid=None):
+    """Pin a work to the hero, or unpin with a falsy work_id."""
+    data = _load()
+    if work_id:
+        rec = {"id": work_id}
+        if pid:
+            rec["pid"] = pid
+        data["featured"] = rec
+    else:
+        data.pop("featured", None)
+    _save(data)
+    return get_featured()
+
+
+def remap_featured(id_map):
+    """Follow the hero pin when its painting moves and is therefore re-identified —
+    a repoint into another artist, or an artist edit. Without this the pin would
+    silently lapse back to the rotation and look like the setting hadn't stuck."""
+    f = get_featured()
+    if not f:
+        return
+    new = (id_map or {}).get(f["id"])
+    if new and new != f["id"]:
+        set_featured(new, f.get("pid"))
+
+
 def get_short():
     """A shorter title for narrow screens, where the full one eats the whole width.
     Empty = fall back to the full title. Never names the tab — that stays the real
