@@ -2050,10 +2050,54 @@ function richDescHtml(d) {
   return RICH_RE.test(d) ? sanitizeRich(d) : esc(d).replace(/\n/g, "<br>");
 }
 
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+/* House style: a work's own name is italicised wherever it appears in its placard
+   text. Applied when the placard renders, so the description stays plain prose —
+   nothing to maintain by hand. Walks text nodes rather than regexing the HTML, so
+   tags and attributes are never touched, and skips anything already inside an
+   <em>/<i> so we don't double up. */
+function italicizeTitle(html, title) {
+  const t = (title || "").trim();
+  // Very short or generic names ("Untitled", "Two") would match ordinary prose.
+  if (t.length < 4 || /^untitled$/i.test(t)) return html;
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const re = new RegExp(escapeRe(t), "gi");
+  (function walk(node) {
+    let c = node.firstChild;
+    while (c) {
+      const next = c.nextSibling;
+      if (c.nodeType === 3) {
+        const s = c.nodeValue;
+        re.lastIndex = 0;
+        if (re.test(s)) {
+          re.lastIndex = 0;
+          const frag = document.createDocumentFragment();
+          let last = 0, m;
+          while ((m = re.exec(s))) {
+            if (m.index > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
+            const em = document.createElement("em");
+            em.textContent = m[0];                 // keep the text as written
+            frag.appendChild(em);
+            last = m.index + m[0].length;
+          }
+          if (last < s.length) frag.appendChild(document.createTextNode(s.slice(last)));
+          node.replaceChild(frag, c);
+        }
+      } else if (c.nodeType === 1 && c.tagName !== "EM" && c.tagName !== "I") {
+        walk(c);
+      }
+      c = next;
+    }
+  })(tpl.content);
+  return tpl.innerHTML;
+}
+
 function placardHtml(w) {
   const date = w.date || (w.year ? String(w.year) : "");
   const desc = w.description
-    ? '<div class="pl-desc">' + richDescHtml(w.description) + "</div>"
+    ? '<div class="pl-desc">' + italicizeTitle(richDescHtml(w.description), w.title) + "</div>"
     : (isOwner() ? '<div class="pl-desc pl-empty">No description yet.</div>' : "");
   const edit = isOwner() ? '<button class="pl-edit" id="pl-edit" type="button">Edit</button>' : "";
   const artist = w.artist
@@ -2112,6 +2156,11 @@ function editWorkDialog(w) {
     '<button type="button" class="fmtbtn" data-cmd="bold" title="Bold"><b>B</b></button>' +
     '<button type="button" class="fmtbtn" data-cmd="italic" title="Italic"><i>I</i></button>' +
     '<button type="button" class="fmtbtn" data-cmd="underline" title="Underline"><u>U</u></button>' +
+    '<button type="button" class="fmtbtn" id="fmt-paste" title="Paste as plain text">' +
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
+    '<path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg></button>' +
     '<select id="fmt-font" title="Font"><option value="">Font</option>' +
     '<option value="Georgia">Serif</option><option value="Arial">Sans</option>' +
     '<option value="Courier New">Mono</option></select>' +
@@ -2129,9 +2178,26 @@ function editWorkDialog(w) {
 
   /* ---- format bar (description) ---- */
   try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
-  m.el.querySelectorAll(".fmtbtn").forEach((b) => {
+  m.el.querySelectorAll(".fmtbtn[data-cmd]").forEach((b) => {
     b.addEventListener("mousedown", (e) => e.preventDefault());  // keep the text selection
     b.addEventListener("click", () => { ed.focus(); document.execCommand(b.dataset.cmd); });
+  });
+
+  /* Paste as plain text: insert the clipboard with its markup stripped, so text
+     copied from a web page doesn't drag that page's fonts and colours in. */
+  const pasteBtn = q("#fmt-paste");
+  pasteBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  pasteBtn.addEventListener("click", async () => {
+    ed.focus();
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) document.execCommand("insertText", false, text);
+    } catch (err) {
+      // Reading the clipboard needs a secure context + permission; fall back to
+      // telling them the keyboard shortcut that does the same thing.
+      q("#ew-msg").textContent =
+        "Your browser blocked clipboard access — use Ctrl+Shift+V to paste without formatting.";
+    }
   });
   const fontSel = q("#fmt-font"), sizeSel = q("#fmt-size");
   fontSel.addEventListener("change", () => {
