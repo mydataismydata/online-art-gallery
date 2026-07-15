@@ -25,16 +25,24 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import config, library, thumbs
-from .names import safe_name, parse_year
+from . import config, library, thumbs, artistinfo
+from .names import safe_name, parse_year, slugify
 
 WORKS_SUBDIR = "works"
+ARTISTS_SUBDIR = "artists"
 
 # Placard fields carried to the public site: everything the viewer shows plus
 # provenance. Width/height are intentionally omitted -- the public work's real
 # dimensions come from the (reduced) image file itself when it's scanned.
 _PLACARD_FIELDS = ("artist", "title", "date", "year", "medium", "style", "genre",
                    "school", "description", "type", "source", "source_url")
+
+# Artist bio fields carried across. `updated` is deliberately not among them (it
+# would churn the repo on every export) and neither is `cover` -- that's a local
+# work id, and the same painting has a different id on the public box, so it
+# travels as cover_pid instead.
+_BIO_FIELDS = ("born", "died", "birthplace", "nationality", "movements",
+               "description", "wikidata_id", "wikipedia_url")
 
 
 # ---------------- repo location + config ----------------
@@ -157,11 +165,14 @@ def repo_status():
     wd = repo / WORKS_SUBDIR
     if wd.is_dir():
         st["works"] = sum(1 for _ in wd.glob("*.json"))
+    ad = repo / ARTISTS_SUBDIR
+    st["artists"] = sum(1 for _ in ad.glob("*.json")) if ad.is_dir() else None
     st["last_export"] = last_export()
     try:
         st["new_count"] = len(unpublished_works())
     except Exception:
         st["new_count"] = None
+    st["bio_changes"] = pending_bios()
     return st
 
 
@@ -205,6 +216,78 @@ def _ensure_pid(work):
         data["pid"] = pid
         _save_sidecar(sc, data)
     return pid
+
+
+# ---------------- artist bios ----------------
+
+def _artist_blobs():
+    """{slug: (name, json)} for every artist who has work on the public site and a
+    bio worth sending. Deterministic bytes, so re-exporting an unchanged bio stages
+    nothing and the repo stays quiet.
+
+    Only artists with published work are included: a bio for a painter the public
+    site has never heard of would import as an orphan."""
+    pid_by_wid, names = {}, {}
+    for w in library.all_works():
+        if w.get("pid"):
+            pid_by_wid[w["id"]] = w["pid"]
+            names.setdefault((w.get("artist") or "").casefold(), w.get("artist"))
+
+    out = {}
+    for name in names.values():
+        info = artistinfo.load(name)
+        if not info:
+            continue
+        rec = {"name": name}
+        for f in _BIO_FIELDS:
+            v = info.get(f)
+            if v not in (None, "", []):
+                rec[f] = v
+        if len(rec) == 1:                      # name only -- nothing to say
+            continue
+        cover = info.get("cover")
+        if cover and cover in pid_by_wid:
+            rec["cover_pid"] = pid_by_wid[cover]
+        out[slugify(name)] = (
+            name, json.dumps(rec, ensure_ascii=False, indent=1, sort_keys=True))
+    return out
+
+
+def _bio_diff(repo):
+    """(slug, name, blob) for each bio the repo doesn't already hold verbatim."""
+    adir = repo / ARTISTS_SUBDIR
+    out = []
+    for slug, (name, blob) in _artist_blobs().items():
+        p = adir / (slug + ".json")
+        try:
+            if p.read_text(encoding="utf-8") == blob:
+                continue
+        except OSError:
+            pass
+        out.append((slug, name, blob))
+    return out
+
+
+def pending_bios():
+    """How many artist bios differ from what the public site holds. None if there's
+    no usable repo to compare against."""
+    repo = repo_path()
+    if not _is_git_repo(repo):
+        return None
+    try:
+        return len(_bio_diff(repo))
+    except Exception:
+        return None
+
+
+def sync_artists(repo):
+    """Write every changed bio into the repo. Returns the artists written."""
+    changed = _bio_diff(repo)
+    if changed:
+        (repo / ARTISTS_SUBDIR).mkdir(parents=True, exist_ok=True)
+    for slug, _name, blob in changed:
+        (repo / ARTISTS_SUBDIR / (slug + ".json")).write_text(blob, encoding="utf-8")
+    return [name for _slug, name, _blob in changed]
 
 
 # ---------------- push (local box) ----------------
@@ -254,47 +337,75 @@ def publish_works(ids):
         except Exception as e:
             errors.append({"id": wid, "error": str(e)})
 
-    result = {"published": published, "pids": pids, "errors": errors,
-              "committed": False, "pushed": False, "commit": None, "message": None}
-    if not published:
-        result["message"] = "Nothing to publish."
-        return result
-
     # The sidecars just gained pids; drop the scan cache so those works stop
-    # counting as "new" straight away.
-    library.invalidate()
-    _record_export(published)
+    # counting as "new" straight away -- and so the bio sync below sees them as
+    # published and carries their artists across.
+    if published:
+        library.invalidate()
+
+    # Always: editing a bio is a publishable change on its own, with no new
+    # artwork attached. An unchanged bio writes nothing, so this is free.
+    try:
+        bios = sync_artists(repo)
+    except Exception as e:
+        bios = []
+        errors.append({"id": "artists", "error": str(e)})
+
+    result = {"published": published, "bios": len(bios), "pids": pids, "errors": errors,
+              "committed": False, "pushed": False, "commit": None, "message": None}
+
     _git(repo, "add", "-A")
     _, staged, _ = _git(repo, "status", "--porcelain")
     if not staged.strip():
-        result["message"] = "Already up to date — no changes to push."
+        result["message"] = ("Nothing to publish." if not ids
+                             else "Already up to date — no changes to push.")
         return result
+    if published:
+        _record_export(published)
 
-    who = ", ".join(artists[:3]) + (" +%d more" % (len(artists) - 3) if len(artists) > 3 else "")
-    msg = "Publish %d work(s)%s" % (published, (": " + who) if who else "")
-    _git(repo, "commit", "-m", msg)
+    _git(repo, "commit", "-m", _commit_message(published, artists, bios))
     result["committed"] = True
     _, sha_out, _ = _git(repo, "rev-parse", "--short", "HEAD", check=False)
     result["commit"] = sha_out.strip() or None
     try:
         _git(repo, "push", timeout=600)
         result["pushed"] = True
-        result["message"] = "Pushed %d work(s) to the public server." % published
+        result["message"] = "Pushed %s to the public server." % _summary(published, len(bios))
     except Exception as e:
         result["message"] = ("Committed locally but the push failed: %s — the commit "
                               "is saved; retry once git access is sorted." % e)
     return result
 
 
+def _summary(works, bios):
+    bits = []
+    if works:
+        bits.append("%d work%s" % (works, "" if works == 1 else "s"))
+    if bios:
+        bits.append("%d bio%s" % (bios, "" if bios == 1 else "s"))
+    return " and ".join(bits) or "nothing"
+
+
+def _commit_message(published, artists, bios):
+    parts = []
+    if published:
+        who = ", ".join(artists[:3]) + (" +%d more" % (len(artists) - 3) if len(artists) > 3 else "")
+        parts.append("%d work(s)%s" % (published, (": " + who) if who else ""))
+    if bios:
+        who = ", ".join(bios[:3]) + (" +%d more" % (len(bios) - 3) if len(bios) > 3 else "")
+        parts.append("%d bio(s): %s" % (len(bios), who))
+    return "Publish " + " + ".join(parts)
+
+
 def publish_new():
-    """Export every work that has never been published, in one commit + push."""
+    """Export everything the public site hasn't got: works never published, and any
+    bio that's been written or revised since. One commit, one push."""
     works = unpublished_works()
-    if not works:
-        return {"published": 0, "new": 0, "pids": [], "errors": [], "committed": False,
-                "pushed": False, "commit": None,
-                "message": "No new artwork — everything is already on the public server."}
     result = publish_works([w["id"] for w in works])
     result["new"] = len(works)
+    if not result["committed"] and not result["errors"]:
+        result["message"] = ("Nothing new — the public server already has every work "
+                             "and every bio.")
     return result
 
 
@@ -373,6 +484,46 @@ def _import_update(repo, p, cur):
     return True
 
 
+def _import_artists(repo):
+    """Import the published bios. Run AFTER the works, so the pid->id map is
+    populated and an artist's folder already exists."""
+    adir = repo / ARTISTS_SUBDIR
+    out = {"added": 0, "updated": 0, "unchanged": 0}
+    if not adir.is_dir():
+        return out
+    # The cover travels as a pid because work ids are per-box: the same painting
+    # lives at a different path here and so hashes differently.
+    wid_by_pid = {w["pid"]: w["id"] for w in library.all_works() if w.get("pid")}
+
+    for jf in sorted(adir.glob("*.json")):
+        try:
+            rec = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        name = (rec.get("name") or "").strip()
+        if not name:
+            continue
+        data = {f: rec[f] for f in _BIO_FIELDS if rec.get(f) not in (None, "", [])}
+        if not data:
+            continue
+        cover = wid_by_pid.get(rec.get("cover_pid"))
+        if cover:
+            data["cover"] = cover
+        data["source"] = "published"
+
+        cur = artistinfo.load(name)
+        same = bool(cur) and all(
+            (cur.get(f) or None) == (data.get(f) or None) for f in _BIO_FIELDS)
+        if same and (not cover or cur.get("cover") == cover):
+            out["unchanged"] += 1
+            continue
+        artistinfo.save(name, data)
+        out["updated" if cur else "added"] += 1
+    return out
+
+
 def _prewarm(artists):
     wanted = {(a or "").casefold() for a in artists}
     try:
@@ -432,9 +583,17 @@ def pull_and_import():
         except Exception as e:
             errors.append({"pid": p.get("pid"), "error": str(e)})
 
+    # Unconditionally: the bio import reads the pid->id map off a fresh scan, and
+    # bios can change with no work changing at all.
+    library.invalidate()
+    try:
+        bios = _import_artists(repo)
+    except Exception as e:
+        bios = {"added": 0, "updated": 0, "unchanged": 0}
+        errors.append({"pid": "artists", "error": str(e)})
     if added or updated:
-        library.invalidate()
         _prewarm(touched)
 
     return {"added": added, "updated": updated, "unchanged": unchanged,
-            "skipped": skipped, "errors": errors, "pull": pull_msg, "total": len(placards)}
+            "skipped": skipped, "errors": errors, "pull": pull_msg,
+            "total": len(placards), "bios": bios}

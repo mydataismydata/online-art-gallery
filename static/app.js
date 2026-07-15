@@ -2182,21 +2182,30 @@ function publishPanelHtml(st) {
   const remote = st && st.remote ? st.remote : "—";
   const worksN = st && st.works != null ? st.works : "—";
   const newN = st && st.new_count != null ? st.new_count : null;
+  const bioN = st && st.bio_changes != null ? st.bio_changes : null;
   const last = st && st.last_export;
   const lastTxt = last
     ? "Last export: " + last.at + " · " + last.count + " work(s)."
     : "No exports yet.";
-  const newTxt = newN == null ? ""
-    : (newN === 0 ? "Nothing new since your last export. "
-                  : newN + " work(s) added since your last export. ");
+  // Works and bios are separate reasons to export — a bio you've rewritten is
+  // pending even when no new paintings are.
+  const pend = [];
+  if (newN) pend.push(newN + (newN === 1 ? " new work" : " new works"));
+  if (bioN) pend.push(bioN + (bioN === 1 ? " changed bio" : " changed bios"));
+  const nothing = newN === 0 && bioN === 0;
+  const newTxt = (newN == null || bioN == null) ? ""
+    : (nothing ? "Nothing pending. "
+               : "Waiting to go: " + pend.join(" and ") + ". ");
   return setSec("public", "Public server",
     "<b>Push to public</b> (on an artist page) copies the reduced-size images and " +
     "placards of the selected works into your content repo and pushes them to GitHub; the public " +
-    "site then pulls them in. " + repoPill(st),
+    "site then pulls them in. Artist bios ride along with whichever painters are " +
+    "already published. " + repoPill(st),
     '<div class="publishpanel">' +
     '<div class="exportbox"><div class="bf-actions">' +
-    '<button type="button" class="cta-btn" id="export-new"' + (newN === 0 ? " disabled" : "") + ">" +
-    "Export all new artwork" + (newN ? " (" + newN + ")" : "") + "</button>" +
+    '<button type="button" class="cta-btn" id="export-new"' + (nothing ? " disabled" : "") + ">" +
+    "Export new artwork &amp; bios" + (pend.length ? " (" + pend.join(" · ") + ")" : "") +
+    "</button>" +
     '<span class="formmsg" id="export-msg"></span></div>' +
     '<p class="tiny">' + esc(newTxt) + esc(lastTxt) +
     " A large first export can take a few minutes.</p></div>" +
@@ -2245,11 +2254,14 @@ function wirePublishPanel() {
   });
 }
 
-// Public box: pull the latest published works into the gallery.
+// Public box: pull the latest published works + bios into the gallery.
 function pullPanelHtml(st) {
+  const holds = [];
+  if (st && st.works != null) holds.push(st.works + (st.works === 1 ? " work" : " works"));
+  if (st && st.artists != null) holds.push(st.artists + (st.artists === 1 ? " bio" : " bios"));
   return setSec("pull", "Pull new artwork",
-    "Fetch the latest works your local gallery pushed and import them here. " +
-    repoPill(st) + (st && st.works != null ? " · " + st.works + " in the repo" : ""),
+    "Fetch the latest works and artist bios your local gallery pushed, and import " +
+    "them here. " + repoPill(st) + (holds.length ? " · " + holds.join(" · ") + " in the repo" : ""),
     '<div class="pullpanel"><div class="bf-actions">' +
     '<button type="button" class="cta-btn" id="pull-btn">Pull new artwork</button>' +
     '<span class="formmsg" id="pull-msg"></span></div></div>');
@@ -2263,10 +2275,14 @@ function wirePullPanel() {
     btn.disabled = true; const orig = btn.textContent; btn.textContent = "Pulling…";
     try {
       const r = await api("/api/pull", { method: "POST" });
+      const b = r.bios || { added: 0, updated: 0 };
+      const bioN = (b.added || 0) + (b.updated || 0);
       msg.className = "formmsg ok";
-      msg.textContent = "Added " + r.added + ", updated " + r.updated + ", " +
-        r.unchanged + " unchanged.";
-      toast("Pull complete: +" + r.added + " new, " + r.updated + " updated.");
+      msg.textContent = "Works: added " + r.added + ", updated " + r.updated + ", " +
+        r.unchanged + " unchanged. Bios: added " + (b.added || 0) +
+        ", updated " + (b.updated || 0) + ".";
+      toast("Pull complete: +" + r.added + " new, " + r.updated + " updated" +
+            (bioN ? ", " + bioN + " bio" + (bioN === 1 ? "" : "s") : "") + ".");
     } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = orig; }
   });
