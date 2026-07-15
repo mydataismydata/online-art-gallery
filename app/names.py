@@ -73,6 +73,14 @@ def unshout(name):
     return " ".join(fix_word(w, i == 0) for i, w in enumerate(words)) or (name or "")
 
 
+def particle_case_score(name):
+    """How many nobiliary particles ('van', 'de', 'von') are written lowercase.
+    Used to choose between artist spellings that differ only in case, so
+    'Anthony van Dyck' wins over 'Anthony Van Dyck'."""
+    words = (name or "").split()
+    return sum(1 for w in words[1:] if w.lower() in _PARTICLES and w[:1].islower())
+
+
 def artist_sort_key(name):
     """Sort painters by surname: 'Jacques-Louis David' -> 'david'."""
     words = strip_diacritics(name or "").casefold().split()

@@ -14,7 +14,7 @@ from PIL import Image
 
 from . import config
 from .names import (safe_name, era_from, parse_year, clean_title_text,
-                    artist_sort_key, strip_diacritics)
+                    artist_sort_key, strip_diacritics, particle_case_score)
 
 # The gallery is built around enormous images; don't let Pillow refuse to read them.
 Image.MAX_IMAGE_PIXELS = None
@@ -115,6 +115,28 @@ def _work_from_file(path, artist_dir_name):
     }
 
 
+def _pick_artist_name(counter):
+    """Choose the display spelling among case-variants of one artist: the most
+    common wins; ties prefer correctly-lowercased particles ('van Dyck' over
+    'Van Dyck'), then alphabetical so the pick is stable across scans."""
+    return sorted(counter.items(),
+                  key=lambda kv: (-kv[1], -particle_case_score(kv[0]), kv[0]))[0][0]
+
+
+def _canonicalize_artists(works):
+    """Collapse artist spellings that differ only in case onto one name. Museums
+    credit the same painter inconsistently ('Anthony van Dyck' vs 'Anthony Van
+    Dyck'), which would otherwise split them into two artists. Done here so every
+    consumer — cards, grids, AI batching, placards — sees one identity."""
+    variants = {}
+    for w in works:
+        name = (w["artist"] or "").strip()
+        variants.setdefault(name.casefold(), Counter())[name] += 1
+    canon = {cf: _pick_artist_name(c) for cf, c in variants.items()}
+    for w in works:
+        w["artist"] = canon[(w["artist"] or "").strip().casefold()]
+
+
 def scan(force=False):
     with _lock:
         if not force and time.time() - _state["scanned_at"] < _TTL:
@@ -131,6 +153,7 @@ def scan(force=False):
                             works.append(_work_from_file(f, artist_dir.name))
                         except Exception as e:
                             print("scan: skipping %s (%s)" % (f, e), flush=True)
+        _canonicalize_artists(works)
         works.sort(key=lambda w: (artist_sort_key(w["artist"]), w["year"] or 9999, w["title"].casefold()))
         _state["works"] = works
         _state["by_id"] = {w["id"]: w for w in works}
@@ -470,12 +493,26 @@ def update_works_meta(updates):
     return changed
 
 
+def _artist_folder(artist_name):
+    """Where an artist's works live. Reuses a folder that differs only by case, so
+    a work credited 'Anthony Van Dyck' files in with an existing 'Anthony van Dyck'
+    instead of splitting the painter across two folders on disk."""
+    want = safe_name(artist_name, 80)
+    root = config.LIBRARY_DIR
+    if root.exists():
+        target = want.casefold()
+        for d in sorted(root.iterdir()):
+            if d.is_dir() and not d.name.startswith(".") and d.name.casefold() == target:
+                return d
+    return root / want
+
+
 def save_work(artist, meta, tmp_path, job=None):
     """Move a downloaded temp file into the library and write its sidecar.
     Returns the final path. If a download `job` is given, records the artist the
     work was filed under so the UI can link to that artist afterwards."""
     artist_name = re.sub(r"\s+", " ", artist or "").strip() or "Unknown Artist"
-    folder = config.LIBRARY_DIR / safe_name(artist_name, 80)
+    folder = _artist_folder(artist_name)
     folder.mkdir(parents=True, exist_ok=True)
 
     ext = Path(str(tmp_path)).suffix.lower() or ".jpg"
