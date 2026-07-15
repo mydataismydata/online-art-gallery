@@ -276,13 +276,18 @@ function workFigure(w, i, showArtist) {
   const dim = (!isPublic() && w.width && w.height)
     ? '<span class="wdim">' + w.width + " × " + w.height + "</span>"
     : "";
+  // Only offer the placard where there's something to read.
+  const info = w.description
+    ? '<button class="winfo" type="button" title="Show the placard"' +
+      ' aria-label="Show the placard for ' + esc(w.title) + '">i</button>'
+    : "";
   return (
     '<figure class="work" data-i="' + i + '" data-id="' + w.id + '">' +
       '<div class="wimg"><img src="' + thumbSrc(w) + '" loading="lazy" alt="">' +
       '<span class="checkmark" aria-hidden="true"></span>' + dim + "</div>" +
-      '<figcaption><div class="wt">' + esc(w.title) + "</div>" +
+      '<figcaption><div class="wtext"><div class="wt">' + esc(w.title) + "</div>" +
       (meta ? '<div class="wm">' + esc(meta) + "</div>" : "") +
-      "</figcaption></figure>"
+      "</div>" + info + "</figcaption></figure>"
   );
 }
 
@@ -330,6 +335,12 @@ function bindWorks(works, showArtist, rerender, ctx) {
   grid.addEventListener("click", (e) => {
     const fig = e.target.closest(".work");
     if (!fig) return;
+    // The info button is an explicit target: it never selects or opens the viewer.
+    if (e.target.closest(".winfo")) {
+      const w = works[parseInt(fig.dataset.i, 10)];
+      if (w) workInfoDialog(w);
+      return;
+    }
     if (SEL.on) {
       const id = fig.dataset.id;
       if (SEL.ids.has(id)) SEL.ids.delete(id); else SEL.ids.add(id);
@@ -2172,6 +2183,26 @@ function placardHtml(w) {
     (date ? '<span class="pl-date">, ' + esc(date) + "</span>" : "") + "</div>" +
     (w.medium ? '<div class="pl-medium">' + esc(w.medium) + "</div>" : "") +
     desc + edit + "</div>";
+}
+
+/* The "i" on a tile: read a piece's placard without opening the viewer. Same card
+   the viewer shows, so the reading is identical — its buttons just mean modal
+   things here (× closes this, Edit hands off to the editor). Queries are scoped to
+   the modal: the viewer's own hidden placard may still hold the same ids. */
+function workInfoDialog(w) {
+  const m = modal(placardHtml(w));
+  m.el.querySelector(".modal").classList.add("modal-placard");
+  const q = (s) => m.el.querySelector(s);
+  const close = q("#pl-close");
+  if (close) close.addEventListener("click", m.close);
+  const edit = q("#pl-edit");
+  if (edit) edit.addEventListener("click", () => { m.close(); editWorkDialog(w); });
+  const artist = q("#pl-artist");
+  if (artist) artist.addEventListener("click", (e) => {
+    e.preventDefault();
+    m.close();
+    location.hash = artist.getAttribute("href");
+  });
 }
 
 function syncPlacard() {
