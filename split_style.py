@@ -123,7 +123,9 @@ GENRES = {
 NAMED_SCHOOLS = {
     "Heidelberg School": ["Australian Impressionism", "Australian Impressionist"],
     "Hudson River School": [],
-    "Pennsylvania Impressionism": ["Pennsylvania Impressionist", "New Hope School"],
+    # The colony's proper name; "Pennsylvania Impressionism" is the descriptive
+    # label for the same painters.
+    "New Hope School": ["Pennsylvania Impressionism", "Pennsylvania Impressionist"],
     "Skagen Painters": ["Skagen"],
     "Barbizon School": ["Barbizon"],
     "Hague School": [],
@@ -182,8 +184,12 @@ NATION_FORMS = _forms(NATIONALITIES)
 
 
 def _pat(phrase):
-    # [\s,]+ between words so a stray comma ("Skagen, Painters") still matches.
-    return r"\b" + r"[\s,]+".join(re.escape(w) for w in phrase.split()) + r"\b"
+    # [\s,]+ between words so a stray comma ("Skagen, Painters") still matches, and
+    # an optional trailing s so plurals do too ("Pennsylvania Impressionists",
+    # "Portraits", "Still lifes") — \b would otherwise refuse them outright.
+    parts = [re.escape(w) for w in phrase.split()]
+    parts[-1] += "s?"
+    return r"\b" + r"[\s,]+".join(parts) + r"\b"
 
 
 def _find(forms, text):
