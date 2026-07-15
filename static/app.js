@@ -2182,29 +2182,33 @@ function publishPanelHtml(st) {
   const remote = st && st.remote ? st.remote : "—";
   const worksN = st && st.works != null ? st.works : "—";
   const newN = st && st.new_count != null ? st.new_count : null;
+  const plaN = st && st.placard_changes != null ? st.placard_changes : null;
   const bioN = st && st.bio_changes != null ? st.bio_changes : null;
   const last = st && st.last_export;
   const lastTxt = last
     ? "Last export: " + last.at + " · " + last.count + " work(s)."
     : "No exports yet.";
-  // Works and bios are separate reasons to export — a bio you've rewritten is
-  // pending even when no new paintings are.
+  // Three separate reasons to export: a new painting, a placard you've corrected
+  // since publishing it, or a rewritten bio. Any one of them stands alone.
+  const n = (v, one, many) => v + " " + (v === 1 ? one : many);
   const pend = [];
-  if (newN) pend.push(newN + (newN === 1 ? " new work" : " new works"));
-  if (bioN) pend.push(bioN + (bioN === 1 ? " changed bio" : " changed bios"));
-  const nothing = newN === 0 && bioN === 0;
-  const newTxt = (newN == null || bioN == null) ? ""
-    : (nothing ? "Nothing pending. "
-               : "Waiting to go: " + pend.join(" and ") + ". ");
+  if (newN) pend.push(n(newN, "new work", "new works"));
+  if (plaN) pend.push(n(plaN, "fixed placard", "fixed placards"));
+  if (bioN) pend.push(n(bioN, "changed bio", "changed bios"));
+  const known = newN != null && plaN != null && bioN != null;
+  const nothing = known && !pend.length;
+  const newTxt = !known ? ""
+    : (nothing ? "Nothing pending. " : "Waiting to go: " + pend.join(", ") + ". ");
   return setSec("public", "Public server",
-    "<b>Push to public</b> (on an artist page) copies the reduced-size images and " +
-    "placards of the selected works into your content repo and pushes them to GitHub; the public " +
-    "site then pulls them in. Artist bios ride along with whichever painters are " +
-    "already published. " + repoPill(st),
+    "Everything your gallery has that the public site doesn't — new paintings, " +
+    "placards you've corrected since publishing them, and rewritten artist bios — " +
+    "goes over in one push. <b>Push to public</b> on an artist page sends just the " +
+    "works you select, and is the way to send a better image of a painting that's " +
+    "already up. " + repoPill(st),
     '<div class="publishpanel">' +
     '<div class="exportbox"><div class="bf-actions">' +
     '<button type="button" class="cta-btn" id="export-new"' + (nothing ? " disabled" : "") + ">" +
-    "Export new artwork &amp; bios" + (pend.length ? " (" + pend.join(" · ") + ")" : "") +
+    "Export everything pending" + (pend.length ? " (" + pend.join(" · ") + ")" : "") +
     "</button>" +
     '<span class="formmsg" id="export-msg"></span></div>' +
     '<p class="tiny">' + esc(newTxt) + esc(lastTxt) +

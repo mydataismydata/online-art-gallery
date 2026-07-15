@@ -101,6 +101,31 @@ def unpublished_works():
     return [w for w in library.all_works() if not w.get("pid")]
 
 
+def restated_works():
+    """Published works whose placard no longer matches what the public site holds.
+
+    "New" is pid-gated, and a published work keeps its pid forever — so a corrected
+    placard would never appear in an export and would sit there looking done. This
+    compares the fields only, never the image: it runs over the whole library on
+    every Settings load, and rendering derivatives to compare shas would make that
+    unbearable. A replaced image is still the explicit "Push to public" case."""
+    repo = repo_path()
+    if not _is_git_repo(repo):
+        return []
+    out = []
+    for w in library.all_works():
+        if not w.get("pid"):
+            continue
+        p = repo / WORKS_SUBDIR / (w["pid"] + ".json")
+        try:
+            cur = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue          # not published yet, or unreadable — not our business
+        if any((w.get(f) or None) != (cur.get(f) or None) for f in _PLACARD_FIELDS):
+            out.append(w)
+    return out
+
+
 # ---------------- pull suppression ----------------
 # When the owner deletes a pulled work on the public server, its pid is remembered
 # here so a later Pull doesn't re-import it (the pid is still in the content repo).
@@ -172,6 +197,10 @@ def repo_status():
         st["new_count"] = len(unpublished_works())
     except Exception:
         st["new_count"] = None
+    try:
+        st["placard_changes"] = len(restated_works())
+    except Exception:
+        st["placard_changes"] = None
     st["bio_changes"] = pending_bios()
     return st
 
@@ -398,14 +427,17 @@ def _commit_message(published, artists, bios):
 
 
 def publish_new():
-    """Export everything the public site hasn't got: works never published, and any
-    bio that's been written or revised since. One commit, one push."""
-    works = unpublished_works()
-    result = publish_works([w["id"] for w in works])
-    result["new"] = len(works)
+    """Export everything the public site hasn't got: works never published, placards
+    corrected since they were, and any bio written or revised. One commit, one push."""
+    fresh = unpublished_works()
+    fixed = restated_works()
+    ids = [w["id"] for w in fresh] + [w["id"] for w in fixed]
+    result = publish_works(ids)
+    result["new"] = len(fresh)
+    result["restated"] = len(fixed)
     if not result["committed"] and not result["errors"]:
-        result["message"] = ("Nothing new — the public server already has every work "
-                             "and every bio.")
+        result["message"] = ("Nothing to send — the public server already matches "
+                             "your gallery.")
     return result
 
 
