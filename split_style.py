@@ -9,10 +9,21 @@ now browses by three separate axes, so this splits each existing value across th
     genre  = the subject category      (Marine painting, Portrait, Still life)
     school = the national/regional     (Dutch, Flemish, Heidelberg School)
 
-Matching is by vocabulary, word-boundary and longest-phrase-first, scanned once per
+Matching is by vocabulary, word-boundary and longest-form-first, scanned once per
 bucket — so "Flemish Baroque" lands as school=Flemish + style=Baroque, and
 "Dutch Golden Age" as style=Dutch Golden Age + school=Dutch. A value nothing
 recognises is left alone in `style` and listed at the end for you to eyeball.
+
+Two things worth knowing if you're editing the vocabularies below:
+
+  * Each entry is  "Canonical output": [other spellings that mean the same thing].
+    So "Flower painting" in the data comes out as "Floral painting". Add an alias
+    to fix a wording you don't like — you never have to touch the matcher.
+
+  * NAMED_SCHOOLS beats NATIONALITIES. A named school already implies its country
+    and is the more useful label, so "Australian Impressionism" becomes the
+    Heidelberg School rather than "Australian", and "Pennsylvania Impressionism"
+    stays itself rather than collapsing to "American".
 
 Dry run (writes nothing, prints exactly what it would do):
 
@@ -34,93 +45,181 @@ from pathlib import Path
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
+# ---- vocabularies:  "Canonical output": [other spellings meaning the same] ----
+
 # The movement or manner.
-STYLES = [
-    "Dutch Golden Age", "Northern Renaissance", "Italian Renaissance",
-    "High Renaissance", "Early Renaissance", "Renaissance", "Baroque", "Rococo",
-    "Mannerism", "Mannerist", "Neoclassicism", "Neoclassical", "Romanticism",
-    "Romantic", "Realism", "Realist", "Naturalism", "Naturalist",
-    "Post-Impressionism", "Post-Impressionist", "Impressionism", "Impressionist",
-    "Pointillism", "Divisionism", "Symbolism", "Symbolist", "Tonalism", "Luminism",
-    "Orientalism", "Academic art", "Academicism", "Pre-Raphaelite", "Art Nouveau",
-    "Art Deco", "Expressionism", "Cubism", "Fauvism", "Surrealism", "Modernism",
-    "International Gothic", "Gothic", "Byzantine", "Medieval", "Classicism",
-    "Caravaggism", "Caravaggesque", "Victorian", "Edwardian", "Biedermeier",
-    "Primitivism", "Naive art", "Abstraction", "Abstract", "Minimalism", "Pop art",
-    "Futurism", "Constructivism", "Suprematism", "Bauhaus", "De Stijl", "Vorticism",
-    "Precisionism", "Regionalism", "Social realism", "Magic realism",
-    "Photorealism", "Hyperrealism", "Postmodernism", "Contemporary", "Macchiaioli",
-    "Secession", "Golden Age",
-]
+STYLES = {
+    "Dutch Golden Age": [],
+    "Northern Renaissance": [], "Italian Renaissance": [], "High Renaissance": [],
+    "Early Renaissance": [], "Renaissance": [],
+    "Baroque": [], "Rococo": [],
+    "Mannerism": ["Mannerist"],
+    "Neoclassicism": ["Neoclassical", "Neo-classicism"],
+    "Romanticism": ["Romantic"],
+    "Realism": ["Realist"],
+    "Naturalism": ["Naturalist"],
+    "Post-Impressionism": ["Post-Impressionist", "Postimpressionism"],
+    "Impressionism": ["Impressionist", "Impressionistic"],
+    "Pointillism": ["Pointillist"],
+    "Divisionism": [],
+    "Symbolism": ["Symbolist"],
+    "Tonalism": ["Tonalist"],
+    "Luminism": [],
+    "Orientalism": ["Orientalist"],
+    "Academic art": ["Academicism"],
+    "Pre-Raphaelite": ["Pre-Raphaelitism", "Pre-Raphaelite Brotherhood"],
+    "Art Nouveau": [], "Art Deco": [],
+    "Expressionism": ["Expressionist"],
+    "Cubism": ["Cubist"], "Fauvism": ["Fauvist"],
+    "Surrealism": ["Surrealist"], "Modernism": ["Modernist"],
+    "International Gothic": [], "Gothic": [], "Byzantine": [], "Medieval": [],
+    "Classicism": [],
+    "Caravaggism": ["Caravaggesque", "Caravaggisti"],
+    "Victorian": [], "Edwardian": [], "Biedermeier": [],
+    "Primitivism": ["Naive art", "Naïve art"],
+    "Abstraction": ["Abstract"],
+    "Minimalism": [], "Pop art": [], "Futurism": [], "Constructivism": [],
+    "Suprematism": [], "Bauhaus": [], "De Stijl": [], "Vorticism": [],
+    "Precisionism": [], "Regionalism": [], "Social realism": [],
+    "Magic realism": [], "Photorealism": ["Hyperrealism"], "Postmodernism": [],
+    "Contemporary": [], "Macchiaioli": [], "Secession": ["Sezession"],
+    "Golden Age": [],
+}
 
 # The subject category.
-GENRES = [
-    "History painting", "Genre painting", "Genre scene", "Equestrian portrait",
-    "Group portrait", "Self-portrait", "Portraiture", "Portrait",
-    "Winter landscape", "Landscape", "Cityscape", "Townscape", "Veduta",
-    "Seascape", "Marine painting", "Marine art", "Maritime", "Marine",
-    "Still life", "Flower painting", "Floral", "Animal painting", "Animalier",
-    "Religious art", "Religious", "Biblical", "Mythological", "Mythology",
-    "Allegory", "Allegorical", "Nude", "Interior", "Architectural",
-    "Battle painting", "Battle scene", "Battle", "Military", "Hunting scene",
-    "Sporting art", "Vanitas", "Tronie", "Capriccio", "Pastoral", "Nocturne",
-    "Figure painting", "Conversation piece", "Trompe l'oeil", "Icon", "Miniature",
-    "Caricature", "Topographical", "Rural scene",
-]
+GENRES = {
+    "History painting": ["History piece"],
+    "Genre painting": ["Genre scene", "Genre work"],
+    "Equestrian portrait": [], "Group portrait": [], "Self-portrait": [],
+    "Portrait": ["Portraiture", "Portrait painting"],
+    "Winter landscape": [],
+    "Landscape": ["Landscape painting"],
+    "Cityscape": ["Townscape", "Veduta", "Urban scene"],
+    "Seascape": [],
+    "Marine painting": ["Marine art", "Maritime painting", "Maritime", "Marine"],
+    "Still life": ["Stilleven"],
+    "Floral painting": ["Flower painting", "Flower piece", "Floral", "Flowers"],
+    "Animal painting": ["Animalier", "Animal art"],
+    "Religious art": ["Religious painting", "Religious", "Sacred art"],
+    "Biblical": [],
+    "Mythological": ["Mythology", "Mythological painting"],
+    "Allegory": ["Allegorical"],
+    "Nude": [], "Interior": ["Interior scene"],
+    "Architectural": ["Architectural painting"],
+    "Battle painting": ["Battle scene", "Battle"],
+    "Military": [], "Hunting scene": [], "Sporting art": [], "Vanitas": [],
+    "Tronie": [], "Capriccio": [],
+    "Pastoral": ["Pastoral scene"],
+    "Nocturne": [],
+    "Figure painting": ["Figurative"],
+    "Conversation piece": [],
+    "Trompe l'oeil": ["Trompe-l'oeil"],
+    "Icon": [], "Miniature": [], "Caricature": [], "Topographical": [],
+    "Rural scene": ["Rural life"],
+}
 
-# The national or regional school.
-SCHOOLS = [
-    "Hudson River School", "Heidelberg School", "Barbizon School", "Norwich School",
-    "Newlyn School", "Glasgow School", "Ashcan School", "Dusseldorf School",
-    "Düsseldorf School", "Venetian School", "Florentine School", "Bolognese School",
-    "Sienese School", "Utrecht School", "Antwerp School", "Haarlem School",
-    "Delft School", "Leiden School", "Hague School", "School of Paris", "Barbizon",
-    "Netherlandish", "Flemish", "Dutch", "Italian", "Venetian", "Florentine",
-    "Sienese", "Bolognese", "Neapolitan", "Lombard", "Umbrian", "Ferrarese",
-    "Roman", "Spanish", "French", "German", "English", "British", "Scottish",
-    "Irish", "American", "Russian", "Austrian", "Swiss", "Danish", "Norwegian",
-    "Swedish", "Finnish", "Belgian", "Hungarian", "Polish", "Czech", "Portuguese",
-    "Greek", "Japanese", "Chinese", "Korean", "Indian", "Persian", "Australian",
-    "Canadian", "Mexican", "Brazilian", "Scandinavian", "Nordic", "Antwerp",
-    "Haarlem", "Delft", "Utrecht", "Leiden", "Amsterdam",
-]
+# Named schools and artists' colonies. These WIN over a bare nationality below —
+# "Heidelberg School" already tells you Australian, and is the more useful label.
+NAMED_SCHOOLS = {
+    "Heidelberg School": ["Australian Impressionism", "Australian Impressionist"],
+    "Hudson River School": [],
+    "Pennsylvania Impressionism": ["Pennsylvania Impressionist", "New Hope School"],
+    "Skagen Painters": ["Skagen"],
+    "Barbizon School": ["Barbizon"],
+    "Hague School": [],
+    "Norwich School": [], "Newlyn School": [],
+    "Glasgow School": ["Glasgow Boys"],
+    "Ashcan School": [],
+    "Düsseldorf School": ["Dusseldorf School"],
+    "Venetian School": [], "Florentine School": [], "Bolognese School": [],
+    "Sienese School": [],
+    "Utrecht School": ["Utrecht Caravaggism", "Utrecht Caravaggisti"],
+    "Antwerp School": [], "Haarlem School": [], "Delft School": [],
+    "Leiden School": ["Leiden fijnschilders"],
+    "School of Paris": ["École de Paris", "Ecole de Paris"],
+    "Cornish School": [], "Norwegian Romantic Nationalism": [],
+}
+
+# The plain national / regional school.
+NATIONALITIES = {
+    "Netherlandish": ["Early Netherlandish"],
+    "Flemish": [], "Dutch": [], "Italian": [], "Venetian": [], "Florentine": [],
+    "Sienese": [], "Bolognese": [], "Neapolitan": [], "Lombard": [], "Umbrian": [],
+    "Ferrarese": [], "Roman": [], "Spanish": [], "French": [], "German": [],
+    "English": [], "British": [], "Scottish": [], "Welsh": [], "Irish": [],
+    "American": [], "Russian": [], "Austrian": [], "Swiss": [], "Danish": [],
+    "Norwegian": [], "Swedish": [], "Finnish": [], "Belgian": [], "Hungarian": [],
+    "Polish": [], "Czech": [], "Portuguese": [], "Greek": [], "Japanese": [],
+    "Chinese": [], "Korean": [], "Indian": [], "Persian": [], "Australian": [],
+    "Canadian": [], "Mexican": [], "Brazilian": [], "Scandinavian": [],
+    "Nordic": [], "Antwerp": [], "Haarlem": [], "Delft": [], "Utrecht": [],
+    "Leiden": [], "Amsterdam": [],
+}
 
 # Words that carry no bucket on their own — ignored when reporting leftovers.
-FILLER = {"painting", "paintings", "art", "artwork", "works", "work", "style",
-          "school", "movement", "and", "or", "the", "of", "a", "an", "period",
-          "era", "scene", "scenes", "genre", "c", "circa", "century"}
+FILLER = {"painting", "paintings", "painters", "painter", "art", "artwork",
+          "works", "work", "style", "school", "movement", "and", "or", "the",
+          "of", "a", "an", "period", "era", "scene", "scenes", "genre", "c",
+          "circa", "century"}
 
-for _v in (STYLES, GENRES, SCHOOLS):      # longest phrase first, so "Post-Impressionism"
-    _v.sort(key=len, reverse=True)        # is consumed before "Impressionism"
+
+def _forms(vocab):
+    """[(surface form, canonical)] — longest surface first, so "Post-Impressionism"
+    is consumed before "Impressionism" and "Australian Impressionism" before
+    "Australian"."""
+    out = []
+    for canon, aliases in vocab.items():
+        for surface in [canon] + list(aliases):
+            out.append((surface, canon))
+    out.sort(key=lambda p: len(p[0]), reverse=True)
+    return out
+
+
+STYLE_FORMS = _forms(STYLES)
+GENRE_FORMS = _forms(GENRES)
+NAMED_FORMS = _forms(NAMED_SCHOOLS)
+NATION_FORMS = _forms(NATIONALITIES)
 
 
 def _pat(phrase):
-    return r"\b" + r"\s+".join(re.escape(w) for w in phrase.split()) + r"\b"
+    # [\s,]+ between words so a stray comma ("Skagen, Painters") still matches.
+    return r"\b" + r"[\s,]+".join(re.escape(w) for w in phrase.split()) + r"\b"
 
 
-def _find(vocab, text):
-    """Longest-first, non-overlapping matches within one bucket."""
-    found, rest = [], text
-    for phrase in vocab:
-        p = _pat(phrase)
+def _find(forms, text):
+    """-> (canonicals, surfaces matched). Non-overlapping within the bucket."""
+    found, surfaces, rest = [], [], text
+    for surface, canon in forms:
+        p = _pat(surface)
         if re.search(p, rest, re.I):
-            found.append(phrase)
+            if canon not in found:
+                found.append(canon)
+            surfaces.append(surface)
             rest = re.sub(p, " ", rest, flags=re.I)
-    return found
+    return found, surfaces
 
 
-def _leftover(text, matched):
+def _leftover(text, surfaces):
     rest = text
-    for phrase in matched:
-        rest = re.sub(_pat(phrase), " ", rest, flags=re.I)
+    # Longest first: strip "Pennsylvania Impressionism" whole before the style
+    # bucket's "Impressionism" can break it up and strand "Pennsylvania" as a
+    # phantom dropped word.
+    for s in sorted(surfaces, key=len, reverse=True):
+        rest = re.sub(_pat(s), " ", rest, flags=re.I)
     words = [w for w in re.split(r"[^A-Za-z'À-ɏ-]+", rest) if w]
     return [w for w in words if w.lower() not in FILLER]
 
 
 def classify(value):
     """-> (fields, leftover_words, recognised)."""
-    styles, genres, schools = _find(STYLES, value), _find(GENRES, value), _find(SCHOOLS, value)
-    left = _leftover(value, styles + genres + schools)
+    styles, s_sf = _find(STYLE_FORMS, value)
+    genres, g_sf = _find(GENRE_FORMS, value)
+    named, n_sf = _find(NAMED_FORMS, value)
+    nations, t_sf = _find(NATION_FORMS, value)
+    # A named school implies its country, so it wins outright; the nationality is
+    # still consumed (t_sf) so it isn't reported as a dropped word.
+    schools = named or nations
+    left = _leftover(value, s_sf + g_sf + n_sf + t_sf)
     if not (styles or genres or schools):
         return {"style": value, "genre": None, "school": None}, left, False
     return ({"style": ", ".join(styles) or None,
