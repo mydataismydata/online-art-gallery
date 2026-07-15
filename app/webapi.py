@@ -514,9 +514,10 @@ def api_work_autofill(wid):
         abort(404)
     # The trace goes back either way — a failed call is exactly when the owner
     # needs to see what was sent and what came back.
+    data = request.get_json(silent=True) or {}
     trace = {}
     try:
-        fields = ai.autofill(w, trace=trace)
+        fields = ai.autofill(w, hint=data.get("hint"), trace=trace)
     except ai.AIError as e:
         return jsonify({"error": str(e), "trace": trace}), 502
     return jsonify({"fields": fields, "trace": trace})

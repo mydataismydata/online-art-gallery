@@ -2208,6 +2208,11 @@ function editWorkDialog(w) {
     '<button type="button" class="toolbtn" id="ew-auto">Auto fill</button>' +
     '<span class="tiny ew-autohint">Researches this painting and fills the fields below — review before saving.</span>' +
     '<span class="formmsg" id="ew-auto-msg"></span></div>' +
+    '<label class="ew-hintrow">Which painting? ' +
+    '<span class="tiny">optional · sent with Auto fill only — use it when the artist ' +
+    "has several works sharing this title</span>" +
+    '<textarea id="ew-hint" rows="2" placeholder="e.g. the 1887 self-portrait in a ' +
+    'grey felt hat, held by the Art Institute of Chicago"></textarea></label>' +
     '<div id="ew-trace-box"></div>' +
     "<label>Title<input id=\"ew-title\" autocomplete=\"off\"></label>" +
     "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
@@ -2294,7 +2299,12 @@ function editWorkDialog(w) {
     btn.disabled = true; btn.textContent = "Researching…";
     msg.className = "formmsg"; msg.textContent = "";
     try {
-      const r = await api("/api/work/" + encodeURIComponent(w.id) + "/autofill", { method: "POST" });
+      // Omitted when blank, so the request stays exactly as it was without a hint.
+      const hint = q("#ew-hint").value.trim();
+      const r = await api("/api/work/" + encodeURIComponent(w.id) + "/autofill", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(hint ? { hint: hint } : {}),
+      });
       const f = r.fields || {};
       const set = (id, v) => { if (v) { const el = q(id); el.value = v; flash(el); } };
       set("#ew-title", f.title); set("#ew-artist", f.artist); set("#ew-date", f.date);

@@ -194,12 +194,18 @@ def _chat(key, messages, max_tokens, timeout, trace=None):
     return content
 
 
-def autofill(work, trace=None):
+def autofill(work, hint=None, trace=None):
     """Ask the model for catalogue metadata for one work. Returns a dict of the
     fields it could supply (schema keys: artist/title/date/medium/style/genre/
     school/description), omitting blanks. Raises AIError on any config/transport
-    error. Pass a dict as `trace` to have the request/response recorded for the
-    editor's debug panel (see _chat)."""
+    error.
+
+    `hint` is the owner's own words about which painting this is — the way to break
+    a tie when an artist has many works sharing a title (van Gogh's "Self
+    Portrait", Degas' "The Dance Class"). Omitted, the request is unchanged.
+
+    Pass a dict as `trace` to have the request/response recorded for the editor's
+    debug panel (see _chat)."""
     key = _api_key()
     if not key:
         msg = "No API key set. Add one under Settings → Auto-fill."
@@ -216,6 +222,12 @@ def autofill(work, trace=None):
         user += "Known date: %s\n" % known_date
     if work.get("medium"):
         user += "Known medium: %s\n" % work["medium"]
+    hint = (hint or "").strip()
+    if hint:
+        user += ("\nThe gallery owner describes THIS painting as follows. This artist "
+                 "has other works with the same or a similar title, so use these "
+                 "details to identify the right one, and catalogue THAT painting — "
+                 "not another of the same name. Treat it as authoritative:\n%s\n" % hint)
     user += "\nReturn the JSON described in your instructions."
 
     content = _chat(key, [{"role": "system", "content": _SYSTEM},

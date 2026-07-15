@@ -418,6 +418,10 @@ a.pl-artist:hover { text-decoration: underline; }
 /* draggable modal heading */
 .modal-drag { cursor: move; user-select: none; }
 
+/* Auto fill: the owner's "which painting is this?" hint */
+.ew-hintrow { margin-bottom: 4px; }
+.ew-hintrow textarea { margin-top: 5px; }
+
 /* Auto fill request/response detail */
 .ew-trace { margin: 2px 0 12px; }
 .ew-trace summary { cursor: pointer; color: var(--dim); font-size: 12.5px; }
