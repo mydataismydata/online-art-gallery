@@ -28,6 +28,7 @@ import hashlib
 import io
 import re
 import time
+import urllib.parse
 from pathlib import Path
 
 from PIL import Image
@@ -43,13 +44,21 @@ HINT = ("Imports a list of individual works rather than an artist's whole output
         "Choose a CSV and the browser hands it over — a museum's own room export works "
         "as-is. Rows are matched by an image_url, wikidata or ark column if present, "
         "else by artist + title. Anything smaller than the minimum size is reported, "
-        "not saved.")
+        "not saved. Leave Max size blank for the full originals: correct, but Wikimedia "
+        "allows roughly 66 MB before asking for a ten-minute pause, so a room of large "
+        "scans takes hours. Set it to 4000 and the same room lands in a minute or two, "
+        "still well above the viewer's 2560.")
 PLACEHOLDER = "…or a URL, or a path on the gallery server"
 # The file is read in the browser and posted as text: the CSV is wherever the
 # person is sitting, which is rarely where the gallery is running.
 ACCEPTS_FILE = True
 FILE_ACCEPT = ".csv,.tsv,text/csv"
 QUERY_LABEL = "CSV file"
+# Commons will scale a painting on request. Left blank we take the full original,
+# which is what "highest resolution" means and what the rate limiter minds most:
+# it allows about 66 MB before asking for a ten-minute pause, so a room of
+# gigapixel scans is mostly spent waiting. Setting a size turns that into minutes.
+SUPPORTS_MAX_PX = True
 
 WDQS = "https://query.wikidata.org/sparql"
 COMMONS = "https://commons.wikimedia.org/w/api.php"
@@ -216,24 +225,32 @@ def _items(sess, qids):
 
 def _file_of(url):
     """A Commons Special:FilePath URL -> the file's page title."""
-    import urllib.parse
     return urllib.parse.unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
 
 
-def _commons(sess, params):
-    return fetch_json(sess, COMMONS, dict(params, format="json", formatversion="2"), timeout=60)
+def _commons(sess, params, **retry):
+    return fetch_json(sess, COMMONS, dict(params, format="json", formatversion="2"),
+                      timeout=60, **retry)
 
 
-def _sizes(sess, files):
+# Set once the Commons API starts pushing back, so the optional lookups stop asking.
+# Without this each one waits out its own rate limit and gives up anyway, which cost
+# a real 30-work import two and a half silent hours before the first download.
+_OPTIONAL = {"attempts": 1, "max_wait": 0}
+
+
+def _sizes(sess, files, on_wait=None):
     """{filename: (w, h, url)} from the Commons imageinfo API — so a too-small file is
-    ruled out before a byte of it is downloaded."""
+    ruled out before a byte of it is downloaded. Unlike the category trawl this isn't
+    optional, so it will wait a little; 40 files at a time keeps that rare."""
     out = {}
     files = sorted(set(files))
     for i in range(0, len(files), 40):
         chunk = files[i:i + 40]
         try:
             r = _commons(sess, {"action": "query", "prop": "imageinfo", "iiprop": "url|size|mime",
-                                "titles": "|".join("File:" + f for f in chunk)})
+                                "titles": "|".join("File:" + f for f in chunk)},
+                         max_wait=60, on_wait=on_wait)
         except Exception:
             continue
         for p in (r.get("query") or {}).get("pages") or []:
@@ -243,14 +260,34 @@ def _sizes(sess, files):
     return out
 
 
-def _category_files(sess, cat):
+def _scaled(sess, filename, long_px, w, h, on_wait=None):
+    """Ask Commons to render this file with its long side at long_px, and return
+    (url, w, h). iiurlwidth scales by width, so a portrait has to be asked for by
+    the width that puts its *height* on the mark. Returns None if it declines, or
+    if the original is already smaller than we're asking for."""
+    if not long_px or max(w, h) <= long_px:
+        return None
+    width = long_px if w >= h else max(1, int(round(long_px * w / float(h))))
     try:
-        r = _commons(sess, {"action": "query", "list": "categorymembers", "cmtype": "file",
-                            "cmtitle": "Category:" + cat, "cmlimit": "60"})
-        return [m["title"].split(":", 1)[1]
-                for m in (r.get("query") or {}).get("categorymembers") or []]
+        r = _commons(sess, {"action": "query", "prop": "imageinfo", "iiprop": "url|size",
+                            "iiurlwidth": width, "titles": "File:" + filename},
+                     max_wait=30, on_wait=on_wait)
+        ii = ((r.get("query") or {}).get("pages") or [{}])[0].get("imageinfo") or [{}]
+        t = ii[0]
+        if t.get("thumburl"):
+            return t["thumburl"], t.get("thumbwidth") or width, t.get("thumbheight") or 0
     except Exception:
-        return []
+        pass
+    return None
+
+
+def _category_files(sess, cat):
+    """Best-effort: this only ever *upgrades* on P18, so it never waits. Raises on a
+    rate limit so the caller can stop asking."""
+    r = _commons(sess, {"action": "query", "list": "categorymembers", "cmtype": "file",
+                        "cmtitle": "Category:" + cat, "cmlimit": "60"}, **_OPTIONAL)
+    return [m["title"].split(":", 1)[1]
+            for m in (r.get("query") or {}).get("categorymembers") or []]
 
 
 def _pick(p18, cat_files, want_inv, sizes):
@@ -313,12 +350,18 @@ def run(job):
     sess = session()
     cfg = tuning.effective(ID, CONFIG)
     min_px = job.opts.get("min_px") or cfg["min_px"]
+    max_px = job.opts.get("max_px")
     rows, cols = _read_rows(job.query, cfg["max_rows"], job.opts.get("csv_text"))
     job.log("Read %d row%s; using columns: %s."
             % (len(rows), "" if len(rows) == 1 else "s",
                ", ".join("%s=%s" % (k, v) for k, v in sorted(cols.items()))))
     if min_px:
         job.log("Skipping anything %d px or smaller on the long side." % min_px)
+    job.log("Taking the full original of each work. Wikimedia allows about 66 MB before "
+            "asking for a ten-minute pause, so this may sit waiting; set Max size to "
+            "4000 to trade the gigapixel copy for a job that finishes in minutes."
+            if not max_px else
+            "Asking Commons to scale each work to %d px on the long side." % max_px)
 
     # Resolve identifiers in bulk: two queries, not two per row.
     arks = [r["ark"] for r in rows if r.get("ark") and not r.get("qid") and not r.get("image")]
@@ -346,14 +389,30 @@ def run(job):
 
     # Every Commons candidate, measured in batches before anything is fetched.
     cands = {}
+    trawl = True
     for r in rows:
+        if job.cancelled:
+            return
         m = meta.get(r.get("qid") or "")
         if not m:
             continue
         want = _inv_tokens(" ".join(m["inv"]) + " " + (r.get("inv") or ""))
-        cat = _category_files(sess, m["cat"]) if (m["cat"] and want) else []
+        cat = []
+        if trawl and m["cat"] and want:
+            try:
+                cat = _category_files(sess, m["cat"])
+            except Exception as e:
+                # One refusal means the rest will be refused too. Carry on with P18,
+                # which is the identified image anyway — the trawl only ever adds a
+                # bigger scan of the same painting.
+                trawl = False
+                job.log("Commons won't take more lookups right now (%s); using each "
+                        "work's own Wikidata image instead of hunting for a larger scan."
+                        % str(e)[:60])
         cands[id(r)] = (m, want, cat)
-    sizes = _sizes(sess, [f for m, w, cat in cands.values() for f in ([m["p18"]] if m["p18"] else []) + cat])
+    waited = lambda n: job.log("Commons is rate limiting us; waiting %d seconds." % round(n))
+    sizes = _sizes(sess, [f for m, w, cat in cands.values()
+                          for f in ([m["p18"]] if m["p18"] else []) + cat], on_wait=waited)
 
     # A row that resolves to nothing, or to nothing big enough, is not a crash but
     # it isn't a work either. Both land in the job's `failed` tally, so account for
@@ -389,12 +448,21 @@ def run(job):
             pick = _pick(m["p18"], cat, want, sizes)
             if pick:
                 w, h, url = sizes[pick]
+                # Judge the size on the original, not on what we'll settle for: a
+                # painting that only exists at 1800px is out regardless of Max size.
                 if max(w, h) <= min_px:
                     job.log("TOO SMALL \"%s\": best is %dx%d." % (title[:52], w, h))
                     small.append(title)
                     job.failed += 1
                     continue
                 note = "%dx%d" % (w, h)
+                fit = _scaled(sess, pick, max_px, w, h, on_wait=waited)
+                if fit:
+                    # Commons hands back the original's size when it won't render a
+                    # scaled copy; don't claim to have shrunk something we didn't.
+                    url = fit[0]
+                    note = ("%dx%d, scaled from %dx%d" % (fit[1], fit[2], w, h)
+                            if (fit[1], fit[2]) != (w, h) else "%dx%d" % (w, h))
         if not url:
             job.log("NO IMAGE \"%s\": nothing on Wikidata or Commons identifies this work."
                     % title[:52])
@@ -403,7 +471,13 @@ def run(job):
             continue
 
         try:
-            tmp = download_to_tmp(sess, url, referer="https://commons.wikimedia.org/")
+            tmp = download_to_tmp(
+                sess, url, referer="https://commons.wikimedia.org/",
+                # Say why we've gone quiet, and stay interruptible while we do.
+                on_wait=lambda s: job.log(
+                    "Rate limited — %s asked us to wait %d seconds. Holding off."
+                    % (urllib.parse.urlsplit(url).hostname or "the server", round(s))),
+                should_stop=lambda: job.cancelled)
         except Exception as e:
             job.failed += 1
             job.log("FAILED \"%s\": %s" % (title[:52], e))
