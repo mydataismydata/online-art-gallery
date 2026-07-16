@@ -3293,7 +3293,9 @@ function toast(msg) {
 
 const viewer = $("#viewer"), vstage = $("#vstage"), vimg = $("#vimg"),
       vcap = $("#vcap"), vcount = $("#vcount");
-const V = { list: [], i: 0, wasFullscreen: false };
+/* `list` is the walk the viewer is on. `src` is the array the page handed over and
+   is still holding — see openViewer for why the viewer needs both. */
+const V = { list: [], src: null, i: 0, wasFullscreen: false };
 let idleTimer = null, dragState = null, dragMoved = false;
 
 function wake() {
@@ -3739,9 +3741,28 @@ function editWorkDialog(w) {
         body: JSON.stringify(body),
       });
       m.close();
-      if (r.work) { V.list[V.i] = r.work; vcap.innerHTML = caption(r.work); syncPlacard(); }
-      viewerFlash("✓ Saved");
+      if (r.work) replaceWork(w.id, r.work);
+      if (viewer.classList.contains("open")) {
+        if (r.work) { vcap.innerHTML = caption(r.work); syncPlacard(); }
+        viewerFlash("✓ Saved");
+      } else {
+        toast("Placard saved.");   // edited from a tile's "i": no viewer to flash
+      }
     } catch (err) { q("#ew-msg").textContent = err.message; }
+  });
+}
+
+/* A freshly saved work has to replace the stale one everywhere it's held: the walk
+   the viewer is on, and the array the page will re-read the next time a tile is
+   clicked. Matched on the id it had BEFORE the edit — changing a work's artist
+   moves its file, and the id is a hash of the path, so the new work arrives under
+   a new one. Matching by id rather than by V.i also means this is safe when the
+   edit came from a tile's "i" and there is no viewer open to have an index in. */
+function replaceWork(oldId, fresh) {
+  [V.list, V.src].forEach((arr) => {
+    if (!arr) return;
+    const j = arr.findIndex((x) => x && x.id === oldId);
+    if (j >= 0) arr[j] = fresh;
   });
 }
 
@@ -3769,11 +3790,14 @@ vimg.addEventListener("load", () => viewer.classList.remove("loading"));
 
 function openViewer(list, i) {
   if (!list || !list.length) return;
-  // Copy it: the caller keeps this array, and its grid's tiles carry the index
-  // they had when it was rendered. Following a placard's cross-reference splices
-  // the painting into the viewer's list, and sharing the array would splice it
-  // into the page's too — every tile after that point would then open its
-  // neighbour. The viewer owns its walk; the page keeps its own.
+  // Two references, on purpose, because the viewer owes the page two different
+  // things. V.list is the walk, and it must be private: following a placard's
+  // cross-reference splices a painting into it, and the page's grid carries the
+  // indexes its tiles had when it was rendered, so splicing a shared array would
+  // leave every later tile opening its neighbour. V.src is that same page array,
+  // which it re-reads each time a tile is clicked — so an edit has to be written
+  // back there too, or closing and reopening shows the work as it was before.
+  V.src = list;
   V.list = list.slice();
   viewer.classList.add("open");
   document.body.style.overflow = "hidden";
