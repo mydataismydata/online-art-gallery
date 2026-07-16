@@ -555,12 +555,41 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
 .conn-main { padding: 28px 34px 40px 48px; min-width: 0; }
 .conn-caption { margin: 14px 2px 0; font: italic 400 13px var(--serif); color: var(--off); }
 
-.map-canvas {
+/* A fixed window onto a canvas that grows as you zoom. Only the spacing scales:
+   the portraits, their labels and the threads are all measured in screen pixels,
+   so leaning in buys room between painters rather than bigger faces. */
+.map-view {
   position: relative; width: 100%; aspect-ratio: 1600 / 780;
   background: radial-gradient(ellipse at 50% 40%, #1e1813 0%, #171310 75%);
   border: 1px solid var(--mat); overflow: hidden;
+  /* The map has to own every touch inside it, or a pinch becomes a page scroll.
+     It's a short strip on a phone — there's page above and below to swipe on. */
+  touch-action: none;
 }
+.map-canvas {
+  position: absolute; top: 0; left: 0;
+  width: calc(100% * var(--z, 1)); height: calc(100% * var(--z, 1));
+  transform: translate(var(--px, 0px), var(--py, 0px));
+}
+.map-view.pannable { cursor: grab; }
+.map-view.panning, .map-view.panning .map-node { cursor: grabbing; }
 .map-canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+.map-zoom {
+  position: absolute; right: 14px; bottom: 14px; z-index: 8;
+  display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--hair-strong); border-radius: 20px;
+  background: rgba(23,19,16,.82);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.map-zoom button {
+  width: 34px; height: 31px; cursor: pointer; background: none; border: none;
+  font: 400 16px/1 var(--sans); color: var(--dim2);
+  transition: background .25s ease, color .25s ease;
+}
+.map-zoom button + button { border-top: 1px solid var(--hair); }
+.map-zoom button:hover:not(:disabled) { background: var(--gold-tint2); color: var(--display2); }
+.map-zoom button:disabled { color: var(--off2); cursor: default; }
 .map-node {
   position: absolute; transform: translate(-50%, -50%);
   display: flex; flex-direction: column; align-items: center; gap: 6px;

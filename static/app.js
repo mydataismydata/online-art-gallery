@@ -1340,8 +1340,11 @@ async function browseView(facet, value) {
 
 /* Survives re-renders within the page; `off` is the set of type filters the
    viewer has switched off, and selection deliberately persists across a mode
-   switch so you keep your painter when you jump from map to timeline. */
-const CONN = { mode: "map", sel: null, off: new Set(), data: null, threads: [] };
+   switch so you keep your painter when you jump from map to timeline. So does
+   the map's zoom and pan (z, px, py) — clicking a painter re-renders the whole
+   page, and it would be maddening to be thrown back to the wide shot each time. */
+const CONN = { mode: "map", sel: null, off: new Set(), data: null, threads: [],
+               z: 1, px: 0, py: 0 };
 const CONN_MODES = ["map", "timeline", "threads"];
 const SUBLINE = {
   map: "every painter, five kinds of thread",
@@ -1379,6 +1382,7 @@ async function connectionsView(artist, mode) {
     ]);
     CONN.data = g;
     CONN.threads = th.threads || [];
+    CONN.z = 1; CONN.px = 0; CONN.py = 0;   // a fresh graph opens on the wide shot
     if (artist) {
       const hit = g.nodes.find((n) => n.name.toLowerCase() === artist.toLowerCase());
       CONN.sel = hit ? hit.id : null;
@@ -1435,6 +1439,7 @@ function renderConnections() {
   app.querySelectorAll("[data-select]").forEach((el) =>
     el.addEventListener("click", (e) => { e.preventDefault(); connSelect(el.dataset.select); }));
   wireAside();
+  wireMap();
 }
 
 /* ---------- map ---------- */
@@ -1442,10 +1447,18 @@ function renderConnections() {
 /* A quadratic bézier between two nodes, trimmed to each rim so the curve starts
    at the edge of the portrait rather than under it. The control point is pushed
    perpendicular to the chord — a straight line between every pair would collapse
-   parallel links on top of each other. */
-function edgePath(a, b) {
+   parallel links on top of each other.
+
+   ppu is the rendered pixels per canvas unit. The trim is the one screen-space
+   measure in here, because a portrait is a fixed px circle at every zoom, so it
+   has to be converted into canvas units or the threads detach from the faces as
+   you lean in. Where the portraits overlap outright the trim is capped, leaving
+   a stub tucked under them rather than a curve drawn backwards. */
+function edgePath(a, b, ppu) {
   const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
-  const r1 = nodeSize(a) / 2 + 6, r2 = nodeSize(b) / 2 + 6;
+  let r1 = (nodeSize(a) / 2 + 6) / ppu, r2 = (nodeSize(b) / 2 + 6) / ppu;
+  const cap = len * 0.86;
+  if (r1 + r2 > cap) { const f = cap / (r1 + r2); r1 *= f; r2 *= f; }
   const x1 = a.x + dx * (r1 / len), y1 = a.y + dy * (r1 / len);
   const x2 = b.x - dx * (r2 / len), y2 = b.y - dy * (r2 / len);
   const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
@@ -1454,25 +1467,30 @@ function edgePath(a, b) {
          " " + x2 + " " + y2;
 }
 
-function mapHtml() {
-  const g = CONN.data, sel = CONN.sel;
-  const links = activeLinks();
-  const nbr = new Set();
-  if (sel) links.forEach((l) => {
-    if (l.a_id === sel) nbr.add(l.b_id);
-    if (l.b_id === sel) nbr.add(l.a_id);
-  });
-
-  const paths = links.map((l) => {
+/* Redrawn on every zoom step, since the rim trim moves with it — a few dozen
+   paths of string, and the weights are pinned to px so a thread stays a thread. */
+function edgesHtml(ppu) {
+  const sel = CONN.sel;
+  return activeLinks().map((l) => {
     const a = connNode(l.a_id), b = connNode(l.b_id);
     if (!a || !b) return "";
     const t = LINK_TYPES[l.type] || LINK_TYPES.movement;
     const touches = sel && (l.a_id === sel || l.b_id === sel);
     const op = sel ? (touches ? .95 : .07) : (l.type === "curator" ? .7 : .45);
-    return '<path d="' + edgePath(a, b) + '" stroke="' + t.color + '" stroke-width="' + t.w +
-      '"' + (t.dash ? ' stroke-dasharray="' + t.dash + '"' : "") +
+    return '<path d="' + edgePath(a, b, ppu) + '" stroke="' + t.color +
+      '" stroke-width="' + t.w + '" vector-effect="non-scaling-stroke"' +
+      (t.dash ? ' stroke-dasharray="' + t.dash + '"' : "") +
       ' opacity="' + op + '" fill="none"></path>';
   }).join("");
+}
+
+function mapHtml() {
+  const g = CONN.data, sel = CONN.sel;
+  const nbr = new Set();
+  if (sel) activeLinks().forEach((l) => {
+    if (l.a_id === sel) nbr.add(l.b_id);
+    if (l.b_id === sel) nbr.add(l.a_id);
+  });
 
   const nodes = g.nodes.map((n) => {
     const s = nodeSize(n), isSel = sel === n.id;
@@ -1489,17 +1507,169 @@ function mapHtml() {
     '<span class="cluster-label" style="left:' + (c.x / g.canvas.w * 100).toFixed(2) +
     "%;top:" + (c.y / g.canvas.h * 100).toFixed(2) + '%">' + esc(c.label) + "</span>").join("");
 
+  /* The svg is left empty: its threads can't be drawn until the window has been
+     measured, so wireMap fills them in on the same tick, before the paint. */
   return (
-    '<div class="map-canvas">' +
+    '<div class="map-view" id="mapview">' +
+    '<div class="map-canvas" id="mapcanvas">' +
     '<svg viewBox="0 0 ' + g.canvas.w + " " + g.canvas.h +
-    '" preserveAspectRatio="none" aria-hidden="true">' + paths + "</svg>" +
+    '" preserveAspectRatio="none" aria-hidden="true"></svg>' +
     clusters + nodes + "</div>" +
-    '<p class="conn-caption">Click a painter to trace their connections · node size follows ' +
-    "works in the collection" +
+    '<div class="map-zoom">' +
+    '<button type="button" id="mapin" title="Zoom in" aria-label="Zoom in">+</button>' +
+    '<button type="button" id="mapout" title="Zoom out" aria-label="Zoom out">&minus;</button>' +
+    "</div></div>" +
+    '<p class="conn-caption">Click a painter to trace their connections · scroll or pinch ' +
+    "to spread them out · node size follows works in the collection" +
     (g.truncated ? " · showing the " + g.nodes.length + " best-connected of " +
       (g.nodes.length + g.truncated) + " painters" : "") + "</p>"
   );
 }
+
+/* ---------- map zoom ---------- */
+
+/* Zoom spreads the map rather than magnifying it: the canvas box grows, the
+   percentage node positions spread apart with it, and everything measured in
+   pixels — the portraits, their labels, the thread weights — stays exactly as it
+   was. So leaning in buys room between painters, which is the whole point. */
+const Z_MIN = 1;
+
+function mapView() { return $("#mapview"); }
+
+/* Enough zoom to pull the portraits apart at any width. A flat cap can't do it:
+   a phone starts the canvas at a quarter of its design size, where even 2x
+   leaves the faces touching. */
+function zMax(view) {
+  return Math.min(8, Math.max(2.5, 2600 / (view.clientWidth || 1000)));
+}
+
+function applyZoom() {
+  const view = mapView();
+  if (!view) return;
+  const w = view.clientWidth, h = view.clientHeight;
+  CONN.z = Math.min(zMax(view), Math.max(Z_MIN, CONN.z));
+  // Never pan past an edge, which at rest pins the canvas back into the corner.
+  CONN.px = Math.min(0, Math.max(w * (1 - CONN.z), CONN.px));
+  CONN.py = Math.min(0, Math.max(h * (1 - CONN.z), CONN.py));
+
+  const canvas = $("#mapcanvas");
+  canvas.style.setProperty("--z", CONN.z);
+  canvas.style.setProperty("--px", CONN.px.toFixed(1) + "px");
+  canvas.style.setProperty("--py", CONN.py.toFixed(1) + "px");
+  canvas.querySelector("svg").innerHTML = edgesHtml(w * CONN.z / CONN.data.canvas.w);
+
+  view.classList.toggle("pannable", CONN.z > Z_MIN);
+  $("#mapin").disabled = CONN.z >= zMax(view) - 1e-3;
+  $("#mapout").disabled = CONN.z <= Z_MIN + 1e-3;
+}
+
+/* Holds the point under the cursor (or the pinch, or the middle of the window)
+   still while the map spreads around it. Returns whether anything actually
+   moved, so the wheel knows whether it owes the page a scroll. */
+function zoomTo(z, cx, cy) {
+  const view = mapView();
+  if (!view) return false;
+  const z0 = CONN.z, z1 = Math.min(zMax(view), Math.max(Z_MIN, z));
+  if (Math.abs(z1 - z0) < 5e-4) return false;
+  const r = view.getBoundingClientRect();
+  const fx = cx == null ? r.width / 2 : cx - r.left;
+  const fy = cy == null ? r.height / 2 : cy - r.top;
+  CONN.px = fx - (fx - CONN.px) * (z1 / z0);
+  CONN.py = fy - (fy - CONN.py) * (z1 / z0);
+  CONN.z = z1;
+  applyZoom();
+  return true;
+}
+
+function wireMap() {
+  const view = mapView();
+  if (!view) return;
+  applyZoom();
+
+  view.addEventListener("wheel", (e) => {
+    // Only swallow the page scroll when the wheel actually moved the map, so
+    // scrolling on past a map that's already zoomed out still leaves the page.
+    const px = e.deltaY * (e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? 320 : 1);
+    if (zoomTo(CONN.z * Math.exp(-px * 0.002), e.clientX, e.clientY)) e.preventDefault();
+  }, { passive: false });
+
+  $("#mapin").addEventListener("click", () => zoomTo(CONN.z * 1.45));
+  $("#mapout").addEventListener("click", () => zoomTo(CONN.z / 1.45));
+
+  /* One finger drags, two pinch. Pointer events cover mouse, touch and pen at
+     once; the moves are watched on the window so a drag that outruns the cursor
+     and leaves the map doesn't just stop dead. */
+  const pts = new Map();
+  let drag = null, pinch = null, swallow = false;
+
+  const span = () => {
+    const [a, b] = Array.from(pts.values());
+    return {
+      d: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,
+    };
+  };
+
+  view.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    // The +/- control sits over the map but isn't part of it: a press that drifts
+    // a few px there should still count as a press, not a drag that pans the map
+    // and then eats its own click.
+    if (e.target.closest(".map-zoom")) return;
+    swallow = false;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) { pinch = span(); drag = null; }
+    else if (pts.size === 1) drag = { x: e.clientX, y: e.clientY, moved: 0 };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+
+  function onMove(e) {
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    p.x = e.clientX; p.y = e.clientY;
+    if (pinch && pts.size >= 2) {
+      // The fingers' midpoint is both the zoom focus and the pan handle, which
+      // is what a two-finger drag feels like everywhere else.
+      const m = span();
+      CONN.px += m.cx - pinch.cx;
+      CONN.py += m.cy - pinch.cy;
+      pinch.cx = m.cx; pinch.cy = m.cy;
+      if (!zoomTo(CONN.z * (m.d / pinch.d), m.cx, m.cy)) applyZoom();
+      pinch.d = m.d;
+      swallow = true;
+    } else if (drag && CONN.z > Z_MIN) {
+      CONN.px += e.clientX - drag.x;
+      CONN.py += e.clientY - drag.y;
+      drag.moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
+      drag.x = e.clientX; drag.y = e.clientY;
+      if (drag.moved > 6) { swallow = true; view.classList.add("panning"); }
+      applyZoom();
+    }
+  }
+
+  function onUp(e) {
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinch = null;
+    if (pts.size) return;
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    view.classList.remove("panning");
+    drag = null;
+  }
+
+  // A drag that happens to end on a painter shouldn't also open them.
+  view.addEventListener("click", (e) => {
+    if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; }
+  }, true);
+}
+
+/* Both the rim trim and the pan clamp are measured against the window, so a
+   resize has to redraw them. Registered once — the map's own DOM is replaced on
+   every render, and a listener per render would pile up. */
+window.addEventListener("resize", () => { if (mapView()) applyZoom(); });
 
 /* ---------- timeline ---------- */
 
