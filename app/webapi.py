@@ -429,8 +429,10 @@ def api_artist_rename():
         moved, errors, id_map = library.rename_artist(frm, to)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    # The works just moved, so their ids changed; follow the hero pin over.
+    # The works just moved, so their ids changed; follow the hero pin and every
+    # collection holding one over to where they went.
     site.remap_featured(id_map)
+    collections.remap_works(id_map)
     # carry the artist's saved bio (if any) over to the new name
     if to.strip().casefold() not in [f.strip().casefold() for f in frm]:
         for f in frm:
@@ -709,8 +711,10 @@ def api_work_update(wid):
         abort(404)
     if not w:
         return jsonify({"error": "update failed"}), 500
-    # Editing the artist relocates the file, which re-ids the work; keep the pin on it.
+    # Editing the artist relocates the file, which re-ids the work; keep the pin and
+    # any collection it hangs in on it.
     site.remap_featured({wid: w["id"]})
+    collections.remap_works({wid: w["id"]})
     return jsonify({"work": w})
 
 

@@ -207,6 +207,45 @@ def get_collection(cid):
     return _read(cid)
 
 
+def all_records():
+    """Every collection as stored, with membership unresolved. For the publisher,
+    which wants the raw work ids rather than a resolved, sorted view."""
+    return _all()
+
+
+def import_published(rec):
+    """Write a collection pulled from the content repo, keyed by its own id.
+
+    A collection id is minted once and travels, so a re-pull corrects a retitled or
+    re-hung collection in place instead of hanging a second copy. `work_ids` are
+    expected to have been mapped back to this box's ids already — the publisher
+    sends membership as pids, which are the only ids both boxes agree on.
+
+    Returns "added", "updated" or "unchanged"."""
+    cid = (rec.get("id") or "").strip()
+    if not _ID_RE.match(cid):
+        raise ValueError("Bad collection id: %r" % cid)
+    with _lock:
+        cur = _read(cid)
+        new = {
+            "id": cid,
+            "title": _clean_title(rec.get("title")),
+            "description": _clean_desc(rec.get("description")),
+            "owner": (rec.get("owner") or "").strip().casefold(),
+            "owner_display": rec.get("owner_display"),
+            "work_ids": [w for w in rec.get("work_ids") or [] if w],
+            "sort": clean_sort(rec.get("sort")),
+            "source": "published",
+            "created": (cur or {}).get("created") or time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if cur and all(cur.get(k) == new[k] for k in
+                       ("title", "description", "owner", "owner_display", "work_ids")) \
+                and clean_sort(cur.get("sort")) == new["sort"]:
+            return "unchanged"
+        _write(new)
+        return "updated" if cur else "added"
+
+
 def create_collection(title, description, user):
     title = _clean_title(title)
     description = _clean_desc(description)
@@ -261,6 +300,32 @@ def remove_works(cid, ids):
             raise ValueError("No such collection.")
         rec["work_ids"] = [w for w in rec.get("work_ids", []) if w not in drop]
         return _write(rec)
+
+
+def remap_works(id_map):
+    """Follow works whose id changed because their file moved — an artist edit or a
+    repoint.
+
+    A collection stores work ids, and an id is the sha1 of the file's path, so
+    correcting a painter's spelling re-identifies every painting of theirs. Without
+    this they fall out of every collection holding them: still in the library, just
+    silently off the wall, which reads as the collection having lost them. A work
+    that was genuinely deleted is a different matter and is left to drop out.
+
+    Returns the number of collections rewritten."""
+    id_map = {k: v for k, v in (id_map or {}).items() if k and v and v != k}
+    if not id_map:
+        return 0
+    n = 0
+    with _lock:
+        for rec in _all():
+            ids = rec.get("work_ids") or []
+            moved = [id_map.get(w, w) for w in ids]
+            if moved != ids:
+                rec["work_ids"] = moved
+                _write(rec)
+                n += 1
+    return n
 
 
 def delete_collection(cid):
