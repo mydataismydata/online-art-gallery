@@ -1,6 +1,6 @@
-from . import gac, met, aic, cleveland, rijks, wikidata, vam, nga, custom, tuning
+from . import gac, met, aic, cleveland, rijks, wikidata, vam, nga, worklist, custom, tuning
 
-_BUILTIN = (gac, met, aic, cleveland, rijks, wikidata, vam, nga)
+_BUILTIN = (gac, met, aic, cleveland, rijks, wikidata, vam, nga, worklist)
 
 
 def list_builtin_configs():

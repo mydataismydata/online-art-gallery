@@ -22,7 +22,9 @@ def normalize_comma_name(name):
     if name.count(",") == 1:
         last, first = [p.strip() for p in name.split(",")]
         if last and first and not re.search(r"\d", first):
-            return first + " " + last
+            # A trailing particle elides onto the surname rather than taking a
+            # space: "Aligny, Théodore Caruelle d'" is "…Caruelle d'Aligny".
+            return first + ("" if first.endswith("'") else " ") + last
     return name
 
 
