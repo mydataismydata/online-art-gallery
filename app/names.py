@@ -34,6 +34,23 @@ def strip_diacritics(s):
     )
 
 
+def fold(s):
+    """The key under which two spellings are the same name.
+
+    Case and accents are both things sources disagree about — a CSV exported as
+    ASCII gives 'Theodore Gericault', Wikidata gives 'Théodore Géricault' — and
+    neither disagreement makes them different painters. Matches slugify's
+    normalisation, so an artist's identity and their bio file agree on who they are."""
+    return strip_diacritics(s or "").casefold()
+
+
+def diacritic_count(s):
+    """How many accents a spelling carries. Dropping them is lossy and common;
+    adding them is neither. So between spellings of one name, the most accented is
+    the most likely to be what the painter was actually called."""
+    return sum(1 for c in unicodedata.normalize("NFD", s or "") if unicodedata.combining(c))
+
+
 def slugify(s):
     """'J. M. W. Turner' -> 'j-m-w-turner'. Stable key for artist-metadata files."""
     s = strip_diacritics(s or "").casefold()

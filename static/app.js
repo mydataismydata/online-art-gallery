@@ -9,6 +9,14 @@ function esc(s) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+/* Case and accents flattened, matching names.fold() on the server. Nobody hunting
+   for Géricault stops to type the accents, and half our sources can't spell them
+   anyway. NFD splits an "é" into "e" + a combining mark; the range drops the mark. */
+function fold(s) {
+  return String(s == null ? "" : s).normalize("NFD")
+    .replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
 /* ============================== session ============================== */
 
 let SESSION = { user: null, needs_setup: false, public: false };
@@ -784,8 +792,8 @@ async function homeView() {
 
     const search = $("#asearch"), sort = $("#asort"), grid = $("#agrid"), count = $("#acount");
     const paint = () => {
-      const q = search.value.trim().toLowerCase();
-      const list = (q ? d.artists.filter((a) => a.name.toLowerCase().includes(q)) : d.artists)
+      const q = fold(search.value.trim());
+      const list = (q ? d.artists.filter((a) => fold(a.name).includes(q)) : d.artists)
         .slice().sort(SORTS[sort.value][1]);
       grid.innerHTML = list.map(artistCardHtml).join("") + (q ? "" : addCard);
       count.textContent = q
@@ -853,6 +861,10 @@ async function artistView(name) {
       app.innerHTML = page('<div class="emptybox">No works found for ' + esc(name) + ".</div>");
       return;
     }
+    // The works carry the spelling the library settled on; the URL may hold an older
+    // one — a bookmark from before this painter got their accents back. Show, link
+    // and rename under the real name rather than whatever was typed to get here.
+    name = works[0].artist || name;
     const info = ov.info || {}, stats = ov.stats || {};
     const years = works.map((w) => w.year).filter(Boolean);
     const span = years.length
@@ -1192,8 +1204,8 @@ function wireRepoint(name) {
     let artists;
     try {
       const d = await api("/api/artists");
-      const key = name.trim().toLowerCase();
-      artists = (d.artists || []).filter((a) => a.name.trim().toLowerCase() !== key);
+      const key = fold(name.trim());
+      artists = (d.artists || []).filter((a) => fold(a.name.trim()) !== key);
     } catch (e) { toast(e.message); return; }
     if (!artists.length) { toast("There are no other artists to repoint to yet."); return; }
 
@@ -1221,8 +1233,8 @@ function wireRepoint(name) {
       const listEl = inner.querySelector("#rp-list");
       search.focus();
       search.addEventListener("input", () => {
-        const q = search.value.trim().toLowerCase();
-        listEl.innerHTML = rowsHtml(q ? artists.filter((a) => a.name.toLowerCase().includes(q)) : artists);
+        const q = fold(search.value.trim());
+        listEl.innerHTML = rowsHtml(q ? artists.filter((a) => fold(a.name).includes(q)) : artists);
       });
       inner.querySelector("#rp-close").addEventListener("click", m.close);
       listEl.addEventListener("click", (e) => {

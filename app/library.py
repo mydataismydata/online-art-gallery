@@ -14,7 +14,8 @@ from PIL import Image
 
 from . import config
 from .names import (safe_name, era_from, parse_year, clean_title_text,
-                    artist_sort_key, strip_diacritics, particle_case_score)
+                    artist_sort_key, strip_diacritics, particle_case_score,
+                    fold, diacritic_count)
 
 # The gallery is built around enormous images; don't let Pillow refuse to read them.
 Image.MAX_IMAGE_PIXELS = None
@@ -128,25 +129,29 @@ def _work_from_file(path, artist_dir_name):
 
 
 def _pick_artist_name(counter):
-    """Choose the display spelling among case-variants of one artist: the most
-    common wins; ties prefer correctly-lowercased particles ('van Dyck' over
-    'Van Dyck'), then alphabetical so the pick is stable across scans."""
+    """Choose the display spelling among variants of one artist: the most accented
+    wins, since an ASCII source drops accents but no source invents them; then the
+    most common; then correctly-lowercased particles ('van Dyck' over 'Van Dyck');
+    then alphabetical so the pick is stable across scans."""
     return sorted(counter.items(),
-                  key=lambda kv: (-kv[1], -particle_case_score(kv[0]), kv[0]))[0][0]
+                  key=lambda kv: (-diacritic_count(kv[0]), -kv[1],
+                                  -particle_case_score(kv[0]), kv[0]))[0][0]
 
 
 def _canonicalize_artists(works):
-    """Collapse artist spellings that differ only in case onto one name. Museums
-    credit the same painter inconsistently ('Anthony van Dyck' vs 'Anthony Van
-    Dyck'), which would otherwise split them into two artists. Done here so every
-    consumer — cards, grids, AI batching, placards — sees one identity."""
+    """Collapse artist spellings that differ only in case or accents onto one name.
+    Museums credit the same painter inconsistently ('Anthony van Dyck' vs 'Anthony
+    Van Dyck', 'Théodore Géricault' vs 'Theodore Gericault' from a source that
+    couldn't carry the accents), which would otherwise split them into two artists.
+    Done here so every consumer — cards, grids, AI batching, placards — sees one
+    identity."""
     variants = {}
     for w in works:
         name = (w["artist"] or "").strip()
-        variants.setdefault(name.casefold(), Counter())[name] += 1
-    canon = {cf: _pick_artist_name(c) for cf, c in variants.items()}
+        variants.setdefault(fold(name), Counter())[name] += 1
+    canon = {k: _pick_artist_name(c) for k, c in variants.items()}
     for w in works:
-        w["artist"] = canon[(w["artist"] or "").strip().casefold()]
+        w["artist"] = canon[fold((w["artist"] or "").strip())]
 
 
 def scan(force=False):
@@ -197,7 +202,7 @@ def query_works(artist=None, era=None, medium=None, style=None, genre=None,
                 school=None, q=None):
     out = []
     for w in all_works():
-        if artist is not None and w["artist"].casefold() != artist.casefold():
+        if artist is not None and fold(w["artist"]) != fold(artist):
             continue
         if not _matches(w["era"], era):
             continue
@@ -209,7 +214,9 @@ def query_works(artist=None, era=None, medium=None, style=None, genre=None,
             continue
         if not _matches(w["school"], school):
             continue
-        if q and q.casefold() not in (w["title"] + " " + w["artist"]).casefold():
+        # Fold both sides: someone typing "Theo" or "Gericault" without reaching for
+        # the accents is still looking for Géricault.
+        if q and fold(q) not in fold(w["title"] + " " + w["artist"]):
             continue
         out.append(w)
     return out
@@ -517,16 +524,21 @@ def update_works_meta(updates):
 
 
 def _artist_folder(artist_name):
-    """Where an artist's works live. Reuses a folder that differs only by case, so
-    a work credited 'Anthony Van Dyck' files in with an existing 'Anthony van Dyck'
-    instead of splitting the painter across two folders on disk."""
+    """Where an artist's works live. Reuses a folder that differs only by case or
+    accents, so a work credited 'Anthony Van Dyck' or 'Theodore Gericault' files in
+    with the existing 'Anthony van Dyck' or 'Théodore Géricault' instead of splitting
+    the painter across two folders on disk."""
     want = safe_name(artist_name, 80)
     root = config.LIBRARY_DIR
     if root.exists():
-        target = want.casefold()
-        for d in sorted(root.iterdir()):
-            if d.is_dir() and not d.name.startswith(".") and d.name.casefold() == target:
-                return d
+        target = fold(want)
+        hits = [d for d in root.iterdir()
+                if d.is_dir() and not d.name.startswith(".") and fold(d.name) == target]
+        if hits:
+            # Where several spellings already exist on disk, file under the best one
+            # — the same accented-wins rule the displayed name uses, so the folder
+            # and the artist agree rather than depending on directory order.
+            return sorted(hits, key=lambda d: (-diacritic_count(d.name), d.name))[0]
     return root / want
 
 

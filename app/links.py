@@ -26,6 +26,7 @@ import time
 from collections import Counter, defaultdict
 
 from . import config, library, artistinfo
+from .names import fold
 
 # Strongest first: a pair keeps only its best link, so a curator's sentence is
 # never buried under "both were Dutch".
@@ -54,7 +55,10 @@ _MARGIN_X, _MARGIN_Y = 150, 120
 
 
 def _key(name):
-    return (name or "").strip().casefold()
+    # Folded, not just casefolded: a stored link was written under whatever the
+    # canonical spelling was that day, and the library now prefers the accented one.
+    # Keying on the fold means a curator's note survives the painter gaining an é.
+    return fold((name or "").strip())
 
 
 def _pair_key(a, b):

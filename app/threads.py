@@ -11,6 +11,7 @@ import secrets
 import time
 
 from . import config, library
+from .names import fold
 
 MAX_STEPS = 12
 
@@ -58,14 +59,17 @@ def list_threads():
     artist no longer in the library are dropped, and a thread left with fewer than
     two steps is hidden rather than shown broken — a repoint or a delete upstream
     shouldn't leave a dangling path on the page."""
+    # Folded: a step written when the painter was spelled 'Theodore Gericault' still
+    # finds them now the library prefers 'Théodore Géricault'. Matching on the exact
+    # string would quietly drop the step, and then the whole thread.
     covers = {}
     for a in library.artists():
-        covers[a["name"].casefold()] = {"cover": a["cover"], "name": a["name"]}
+        covers[fold(a["name"])] = {"cover": a["cover"], "name": a["name"]}
     out = []
     for t in _load():
         steps = []
         for s in t["steps"]:
-            hit = covers.get(s["artist"].casefold())
+            hit = covers.get(fold(s["artist"]))
             if hit:
                 steps.append({"artist": hit["name"], "note": s["note"], "cover": hit["cover"]})
         if len(steps) >= 2:
@@ -115,11 +119,11 @@ def delete(tid):
 
 def rename(old, new):
     """Follow an artist rename/merge, so a thread keeps its path."""
-    old_k = (old or "").strip().casefold()
+    old_k = fold((old or "").strip())
     threads, touched = _load(), False
     for t in threads:
         for s in t["steps"]:
-            if s["artist"].casefold() == old_k:
+            if fold(s["artist"]) == old_k:
                 s["artist"], touched = new, True
     if touched:
         _save(threads)
