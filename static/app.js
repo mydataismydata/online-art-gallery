@@ -2056,28 +2056,153 @@ async function collectionsView() {
    the sequence they were gathered in — the one order that can't be worked out
    from the paintings themselves, so it stays the default and is never overwritten. */
 const COL_SORTS = [
-  ["added", "As added"],
+  ["added", "Custom order"],
   ["artist", "By artist"],
   ["year", "Earliest first"],
   ["year_desc", "Latest first"],
   ["title", "By title"],
 ];
 
-async function collectionView(cid) {
+/* ---------- arranging a collection by hand ---------- */
+
+/* The masonry is a column flow: read it top to bottom and you get column one, not
+   the hang. Fine to look at, hopeless to drag in — so arranging swaps in a plain
+   list, where the order on screen is the order in the collection and a painting
+   lands where you dropped it. A list also suits what's being decided: a hang is a
+   sequence, not a shape. */
+function arrangeRow(w) {
+  const meta = [w.artist, w.date || w.year].filter(Boolean).join(" · ");
+  return (
+    '<li class="arow" data-id="' + esc(w.id) + '">' +
+      '<span class="agrip" aria-hidden="true" title="Drag to move"></span>' +
+      '<span class="anum"></span>' +
+      '<span class="athumb"><img src="' + thumbSrc(w) + '" loading="lazy" alt="" draggable="false"></span>' +
+      '<span class="atext"><span class="at">' + esc(w.title) + "</span>" +
+      (meta ? '<span class="am">' + esc(meta) + "</span>" : "") +
+      "</span></li>"
+  );
+}
+
+function arrangeHtml(works) {
+  return (
+    '<div class="arrangebox"><p class="arrange-hint">Drag a painting by its handle ' +
+    "to move it. The order you leave here is the order it hangs in — and the walk " +
+    "the viewer takes.</p>" +
+    '<ol class="arrange" id="arrange">' + works.map(arrangeRow).join("") + "</ol></div>"
+  );
+}
+
+function arrangeIds(box) {
+  return [...box.children].map((el) => el.dataset.id);
+}
+
+function renumber(box) {
+  [...box.children].forEach((el, i) => {
+    const n = el.querySelector(".anum");
+    if (n) n.textContent = i + 1;
+  });
+}
+
+/* The dragged row is pointer-events:none, so this never finds the row being held —
+   hovering over yourself means "no change", which is what should happen. */
+function rowUnder(box, x, y, held) {
+  const el = document.elementFromPoint(x, y);
+  const row = el && el.closest ? el.closest(".arow") : null;
+  return row && row !== held && row.parentElement === box ? row : null;
+}
+
+/* A painting has to be able to travel further than one screen. Driven by the
+   pointer rather than a timer: keep moving and the page keeps coming. */
+function edgeScroll(y) {
+  const pad = 100;
+  if (y < pad) window.scrollBy(0, -Math.min(20, (pad - y) / 3 + 4));
+  else if (y > innerHeight - pad)
+    window.scrollBy(0, Math.min(20, (y - innerHeight + pad) / 3 + 4));
+}
+
+function wireArrange(cid, onSaved) {
+  const box = $("#arrange");
+  if (!box) return;
+  renumber(box);
+
+  box.addEventListener("pointerdown", (e) => {
+    // Only the handle starts a drag: the rest of the row has to stay scrollable,
+    // or a phone couldn't get down a long collection to arrange it at all.
+    if (!e.target.closest(".agrip")) return;
+    const row = e.target.closest(".arow");
+    if (!row) return;
+    e.preventDefault();
+    const before = arrangeIds(box);
+    let moved = false;
+    row.classList.add("dragging");
+    box.classList.add("arranging");
+
+    /* Following the pointer on the window rather than capturing it to the row: a
+       hand that slides off the list mid-drag, or lets go somewhere else entirely,
+       still finishes the drag instead of leaving a painting stuck to the cursor.
+       Both come back off on drop, so a drag leaves nothing behind. */
+    const move = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      ev.preventDefault();
+      moved = true;
+      const over = rowUnder(box, ev.clientX, ev.clientY, row);
+      if (over) {
+        const r = over.getBoundingClientRect();
+        box.insertBefore(row, ev.clientY > r.top + r.height / 2 ? over.nextSibling : over);
+        renumber(box);
+      }
+      edgeScroll(ev.clientY);
+    };
+    const drop = async (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", drop);
+      window.removeEventListener("pointercancel", drop);
+      row.classList.remove("dragging");
+      box.classList.remove("arranging");
+      const now = arrangeIds(box);
+      if (!moved || now.join() === before.join()) return;   // put back where it was
+      try {
+        await api("/api/collection/" + encodeURIComponent(cid) + "/reorder", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: now }),
+        });
+        onSaved();
+      } catch (err) {
+        toast(err.message);
+        collectionView(cid, true);      // the save failed; don't leave a lie on screen
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", drop);
+    window.addEventListener("pointercancel", drop);
+  });
+}
+
+/* `arranging` is a parameter rather than state so it can't outlive the page: route
+   away and the next visit starts from the hang, not from a mode you forgot you left
+   on. The sort re-render threads it through, which is deliberate — pick "Earliest
+   first", then drag from that, and the arrangement starts where the years left off. */
+async function collectionView(cid, arranging) {
   setNav("collections");
   try {
     const d = await api("/api/collection/" + encodeURIComponent(cid));
     const c = d.collection;
     const works = c.works;
     const editable = c.can_edit;
+    arranging = arranging && editable && works.length > 1;
     const sortSel = (editable && works.length > 1)
       ? '<label class="col-sort">Hang<select id="col-sort">' +
         COL_SORTS.map(([v, label]) =>
           '<option value="' + v + '"' + (c.sort === v ? " selected" : "") + ">" +
           esc(label) + "</option>").join("") + "</select></label>"
       : "";
+    const arrBtn = (editable && works.length > 1)
+      ? '<button class="linkbtn' + (arranging ? " on" : "") + '" id="col-arrange">' +
+        (arranging ? "Done arranging" : "Arrange by hand") + "</button>"
+      : "";
     const ctl = (editable || sortSel)
-      ? '<div class="col-ctl">' + sortSel +
+      ? '<div class="col-ctl">' + sortSel + arrBtn +
         (editable
           ? '<button class="linkbtn" id="col-edit">edit details</button>' +
             '<button class="danger" id="col-delete">Delete collection</button>'
@@ -2096,6 +2221,14 @@ async function collectionView(cid) {
           ? "This collection is empty. Browse the museum, hit <b>Select</b>, then " +
             "<b>Add to collection</b> to gather works here."
           : "Nothing here yet.") + "</div>", "tight");
+    } else if (arranging) {
+      app.innerHTML = page(head + arrangeHtml(works), "tight");
+      wireArrange(cid, () => {
+        // The hang is now hand-made, whatever it was sorted by a moment ago.
+        const sel = $("#col-sort");
+        if (sel) sel.value = "added";
+        toast("Arrangement saved.");
+      });
     } else {
       app.innerHTML = page(head + worksSection(works, true, collectionCtx(c)), "tight");
       bindWorks(works, true, () => collectionView(cid), collectionCtx(c));
@@ -2107,9 +2240,11 @@ async function collectionView(cid) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sort: ss.value }),
         });
-        collectionView(cid);          // re-hang it, rather than re-sort a stale copy
+        collectionView(cid, arranging);   // re-hang it, rather than re-sort a stale copy
       } catch (e) { toast(e.message); }
     });
+    const ab = $("#col-arrange");
+    if (ab) ab.addEventListener("click", () => collectionView(cid, !arranging));
     if (editable) {
       $("#col-edit").addEventListener("click", () =>
         editCollectionDialog(c, () => collectionView(cid)));

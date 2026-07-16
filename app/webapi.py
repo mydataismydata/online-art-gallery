@@ -269,6 +269,24 @@ def api_collection_update(cid):
     return jsonify({"collection": collections.detail(rec, auth.current_user())})
 
 
+@bp.post("/api/collection/<cid>/reorder")
+@auth.require_login
+def api_collection_reorder(cid):
+    """Hang the collection in the order the curator dragged it into."""
+    rec, err = _load_editable(cid)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "No order given."}), 400
+    try:
+        rec = collections.reorder(cid, [str(i) for i in ids])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"collection": collections.detail(rec, auth.current_user())})
+
+
 @bp.delete("/api/collection/<cid>")
 @auth.require_login
 def api_collection_delete(cid):

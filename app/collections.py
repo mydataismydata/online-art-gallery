@@ -86,6 +86,12 @@ def _owner_role(rec):
 # How a collection hangs. The order is part of the curation, not a viewer's
 # preference: it's the walk the viewer takes and the three works the card shows,
 # so it belongs to the collection and everyone sees it the same way.
+#
+# "added" is the manual hang -- the stored list itself, in whatever order the
+# curator put it in. It starts as the order the works were gathered in and is
+# theirs to rearrange (see reorder). The rest are computed lenses over that list
+# and never overwrite it, so returning to "added" always restores the hand-made
+# order exactly.
 SORTS = ("added", "artist", "year", "year_desc", "title")
 DEFAULT_SORT = "added"
 
@@ -116,10 +122,10 @@ def resolve_works(rec):
     """The collection's works as full dicts, in the order it hangs in, silently
     skipping ids whose file no longer exists.
 
-    'added' is the sequence they were gathered in. It's the one order that can't
-    be reconstructed from the works themselves, so it is never overwritten — the
-    sort is a lens over the stored list, and choosing 'as added' again restores
-    exactly what the curator built."""
+    The stored list is the curator's own order — the one arrangement that can't be
+    worked out from the paintings themselves. Every other sort is a lens over it and
+    leaves it untouched, so choosing the manual hang again restores exactly what
+    they built."""
     out = []
     for wid in rec.get("work_ids", []):
         w = library.get(wid)
@@ -289,6 +295,34 @@ def add_works(cid, ids):
             if wid and wid not in have:
                 rec.setdefault("work_ids", []).append(wid)
                 have.add(wid)
+        return _write(rec)
+
+
+def reorder(cid, ids):
+    """Hang the collection in exactly this order.
+
+    Only ever a rearrangement of what's already there: ids the collection doesn't
+    hold are ignored, and anything the curator's screen didn't name keeps its place
+    at the end rather than vanishing — someone adding a work from another tab while
+    a drag is in progress shouldn't cost anyone a painting.
+
+    Arranging by hand only means something in manual mode, so this drops the
+    collection into it. Dragging a painting while the collection hangs by year is a
+    request to take the wall back from the year, starting from what's on screen."""
+    with _lock:
+        rec = _read(cid)
+        if not rec:
+            raise ValueError("No such collection.")
+        have = rec.get("work_ids", [])
+        held = set(have)
+        seen, order = set(), []
+        for wid in ids or []:
+            if wid in held and wid not in seen:
+                seen.add(wid)
+                order.append(wid)
+        order += [wid for wid in have if wid not in seen]
+        rec["work_ids"] = order
+        rec["sort"] = DEFAULT_SORT
         return _write(rec)
 
 
