@@ -1097,6 +1097,16 @@ a.pl-artist:hover { color: #262019; }
   font: 400 14px/1.7 var(--serif); color: #40382d; overflow: auto; flex: 1; min-height: 0;
 }
 .pl-desc em, .pl-desc i { font-style: italic; }
+/* A title that names a painting in this museum. The placard is paper, so this is
+   ink and a hairline rule — gold belongs to the dark room, not to the card. It
+   stays italic: it's still a title, it just happens to be somewhere you can go. */
+a.pl-xref {
+  color: inherit; text-decoration: none; cursor: pointer;
+  border-bottom: 1px solid rgba(42,36,28,.42);
+  transition: color .2s ease, border-color .2s ease;
+}
+a.pl-xref:hover, a.pl-xref:focus-visible { color: #1c1712; border-bottom-color: #1c1712; }
+a.pl-xref:focus-visible { outline: 2px solid rgba(42,36,28,.5); outline-offset: 2px; }
 .pl-empty { font-style: italic; color: #8a7c66; }
 .pl-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

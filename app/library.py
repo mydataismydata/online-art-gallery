@@ -154,6 +154,45 @@ def _canonicalize_artists(works):
         w["artist"] = canon[fold((w["artist"] or "").strip())]
 
 
+# The titles a placard italicises. House style marks up every artwork title — the
+# AI that writes these is told to — so the marks are already in the prose, waiting
+# to be read.
+_EM_RE = re.compile(r"<(?:em|i)\b[^>]*>(.*?)</(?:em|i)>", re.I | re.S)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _link_descriptions(works):
+    """Resolve each placard's italicised artwork titles to the works they name.
+
+    Derived per scan and never stored: it follows the library, so retitling a
+    painting silently fixes every placard that mentions it, and a work that leaves
+    takes its links with it. The ids are local, which is also why this must never
+    be published — the public box works its own out from its own library.
+
+    A title two paintings share ("Portrait of a Young Girl" belongs to both Corot
+    and Courbet in one real catalogue) resolves to neither. Sending a reader to a
+    coin-flip is worse than leaving the words as words."""
+    keys = [fold(w["title"]) for w in works]
+    seen = Counter(keys)
+    by_title = {}
+    for w, k in zip(works, keys):
+        # Short or generic titles would match ordinary prose, not a painting.
+        if seen[k] == 1 and len(k) >= 4 and k != "untitled":
+            by_title[k] = w["id"]
+    for w in works:
+        d = w.get("description") or ""
+        if "<" not in d:
+            continue
+        out = {}
+        for m in _EM_RE.finditer(d):
+            text = _TAG_RE.sub("", m.group(1)).strip()
+            wid = by_title.get(fold(text))
+            if wid and wid != w["id"]:
+                out[text] = wid
+        if out:
+            w["xref"] = out
+
+
 def scan(force=False):
     with _lock:
         if not force and time.time() - _state["scanned_at"] < _TTL:
@@ -171,6 +210,7 @@ def scan(force=False):
                         except Exception as e:
                             print("scan: skipping %s (%s)" % (f, e), flush=True)
         _canonicalize_artists(works)
+        _link_descriptions(works)
         works.sort(key=lambda w: (artist_sort_key(w["artist"]), w["year"] or 9999, w["title"].casefold()))
         _state["works"] = works
         _state["by_id"] = {w["id"]: w for w in works}

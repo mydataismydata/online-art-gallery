@@ -3350,6 +3350,60 @@ function aiTextToRich(s) {
   return sanitizeRich(body.replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>"));
 }
 
+/* Placards point at each other: an italicised title that names another painting in
+   this museum becomes somewhere the reader can go. The server decides which titles
+   those are — it's the only party that knows the whole library — and hands over a
+   {title: work id} map; this only has to make them clickable.
+
+   Runs last, on markup sanitizeRich has already cleaned, because that allowlist
+   strips <a>: added any earlier, these links would scrub themselves away. The em
+   is kept and the link goes inside it, so a cross-reference still reads as a title. */
+function linkXrefs(html, xref) {
+  if (!xref) return html;
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll("em, i").forEach((el) => {
+    const id = xref[el.textContent.trim()];
+    if (!id || el.querySelector("a")) return;
+    const a = document.createElement("a");
+    a.className = "pl-xref";
+    a.href = "#";
+    a.dataset.work = id;
+    a.title = "Go to this painting";
+    while (el.firstChild) a.appendChild(el.firstChild);
+    el.appendChild(a);
+  });
+  return tpl.innerHTML;
+}
+
+/* Following a cross-reference slots the painting in beside the one being read, so
+   ← is the way back to it and → still carries on through the walk you were on.
+   Reached from a tile's "i" instead, there's no walk to join: open on its own. */
+async function jumpToWork(id) {
+  try {
+    const w = await api("/api/work/" + encodeURIComponent(id));
+    if (!viewer.classList.contains("open")) return void openViewer([w], 0);
+    const from = (V.list[V.i] || {}).title || "";
+    V.list.splice(V.i + 1, 0, w);
+    showWork(V.i + 1);
+    if (from) viewerFlash("← back to " + from);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+/* One listener for every placard, wherever it is drawn: the viewer repaints its
+   card on each work, and the "i" modal builds another. */
+function wireXrefs(root, before) {
+  root.querySelectorAll("a.pl-xref").forEach((a) =>
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();       // the viewer treats a bare click as "next"
+      if (before) before();
+      jumpToWork(a.dataset.work);
+    }));
+}
+
 /* ---------- shared rich-text editor (placard + artist bio) ---------- */
 
 /* Classes, not ids: the bio form and the placard editor can both be on the page,
@@ -3459,7 +3513,8 @@ function placardHtml(w) {
   const date = w.date || (w.year ? String(w.year) : "");
   const meta = [date, w.medium].filter(Boolean).join(" · ");
   const desc = w.description
-    ? '<div class="pl-desc">' + italicizeTitle(richDescHtml(w.description), w.title) + "</div>"
+    ? '<div class="pl-desc">' +
+      linkXrefs(italicizeTitle(richDescHtml(w.description), w.title), w.xref) + "</div>"
     : (isOwner() ? '<div class="pl-desc pl-empty">No description yet.</div>' : "");
   // Owner only, matching the route that saves it — the design says owner/curator,
   // but /api/work/<id> is owner-gated and widening who may rewrite a placard is
@@ -3501,6 +3556,7 @@ function workInfoDialog(w) {
     m.close();
     location.hash = artist.getAttribute("href");
   });
+  wireXrefs(m.el, m.close);   // drop the card, then open the painting it named
 }
 
 /* Collapsed placards persist for the session only: the checkbox in Settings is
@@ -3533,6 +3589,7 @@ function syncPlacard() {
       closeViewer();
       location.hash = pa.getAttribute("href");
     });
+    wireXrefs(el);   // stay in the viewer; the painting joins this walk
   } else {
     el.hidden = true;
   }
