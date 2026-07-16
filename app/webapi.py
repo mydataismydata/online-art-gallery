@@ -262,7 +262,8 @@ def api_collection_update(cid):
     data = request.get_json(silent=True) or {}
     try:
         rec = collections.update_collection(
-            cid, title=data.get("title"), description=data.get("description"))
+            cid, title=data.get("title"), description=data.get("description"),
+            sort=data.get("sort"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"collection": collections.detail(rec, auth.current_user())})

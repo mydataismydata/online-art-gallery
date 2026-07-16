@@ -520,7 +520,20 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
 .col-new .nlabel { font: 400 12px var(--sans); letter-spacing: .16em; color: var(--dim2); text-transform: uppercase; }
 .col-new:hover .col-mosaic { border-color: var(--gold-line); }
 .col-desc { font: italic 400 15px/1.7 var(--serif); color: var(--dim); max-width: 780px; margin: 14px 0 0; }
-.col-ctl { display: flex; align-items: center; gap: 18px; margin-top: 18px; }
+.col-ctl { display: flex; align-items: center; gap: 18px; margin-top: 18px; flex-wrap: wrap; }
+/* The hang order sits with the collection's own controls, and reads as a caption
+   rather than a form: it's one quiet choice, not a filter bar. */
+.col-sort {
+  display: flex; align-items: center; gap: 9px;
+  font: 600 10px var(--sans); letter-spacing: .2em; text-transform: uppercase;
+  color: var(--faint);
+}
+.col-sort select {
+  width: auto; padding: 6px 30px 6px 10px; font-size: 12px;
+  letter-spacing: normal; text-transform: none; color: var(--dim2);
+  border-color: var(--hair);
+}
+.col-sort select:hover { color: var(--text); border-color: var(--hair-strong); }
 
 /* ---------- connections page ---------- */
 .conn-sub {

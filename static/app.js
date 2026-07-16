@@ -2050,6 +2050,19 @@ async function collectionsView() {
   } catch (e) { errbox(e); }
 }
 
+/* How a collection hangs. Saved on the collection, not held in this browser: the
+   order is the walk the viewer takes and the works its card leads with, so it's
+   part of the curation and everyone should meet it the same way. "As added" is
+   the sequence they were gathered in — the one order that can't be worked out
+   from the paintings themselves, so it stays the default and is never overwritten. */
+const COL_SORTS = [
+  ["added", "As added"],
+  ["artist", "By artist"],
+  ["year", "Earliest first"],
+  ["year_desc", "Latest first"],
+  ["title", "By title"],
+];
+
 async function collectionView(cid) {
   setNav("collections");
   try {
@@ -2057,9 +2070,18 @@ async function collectionView(cid) {
     const c = d.collection;
     const works = c.works;
     const editable = c.can_edit;
-    const ctl = editable
-      ? '<div class="col-ctl"><button class="linkbtn" id="col-edit">edit details</button>' +
-        '<button class="danger" id="col-delete">Delete collection</button></div>'
+    const sortSel = (editable && works.length > 1)
+      ? '<label class="col-sort">Hang<select id="col-sort">' +
+        COL_SORTS.map(([v, label]) =>
+          '<option value="' + v + '"' + (c.sort === v ? " selected" : "") + ">" +
+          esc(label) + "</option>").join("") + "</select></label>"
+      : "";
+    const ctl = (editable || sortSel)
+      ? '<div class="col-ctl">' + sortSel +
+        (editable
+          ? '<button class="linkbtn" id="col-edit">edit details</button>' +
+            '<button class="danger" id="col-delete">Delete collection</button>'
+          : "") + "</div>"
       : "";
     const head =
       '<a class="back" href="#/collections">← All collections</a>' +
@@ -2078,6 +2100,16 @@ async function collectionView(cid) {
       app.innerHTML = page(head + worksSection(works, true, collectionCtx(c)), "tight");
       bindWorks(works, true, () => collectionView(cid), collectionCtx(c));
     }
+    const ss = $("#col-sort");
+    if (ss) ss.addEventListener("change", async () => {
+      try {
+        await api("/api/collection/" + encodeURIComponent(cid), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sort: ss.value }),
+        });
+        collectionView(cid);          // re-hang it, rather than re-sort a stale copy
+      } catch (e) { toast(e.message); }
+    });
     if (editable) {
       $("#col-edit").addEventListener("click", () =>
         editCollectionDialog(c, () => collectionView(cid)));

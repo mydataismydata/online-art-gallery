@@ -11,6 +11,7 @@ import threading
 import time
 
 from . import config, library
+from .names import artist_sort_key, fold
 
 _lock = threading.RLock()
 _ID_RE = re.compile(r"^[a-f0-9]{6,32}$")
@@ -82,15 +83,49 @@ def _owner_role(rec):
 
 # ---------------- work resolution ----------------
 
+# How a collection hangs. The order is part of the curation, not a viewer's
+# preference: it's the walk the viewer takes and the three works the card shows,
+# so it belongs to the collection and everyone sees it the same way.
+SORTS = ("added", "artist", "year", "year_desc", "title")
+DEFAULT_SORT = "added"
+
+
+def clean_sort(s):
+    s = (s or "").strip()
+    return s if s in SORTS else DEFAULT_SORT
+
+
+def _apply_sort(works, sort):
+    """Undated works sort last whichever way the years run — flipping the order
+    shouldn't march the ones we know nothing about to the front."""
+    if sort == "artist":
+        works.sort(key=lambda w: (artist_sort_key(w["artist"]), w["year"] or 9999,
+                                  fold(w["title"])))
+    elif sort == "year":
+        works.sort(key=lambda w: (w["year"] is None, w["year"] or 0,
+                                  artist_sort_key(w["artist"]), fold(w["title"])))
+    elif sort == "year_desc":
+        works.sort(key=lambda w: (w["year"] is None, -(w["year"] or 0),
+                                  artist_sort_key(w["artist"]), fold(w["title"])))
+    elif sort == "title":
+        works.sort(key=lambda w: (fold(w["title"]), artist_sort_key(w["artist"])))
+    return works                      # "added" is the stored order: leave it alone
+
+
 def resolve_works(rec):
-    """The collection's works as full dicts, in curated order, silently skipping
-    ids whose file no longer exists."""
+    """The collection's works as full dicts, in the order it hangs in, silently
+    skipping ids whose file no longer exists.
+
+    'added' is the sequence they were gathered in. It's the one order that can't
+    be reconstructed from the works themselves, so it is never overwritten — the
+    sort is a lens over the stored list, and choosing 'as added' again restores
+    exactly what the curator built."""
     out = []
     for wid in rec.get("work_ids", []):
         w = library.get(wid)
         if w:
             out.append(w)
-    return out
+    return _apply_sort(out, rec.get("sort"))
 
 
 def can_edit(rec, user):
@@ -107,22 +142,22 @@ def can_edit(rec, user):
 def summary(rec):
     """Index-card view: covers + count reflect works that still exist. `covers` is
     up to three ids — the card draws them as a mosaic; `cover` stays for callers
-    that just want the lead image."""
-    covers, count = [], 0
-    for wid in rec.get("work_ids", []):
-        if library.get(wid):
-            count += 1
-            if len(covers) < 3:
-                covers.append(wid)
+    that just want the lead image.
+
+    Ordered the same way the collection hangs, so the card leads with the works
+    you actually meet first rather than whatever was gathered first."""
+    works = resolve_works(rec)
+    covers = [w["id"] for w in works[:3]]
     return {
         "id": rec.get("id"),
         "title": rec.get("title"),
         "description": rec.get("description") or "",
         "owner_display": rec.get("owner_display"),
         "owner_role": _owner_role(rec),
-        "count": count,
+        "count": len(works),
         "cover": covers[0] if covers else None,
         "covers": covers,
+        "sort": clean_sort(rec.get("sort")),
         "updated": rec.get("updated"),
     }
 
@@ -138,6 +173,7 @@ def detail(rec, user):
         "updated": rec.get("updated"),
         "works": works,
         "count": len(works),
+        "sort": clean_sort(rec.get("sort")),
         "can_edit": can_edit(rec, user),
     }
 
@@ -190,7 +226,7 @@ def create_collection(title, description, user):
         return _write(rec)
 
 
-def update_collection(cid, title=None, description=None):
+def update_collection(cid, title=None, description=None, sort=None):
     with _lock:
         rec = _read(cid)
         if not rec:
@@ -199,6 +235,8 @@ def update_collection(cid, title=None, description=None):
             rec["title"] = _clean_title(title)
         if description is not None:
             rec["description"] = _clean_desc(description)
+        if sort is not None:
+            rec["sort"] = clean_sort(sort)
         return _write(rec)
 
 
