@@ -50,6 +50,11 @@ def list_sources():
             "placeholder": m.PLACEHOLDER,
             "supports_max_px": getattr(m, "SUPPORTS_MAX_PX", False),
             "max_px_default": getattr(m, "MAX_PX_DEFAULT", None),
+            # Sources that take a file rather than a name: the browser reads it and
+            # posts the text, so it works wherever the gallery itself is running.
+            "accepts_file": getattr(m, "ACCEPTS_FILE", False),
+            "file_accept": getattr(m, "FILE_ACCEPT", ""),
+            "query_label": getattr(m, "QUERY_LABEL", "Artist"),
             "custom": getattr(m, "custom", False),
             "available": True,
             "note": "",

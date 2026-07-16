@@ -40,10 +40,16 @@ from . import tuning
 ID = "worklist"
 LABEL = "Work list (CSV)"
 HINT = ("Imports a list of individual works rather than an artist's whole output. "
-        "Give it a path or URL to a CSV — a museum's own room export works as-is. "
-        "Rows are matched by an image_url, wikidata or ark column if present, else by "
-        "artist + title. Anything smaller than the minimum size is reported, not saved.")
-PLACEHOLDER = r"Path or URL of a CSV, e.g. C:\lists\louvre-salle-700.csv"
+        "Choose a CSV and the browser hands it over — a museum's own room export works "
+        "as-is. Rows are matched by an image_url, wikidata or ark column if present, "
+        "else by artist + title. Anything smaller than the minimum size is reported, "
+        "not saved.")
+PLACEHOLDER = "…or a URL, or a path on the gallery server"
+# The file is read in the browser and posted as text: the CSV is wherever the
+# person is sitting, which is rarely where the gallery is running.
+ACCEPTS_FILE = True
+FILE_ACCEPT = ".csv,.tsv,text/csv"
+QUERY_LABEL = "CSV file"
 
 WDQS = "https://query.wikidata.org/sparql"
 COMMONS = "https://commons.wikimedia.org/w/api.php"
@@ -107,22 +113,28 @@ def _artist_of(raw):
     return ""
 
 
-def _read_rows(spec, limit):
-    """The CSV, from a local path or a URL. The delimiter is sniffed: museum exports
-    are as often semicolon-separated as comma."""
-    spec = (spec or "").strip().strip('"')
-    if not spec:
-        raise RuntimeError("Give me a path or URL to a CSV file.")
-    if re.match(r"^https?://", spec, re.I):
-        r = session().get(spec, timeout=60)
-        r.raise_for_status()
-        raw = r.content
-    else:
-        p = Path(spec)
-        if not p.is_file():
-            raise RuntimeError("No CSV file at %s" % p)
-        raw = p.read_bytes()
-    text = raw.decode("utf-8-sig", "replace")
+def _read_rows(spec, limit, text=None):
+    """The CSV: handed over by the browser, or fetched from a URL, or read from a
+    path on the server. The delimiter is sniffed — museum exports are as often
+    semicolon-separated as comma."""
+    if text is None:
+        spec = (spec or "").strip().strip('"')
+        if not spec:
+            raise RuntimeError("Choose a CSV file, or give a URL or server path.")
+        if re.match(r"^https?://", spec, re.I):
+            r = session().get(spec, timeout=60)
+            r.raise_for_status()
+            raw = r.content
+        else:
+            p = Path(spec)
+            if not p.is_file():
+                raise RuntimeError(
+                    "No CSV file at %s. That path has to exist on the machine running "
+                    "the gallery — if the file is on your own computer, use the file "
+                    "picker instead." % p)
+            raw = p.read_bytes()
+        text = raw.decode("utf-8-sig", "replace")
+    text = text.lstrip("﻿")
     try:
         dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
     except csv.Error:
@@ -301,7 +313,7 @@ def run(job):
     sess = session()
     cfg = tuning.effective(ID, CONFIG)
     min_px = job.opts.get("min_px") or cfg["min_px"]
-    rows, cols = _read_rows(job.query, cfg["max_rows"])
+    rows, cols = _read_rows(job.query, cfg["max_rows"], job.opts.get("csv_text"))
     job.log("Read %d row%s; using columns: %s."
             % (len(rows), "" if len(rows) == 1 else "s",
                ", ".join("%s=%s" % (k, v) for k, v in sorted(cols.items()))))

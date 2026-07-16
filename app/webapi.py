@@ -1003,6 +1003,11 @@ def api_sources_builtin_reset(sid):
     return jsonify({"source": cfg})
 
 
+# A work list the browser read for us. Generous for a CSV of a few thousand rows,
+# small enough that a misdirected upload can't sit in memory.
+_MAX_UPLOAD = 4 << 20
+
+
 @bp.get("/api/downloads")
 @auth.require_role("owner")
 def api_downloads():
@@ -1016,8 +1021,6 @@ def api_downloads_start():
     data = request.get_json(silent=True) or {}
     source = (data.get("source") or "").strip()
     query = (data.get("query") or "").strip()
-    if not query:
-        return jsonify({"error": "Enter an artist name."}), 400
     try:
         get_source(source)
     except KeyError:
@@ -1032,7 +1035,20 @@ def api_downloads_start():
             except (TypeError, ValueError):
                 return jsonify({"error": "%s must be a number." % key}), 400
 
-    job = manager.start(source, query, opts)
+    # A file the browser read for us, because the gallery may be running on a
+    # different machine from the person choosing the file.
+    csv_text = data.get("csv_text")
+    if csv_text:
+        if not isinstance(csv_text, str):
+            return jsonify({"error": "csv_text must be text."}), 400
+        if len(csv_text) > _MAX_UPLOAD:
+            return jsonify({"error": "That file is larger than %d MB."
+                                     % (_MAX_UPLOAD // (1 << 20))}), 400
+        opts["csv_text"] = csv_text
+    if not query and not csv_text:
+        return jsonify({"error": "Enter an artist name, or choose a file."}), 400
+
+    job = manager.start(source, query or "(pasted file)", opts)
     return jsonify(job.to_dict())
 
 

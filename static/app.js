@@ -2145,11 +2145,14 @@ async function addView(prefill) {
     ).join("");
     app.innerHTML = page(
       '<div class="pagehead"><div><h1>Add an artist</h1>' +
-      '<p class="sub">Download every painting by an artist from a source into your library.</p></div></div>' +
+      '<p class="sub" id="f-sub">Download every painting by an artist from a source ' +
+      "into your library.</p></div></div>" +
       '<div class="addwrap">' +
       '<form class="dlform" id="dlform">' +
         "<label>Source</label><select id=\"f-source\">" + options + "</select>" +
-        "<label>Artist</label><input id=\"f-query\" autocomplete=\"off\">" +
+        '<label id="f-query-label">Artist</label>' +
+        '<input type="file" id="f-file" class="filepick" style="display:none">' +
+        "<input id=\"f-query\" autocomplete=\"off\">" +
         '<div class="row2"><div><label>Max works <span style="text-transform:none">(optional)</span></label>' +
         '<input id="f-max" type="number" min="1" placeholder="all"></div>' +
         '<div id="f-px-wrap"><label>Max size, px <span style="text-transform:none">(optional)</span></label>' +
@@ -2162,6 +2165,7 @@ async function addView(prefill) {
       '<div id="jobs"></div></div></div>');
 
     const sel = $("#f-source"), hint = $("#f-hint"), warn = $("#f-warn"), q = $("#f-query");
+    const file = $("#f-file");
     function syncSource() {
       const s = sources.find((x) => x.id === sel.value);
       hint.textContent = s.hint;
@@ -2169,6 +2173,16 @@ async function addView(prefill) {
       q.placeholder = s.placeholder;
       $("#f-px-wrap").style.display = s.supports_max_px ? "" : "none";
       $("#f-px").placeholder = s.max_px_default ? "default " + s.max_px_default : "native";
+      // A source that takes a file gets the picker; the text field stays for a URL
+      // or a path that really is on the server.
+      $("#f-query-label").textContent = s.query_label || "Artist";
+      $("#f-sub").textContent = s.accepts_file
+        ? "Import a list of individual works — a museum's own export of a room, say — "
+          + "rather than everything by one painter."
+        : "Download every painting by an artist from a source into your library.";
+      file.style.display = s.accepts_file ? "" : "none";
+      file.accept = s.file_accept || "";
+      if (!s.accepts_file) file.value = "";
     }
     sel.addEventListener("change", syncSource);
     syncSource();
@@ -2187,6 +2201,13 @@ async function addView(prefill) {
       };
       try {
         $("#f-go").disabled = true;
+        // Read the chosen file here rather than sending a path: the gallery may be
+        // on another machine entirely, where that path means nothing.
+        const f = file.files && file.files[0];
+        if (f) {
+          body.csv_text = await f.text();
+          body.query = f.name;
+        }
         await api("/api/downloads", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2195,6 +2216,7 @@ async function addView(prefill) {
         msg.className = "formmsg ok";
         msg.textContent = "Queued. Progress appears on the right.";
         q.value = "";
+        file.value = "";
         refreshJobs();
       } catch (err) {
         msg.className = "formmsg err";
