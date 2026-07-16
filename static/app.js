@@ -3737,7 +3737,12 @@ vimg.addEventListener("load", () => viewer.classList.remove("loading"));
 
 function openViewer(list, i) {
   if (!list || !list.length) return;
-  V.list = list;
+  // Copy it: the caller keeps this array, and its grid's tiles carry the index
+  // they had when it was rendered. Following a placard's cross-reference splices
+  // the painting into the viewer's list, and sharing the array would splice it
+  // into the page's too — every tile after that point would then open its
+  // neighbour. The viewer owns its walk; the page keeps its own.
+  V.list = list.slice();
   viewer.classList.add("open");
   document.body.style.overflow = "hidden";
   showWork(i);
