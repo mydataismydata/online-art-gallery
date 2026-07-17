@@ -1297,14 +1297,19 @@ const FACETS = [["era", "Era"], ["medium", "Medium"], ["style", "Style"],
 
    All five are here because an artist's page shows all five. The map draws fewer
    (links.MAP_TYPES) — it says which in its payload, and the chips follow it. */
+/* Primary ties are drawn solid, secondary ties dashed, so the weight of a
+   connection reads before its colour does. Style shares movement's blue-grey a
+   shade lighter — it's the same axis, looser. Subject is artist-page-only. */
 const LINK_TYPES = {
-  movement:   { label: "Movement",     color: "#7f96ad", dash: "",    w: 1.4 },
-  influence:  { label: "Influence",    color: "#c2a061", dash: "",    w: 1.9 },
-  place_time: { label: "Place & time", color: "#7fa389", dash: "7 5", w: 1.4 },
-  subject:    { label: "Subject",      color: "#a884a3", dash: "2 5", w: 1.6 },
   curator:    { label: "Curator note", color: "#bf7e63", dash: "",    w: 2.4 },
+  influence:  { label: "Influence",    color: "#c2a061", dash: "",    w: 1.9 },
+  movement:   { label: "Movement",     color: "#7f96ad", dash: "",    w: 1.6 },
+  style:      { label: "Style",        color: "#9aa9bd", dash: "5 4", w: 1.3 },
+  place_time: { label: "Place & time", color: "#7fa389", dash: "7 5", w: 1.3 },
+  subject:    { label: "Subject",      color: "#a884a3", dash: "2 5", w: 1.6 },
 };
-const LINK_ORDER = ["movement", "influence", "place_time", "subject", "curator"];
+// Chip order on the map: primary first, then the two secondary tiers.
+const LINK_ORDER = ["curator", "influence", "movement", "style", "place_time"];
 
 /* #rrggbb + alpha -> #rrggbbaa, so a type's colour can be handed to CSS at the
    design's exact opacities without keeping a parallel rgba() table. */
@@ -1365,11 +1370,14 @@ async function browseView(facet, value) {
    switch so you keep your painter when you jump from map to timeline. So does
    the map's zoom and pan (z, px, py) — clicking a painter re-renders the whole
    page, and it would be maddening to be thrown back to the wide shot each time. */
-const CONN = { mode: "map", sel: null, off: new Set(), data: null, threads: [],
-               z: 1, px: 0, py: 0 };
+/* The two secondary tiers start hidden, so the map opens on the ties that are
+   always true — hand-written links and a shared first movement — rather than the
+   denser style/place-time web. A click on their chips brings them in. */
+const CONN = { mode: "map", sel: null, off: new Set(["style", "place_time"]),
+               data: null, threads: [], z: 1, px: 0, py: 0 };
 const CONN_MODES = ["map", "timeline", "threads"];
 const SUBLINE = {
-  map: "every painter, five kinds of thread",
+  map: "every painter, and how the collection ties them together",
   timeline: "four centuries, side by side",
   threads: "curated paths through the collection",
 };
@@ -1544,9 +1552,8 @@ function mapHtml() {
     '<button type="button" id="mapout" title="Zoom out" aria-label="Zoom out">&minus;</button>' +
     "</div></div>" +
     '<p class="conn-caption">Click a painter to trace their connections · scroll or pinch ' +
-    "to spread them out · node size follows works in the collection" +
-    (g.truncated ? " · showing the " + g.nodes.length + " best-connected of " +
-      (g.nodes.length + g.truncated) + " painters" : "") + "</p>"
+    "to spread them out · node size follows works in the collection · use the tags " +
+    "above to add or hide kinds of connection</p>"
   );
 }
 

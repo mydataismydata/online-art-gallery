@@ -1,19 +1,30 @@
 """Connections: how the painters in this museum relate to one another.
 
-Five kinds of thread, in two families.
+Two families of link, and within the derived one, two tiers.
 
-*Derived* — movement, place & time, subject — are computed from what's already on
-disk (artist bios + the works' style/genre/school), never stored. They therefore
-follow the library: fix a bio and the graph fixes itself.
+*Hand-written* — influence and curator notes — are stored in data/artist_links.json,
+carry a human sentence, and are always drawn.
 
-*Hand-written* — influence and curator notes — are stored in data/artist_links.json
-and carry a human sentence. Only these need an author.
+*Derived* are computed from what's on disk (bios + the works' style/genre/school),
+never stored, so they follow the library: fix a bio and the graph fixes itself.
+They split by how much weight the evidence carries:
 
-The hard part is restraint. "Everyone who shares a movement" is a clique: twelve
-Impressionists would mean sixty-six edges and a hairball that says nothing. So a
-derived group is threaded as a *chain* in birth order — twelve painters, eleven
-edges — which draws the cluster as a legible run and still says "these belong
-together". A pair only ever gets its ONE strongest link (see _PRECEDENCE).
+  PRIMARY — a shared FIRST bio movement. A painter's own school is the strongest
+  thing their bio asserts, so this is always drawn, whole, ungated.
+
+  SECONDARY — a looser tie: a shared painting style, a shared painting school, a
+  movement past the first in the bio, or simply the same place and time. These are
+  gated on the works the museum actually holds: two painters connect only if their
+  works share a nationality AND overlap in year. That gate is the whole point — it
+  is what keeps an Australian and an American who both merely wrote "Impressionism"
+  apart. Same word, different wall.
+
+Within a group every qualifying pair is drawn — a clique, not a chain. An earlier
+version threaded each group as a chain in birth order to keep the edge count down;
+that was a mistake, because birth-order neighbours who share nothing else (a
+Heidelberg painter and an American Impressionist born five years apart) came out
+wired together. The map now draws the honest, denser graph and lets the reader thin
+it with the type toggles. A pair still keeps only its ONE strongest link (_PRECEDENCE).
 
 Artists are keyed by display name, casefolded for comparison, because that is what
 identifies an artist everywhere else in this app. rename() keeps stored links
@@ -29,35 +40,36 @@ from . import config, library, artistinfo
 from .names import fold
 
 # Strongest first: a pair keeps only its best link, so a curator's sentence is
-# never buried under "both were Dutch".
-_PRECEDENCE = ("curator", "influence", "movement", "place_time", "subject")
+# never buried under "both were Dutch". `style` (the secondary movement/style tie)
+# sits below the primary `movement` and above the bare `place_time`.
+_PRECEDENCE = ("curator", "influence", "movement", "style", "place_time", "subject")
 TYPES = _PRECEDENCE
 HAND_TYPES = ("influence", "curator")
 
-# What the map is willing to draw. Subject is left off it: it chains everyone who
-# shares a genre, and being the weakest link there is (_PRECEDENCE), an edge only
-# ever survives to the map when a pair has nothing better to say than "both painted
-# landscapes" — a haze across the whole graph that tells you nothing you couldn't
-# have guessed. It stays on an artist's own page, where it's one card among a few
-# and the shared subject is worth the mention.
-MAP_TYPES = ("curator", "influence", "movement", "place_time")
+# The primary tier — always drawn, never gated by place or time.
+PRIMARY_TYPES = ("curator", "influence", "movement")
+
+# What the map is willing to draw. Subject alone is left off (it's a genre haze
+# that says little); it stays on an artist's own page, where a shared subject is
+# one card worth the mention.
+MAP_TYPES = ("curator", "influence", "movement", "style", "place_time")
 
 TYPE_META = {
     "movement":   {"label": "Movement",     "color": "#7f96ad",
-                   "desc": "Painters who belong to the same school."},
+                   "desc": "Their first-listed movement is the same — the strongest tie a bio makes."},
+    "style":      {"label": "Style",        "color": "#9aa9bd",
+                   "desc": "A looser tie — a shared painting style, school, or later movement, "
+                           "between painters of one place and time."},
     "influence":  {"label": "Influence",    "color": "#c2a061",
                    "desc": "One painter shaped another — teachers, champions, models."},
     "place_time": {"label": "Place & time", "color": "#7fa389",
-                   "desc": "Overlapping years in the same place."},
+                   "desc": "Same nationality, overlapping working years — nothing more specific."},
     "subject":    {"label": "Subject",      "color": "#a884a3",
                    "desc": "The same subjects, seen differently."},
     "curator":    {"label": "Curator note", "color": "#bf7e63",
                    "desc": "Hand-written links with a note attached."},
 }
 
-# A map with more painters than this stops being a map. Beyond it we keep the
-# best-connected ones rather than drawing an unreadable thicket.
-MAX_NODES = 60
 CANVAS_W, CANVAS_H = 1600, 780
 _MARGIN_X, _MARGIN_Y = 150, 120
 
@@ -328,23 +340,41 @@ def _year_int(s):
     return None
 
 
-def _overlap(p, q):
-    """The years two painters were both alive, or None."""
-    if not (p["born"] and p["died"] and q["born"] and q["died"]):
+def _works_overlap(p, q):
+    """The years both painters have WORK in the museum — the span the collection can
+    actually show them sharing, not their lifetimes (the owner's call: place & time
+    is about the pictures on the wall, not a birth certificate). None if either has
+    no dated work."""
+    a0, a1, b0, b1 = p["year_min"], p["year_max"], q["year_min"], q["year_max"]
+    if None in (a0, a1, b0, b1):
         return None
-    lo, hi = max(p["born"], q["born"]), min(p["died"], q["died"])
+    lo, hi = max(a0, b0), min(a1, b1)
     return (lo, hi) if lo <= hi else None
+
+
+def _same_nation(p, q):
+    """The nationality two painters share, or None. 'Place' for the place-and-time
+    gate: coarse enough that real schoolmates still match, sharp enough to keep an
+    Australian and an American apart however alike their movement labels read."""
+    a, b = p["nationality"].casefold(), q["nationality"].casefold()
+    return p["nationality"] if a and a == b else None
 
 
 # ---------------- derived links ----------------
 
-def _chain(members, type_, note_of):
-    """Thread a group as consecutive pairs in birth order — n-1 edges, not n²/2.
-    Sorted by birth year (undated painters last, then by name) so the chain is
-    stable across scans and reads chronologically."""
-    ordered = sorted(members, key=lambda p: (p["born"] or 9999, p["name"].casefold()))
+def _pairs(members):
+    ms = list(members)
+    for i in range(len(ms)):
+        for j in range(i + 1, len(ms)):
+            yield ms[i], ms[j]
+
+
+def _clique(members, type_, note_of):
+    """Every pair in the group that note_of accepts — n(n-1)/2 edges, not the n-1 of
+    a chain. Dedup thins each pair to its strongest link; the place/time gate thins
+    the secondary tiers. The honest graph, drawn whole."""
     out = []
-    for p, q in zip(ordered, ordered[1:]):
+    for p, q in _pairs(members):
         note = note_of(p, q)
         if note:
             out.append({"a": p["name"], "b": q["name"], "type": type_,
@@ -362,52 +392,54 @@ def _group_by(profiles, field):
 
 def derived_links(profiles):
     out = []
+    ps = list(profiles.values())
 
-    # Movement: a shared bio movement, or failing that a shared style tag.
-    for members in _group_by(profiles, "movements").values():
+    # PRIMARY — a shared FIRST bio movement. Always drawn: a clique over everyone
+    # whose bio opens with the same movement, ungated by place or time.
+    prim = defaultdict(list)
+    for p in ps:
+        if p["movements"]:
+            prim[fold(p["movements"][0])].append(p)
+    for members in prim.values():
         if len(members) > 1:
-            out += _chain(members, "movement",
-                          lambda p, q: _shared(p["movements"], q["movements"]))
-    for members in _group_by(profiles, "styles").values():
-        if len(members) > 1:
-            out += _chain(members, "movement",
-                          lambda p, q: _shared(p["styles"], q["styles"]))
+            out += _clique(members, "movement", lambda p, q: p["movements"][0])
 
-    # Place & time: same school, or same nationality — and alive at the same time.
-    # Without the overlap a "Dutch" link would join painters two centuries apart.
-    def place_note(p, q):
-        # Two painters of one movement are nearly always of one country too, so an
-        # unfiltered nationality chain would propose exactly the pairs the movement
-        # chain already owns — and lose every one of them to precedence, leaving the
-        # type with nothing to show. Place & time earns its keep BETWEEN movements:
-        # "both formed by the German academy" is worth saying, "both Impressionists
-        # were French" is not.
-        if p["primary"].casefold() == q["primary"].casefold():
-            return None
-        ov = _overlap(p, q)
-        if not ov:
-            return None
-        where = _shared(p["schools"], q["schools"]) or _shared_str(p["nationality"], q["nationality"])
-        if not where:
-            return None
-        return "%s, %d–%d" % (where, ov[0], ov[1])
+    # SECONDARY — a looser tie between painters of one place and time. Only pairs of
+    # the same nationality whose museum works overlap in year are even considered;
+    # among those, a shared style / school / later movement makes a `style` edge, and
+    # bare co-presence (same nation, same years, nothing else) makes `place_time`.
+    def affinity(p, q):
+        return (_shared(p["styles"], q["styles"])
+                or _shared(p["schools"], q["schools"])
+                or _shared(p["movements"][1:], q["movements"][1:]))
 
-    for members in _group_by(profiles, "schools").values():
-        if len(members) > 1:
-            out += _chain(members, "place_time", place_note)
-    nat = defaultdict(list)
-    for p in profiles.values():
-        if p["nationality"]:
-            nat[p["nationality"].casefold()].append(p)
-    for members in nat.values():
-        if len(members) > 1:
-            out += _chain(members, "place_time", place_note)
+    by_nation = defaultdict(list)
+    for p in ps:
+        if p["nationality"] and p["year_min"] is not None:
+            by_nation[p["nationality"].casefold()].append(p)
+    for members in by_nation.values():
+        for p, q in _pairs(members):
+            ov = _works_overlap(p, q)
+            if not ov:
+                continue
+            tag = affinity(p, q)
+            if tag:
+                out.append({"a": p["name"], "b": q["name"], "type": "style",
+                            "note": "%s · %d–%d" % (tag, ov[0], ov[1]),
+                            "directed": False, "derived": True})
+            else:
+                out.append({"a": p["name"], "b": q["name"], "type": "place_time",
+                            "note": "%s · works %d–%d" % (p["nationality"], ov[0], ov[1]),
+                            "directed": False, "derived": True})
 
-    # Subject: the same genre, seen differently.
+    # SUBJECT — the same genre, seen differently. Off the map (see MAP_TYPES), kept
+    # for the artist page, and left ungated: a subject is worth remarking on ACROSS
+    # place and time, which is exactly what the secondary gate would forbid. A clique
+    # like the rest, so it no longer depends on who was born next to whom.
     for members in _group_by(profiles, "genres").values():
         if len(members) > 1:
-            out += _chain(members, "subject",
-                          lambda p, q: _shared(p["genres"], q["genres"]))
+            out += _clique(members, "subject",
+                           lambda p, q: _shared(p["genres"], q["genres"]))
     return out
 
 
@@ -415,10 +447,6 @@ def _shared(a, b):
     """First value common to two ordered lists, in a's order (its display case)."""
     bk = {v.casefold() for v in b}
     return next((v for v in a if v.casefold() in bk), None)
-
-
-def _shared_str(a, b):
-    return a if a and b and a.casefold() == b.casefold() else None
 
 
 # ---------------- the graph ----------------
@@ -507,38 +535,13 @@ def _ring(members, cx, cy, cell):
 def graph():
     """Everything the Connections page draws."""
     links, profiles = all_links()
-    # Filtered before anything counts it, so a painter held on by a subject edge
-    # alone doesn't take a place on a map that won't draw their edge.
+    # Only the kinds the map draws (subject is artist-page-only).
     links = [l for l in links if l["type"] in MAP_TYPES]
 
-    degree = defaultdict(int)
-    for l in links:
-        degree[_key(l["a"])] += 1
-        degree[_key(l["b"])] += 1
-
-    # Whoever a curator has written about by hand. Counting degree alone ranks a
-    # painter's one deliberate influence link below somebody else's two incidental
-    # "same movement" chain edges — backwards, when a hand-written link outranks
-    # every derived kind there is (_PRECEDENCE). Cutting one of these painters also
-    # drops the edge with them, so the map would answer a note someone sat down and
-    # wrote with "Influence 0".
-    hand = set()
-    for l in links:
-        if not l.get("derived"):
-            hand.add(_key(l["a"]))
-            hand.add(_key(l["b"]))
-
-    # Too many painters to draw? Keep the hand-linked, then the best-connected,
-    # then the best-represented.
-    keys = list(profiles)
-    truncated = 0
-    if len(keys) > MAX_NODES:
-        keys.sort(key=lambda k: (k not in hand, -degree[k], -profiles[k]["works"], k))
-        truncated = len(keys) - MAX_NODES
-        keys = keys[:MAX_NODES]
-    kept = set(keys)
-    links = [l for l in links if _key(l["a"]) in kept and _key(l["b"]) in kept]
-
+    # Every painter is drawn — no node cap. A big museum makes a big blob; the map
+    # zooms, so the owner pulls the painters apart by scrolling in rather than by us
+    # deciding who's worth showing. What thins the picture is the type toggles.
+    kept = set(profiles)
     pos, labels = _layout(profiles, sorted(kept))
     nodes = []
     for k in sorted(kept, key=lambda k: profiles[k]["name"].casefold()):
@@ -560,12 +563,10 @@ def graph():
         "clusters": labels,
         "types": {t: dict(TYPE_META[t], count=counts[t]) for t in MAP_TYPES},
         "canvas": {"w": CANVAS_W, "h": CANVAS_H},
-        "truncated": truncated,
-        # Every painter in the museum, drawn or not. MAX_NODES is a limit on what
-        # can be *drawn* without the map turning into a thicket — it was never meant
-        # to limit who a curator may write about. A link or a thread naming an
-        # off-map painter is kept and shown on their own artist page; the map just
-        # doesn't draw that edge. Pickers read this, never `nodes`.
+        "truncated": 0,                    # nothing is dropped any more — kept for the client
+        # Every painter in the museum. `nodes` now holds all of them too; this stays
+        # the list the link/thread pickers read (never `nodes`), so a picker can name
+        # anyone even if a future change starts thinning the drawn set again.
         "artists": [{"id": k, "name": profiles[k]["name"]}
                     for k in sorted(profiles, key=lambda k: profiles[k]["name"].casefold())],
     }
