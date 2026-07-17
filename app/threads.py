@@ -14,6 +14,11 @@ from . import config, library
 from .names import fold
 
 MAX_STEPS = 12
+# A step's note is a line saying why this painter follows the last one — short, but
+# it's prose now, with the marks a placard allows and titles that link. Measured on
+# the words, not the markup, and never trimmed to fit: cutting HTML at a character
+# count lands mid-tag and hands the page a broken note.
+MAX_STEP_NOTE = 600
 
 
 def _load():
@@ -39,7 +44,12 @@ def _clean_steps(steps):
         artist = (s.get("artist") or "").strip()
         if not artist:
             continue
-        out.append({"artist": artist, "note": (s.get("note") or "").strip()[:300]})
+        note = (s.get("note") or "").strip()
+        text = library.text_of(note)
+        if len(text) > MAX_STEP_NOTE:
+            raise ValueError("Keep each step's note under %d characters — %s's runs "
+                             "to %d." % (MAX_STEP_NOTE, artist, len(text)))
+        out.append({"artist": artist, "note": note if text else ""})
     if len(out) < 2:
         raise ValueError("A thread needs at least two painters — it's a path, not a pin.")
     if len(out) > MAX_STEPS:
@@ -65,13 +75,20 @@ def list_threads():
     covers = {}
     for a in library.artists():
         covers[fold(a["name"])] = {"cover": a["cover"], "name": a["name"]}
+    # A step's note may name a painting in italics; resolve it the way a placard's
+    # is resolved, on read, so the ids are this box's own and follow the library.
+    index = library.title_index()
     out = []
     for t in _load():
         steps = []
         for s in t["steps"]:
             hit = covers.get(fold(s["artist"]))
             if hit:
-                steps.append({"artist": hit["name"], "note": s["note"], "cover": hit["cover"]})
+                step = {"artist": hit["name"], "note": s["note"], "cover": hit["cover"]}
+                xr = library.xref_in(s["note"], index)
+                if xr:
+                    step["xref"] = xr
+                steps.append(step)
         if len(steps) >= 2:
             out.append(dict(t, steps=steps))
     return out

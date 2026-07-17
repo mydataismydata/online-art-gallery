@@ -218,23 +218,24 @@ h1, h2, h3 { font-weight: 400; margin: 0; }
   border-bottom: 1px solid var(--hair-dash);
 }
 .linkbtn:hover { color: var(--gold-hi); }
-/* A title in a curator's note that names a painting we hold. The placard styles
-   its own in ink, because the placard is paper (see viewer.css); everywhere else
-   the note sits on the dark wall, where gold is what says "you can go here". It
-   stays italic — still a title, just somewhere you can go.
+/* A title that names a painting we hold, wherever prose mentions one. Gold, because
+   almost everywhere it appears is the dark wall and gold is what says "you can go
+   here". The placard is the exception and overrides this: it's paper, so it wants
+   ink (see viewer.css). Italic either way — still a title, just somewhere you can go.
 
-   Not an <a> in a card or an aside row: the note is already inside one, and the
-   parser won't have a link in a link. linkXrefs makes it a span that says it's a
-   link, so this can't lean on the anchor pseudo-classes. */
-.cnote .pl-xref {
-  color: var(--gold); cursor: pointer;
+   Tag-agnostic on purpose. In a connection card or an aside row the note is already
+   inside a link or a button, and the parser won't have a link in a link, so
+   linkXrefs makes it a span that says it's a link — which rules out the anchor
+   pseudo-classes. */
+.pl-xref {
+  color: var(--gold); cursor: pointer; text-decoration: none;
   border-bottom: 1px solid var(--gold-line);
   transition: color .2s ease, border-color .2s ease;
 }
-.cnote .pl-xref:hover, .cnote .pl-xref:focus-visible {
+.pl-xref:hover, .pl-xref:focus-visible {
   color: var(--gold-hi); border-bottom-color: var(--gold-hi);
 }
-.cnote .pl-xref:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; }
+.pl-xref:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 2px; }
 .danger {
   background: none; border: 1px solid rgba(191,126,99,.5); color: var(--t-curator);
   font: 400 11.5px var(--sans); letter-spacing: .1em; text-transform: uppercase;

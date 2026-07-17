@@ -21,11 +21,9 @@ attached when a painter is renamed or merged.
 """
 import json
 import math
-import re
 import secrets
 import time
 from collections import Counter, defaultdict
-from html import unescape
 
 from . import config, library, artistinfo
 from .names import fold
@@ -65,16 +63,9 @@ _MARGIN_X, _MARGIN_Y = 150, 120
 
 
 # A note is a curator's prose — a few sentences, with the same small set of marks
-# a placard allows. It's held as markup, so measuring it means measuring what they
-# actually wrote: count the tags and heavy formatting would eat the allowance, and
-# an editor left alone still hands back a stray <br>.
-_TAG_RE = re.compile(r"<[^>]+>")
+# a placard allows.
 MAX_NOTE = 2000
-
-
-def note_text(note):
-    """What the curator wrote, with the markup taken off."""
-    return unescape(_TAG_RE.sub(" ", note or "")).strip()
+note_text = library.text_of
 
 
 def _key(name):

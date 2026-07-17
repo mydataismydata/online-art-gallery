@@ -8,6 +8,7 @@ import shutil
 import threading
 import time
 from collections import Counter, OrderedDict
+from html import unescape
 from pathlib import Path
 
 from PIL import Image
@@ -159,6 +160,15 @@ def _canonicalize_artists(works):
 # to be read.
 _EM_RE = re.compile(r"<(?:em|i)\b[^>]*>(.*?)</(?:em|i)>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
+
+
+def text_of(html):
+    """What a curator actually wrote, with the markup taken off.
+
+    Prose is held as markup, so measuring it means measuring the words: counting
+    tags would let bold eat someone's allowance. It's also how to tell an empty
+    editor from a full one — left alone, one still hands back a stray <br>."""
+    return unescape(_TAG_RE.sub(" ", html or "")).strip()
 
 
 def title_index(works=None):

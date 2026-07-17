@@ -128,18 +128,31 @@
 .thread .th-desc { margin-top: 6px; font: 400 13px/1.6 var(--sans); color: var(--dim2); max-width: 640px; }
 .th-chain { display: flex; align-items: stretch; flex-wrap: wrap; margin-top: 22px; }
 .th-arrow { display: flex; align-items: center; padding: 0 16px; font: 300 22px var(--serif); color: var(--gold); }
+/* The card is no longer one big button. Its top half is — the portrait and the
+   name, which go to the painter — and the note underneath is plain prose, so a
+   painting it names can be a link of its own. */
 .th-step {
-  display: flex; flex-direction: column; gap: 10px; width: 196px; cursor: pointer;
+  display: flex; flex-direction: column; width: 196px;
   border: 1px solid rgba(216,192,150,.12); padding: 10px 10px 14px;
   background: var(--raised); transition: border-color .3s ease; text-align: left;
 }
-.th-step:hover { border-color: var(--gold-line); }
+.th-who {
+  display: flex; flex-direction: column; gap: 10px; cursor: pointer;
+  border: none; background: none; padding: 0; text-align: left; width: 100%;
+}
+.th-who[disabled] { cursor: default; }
+/* The name carries the hover, not the card: the card's lower half doesn't go
+   anywhere, and a border lighting up around all of it would promise it did. */
+.th-who:hover .nm { color: var(--gold-hi); }
+.th-who:focus-visible { outline: 2px solid var(--gold-line); outline-offset: 3px; }
 .th-step img { width: 100%; height: 108px; object-fit: cover; }
-.th-step .nm { font: 400 15.5px var(--serif); color: var(--text); }
+.th-step .nm { font: 400 15.5px var(--serif); color: var(--text); transition: color .25s ease; }
 .th-step .note {
-  display: block; margin-top: 5px; font: 400 11.5px/1.55 var(--sans);
+  display: block; margin-top: 7px; font: 400 11.5px/1.55 var(--sans);
   color: var(--dim2); text-wrap: pretty;
 }
+.th-step .note b, .th-step .note strong { color: var(--dim); font-weight: 700; }
+.th-step .note u { text-decoration: underline; }
 
 .conn-aside {
   border-left: 1px solid rgba(216,192,150,.12); background: var(--panel);
@@ -201,14 +214,26 @@
 .th-act { display: flex; gap: 16px; margin-top: 18px; }
 .threads-wrap { max-width: 1080px; }
 /* thread composer */
-.th-steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-.th-srow { display: flex; align-items: center; gap: 10px; }
+.th-steps { display: flex; flex-direction: column; gap: 14px; margin-bottom: 12px; }
+/* The note is a rich editor now, so it needs its own line: number and painter on
+   top with the controls, the note spanning underneath. */
+.th-srow {
+  display: grid; grid-template-columns: 22px 1fr auto; gap: 6px 10px;
+  align-items: center;
+}
 .th-srow .th-n {
-  flex: 0 0 22px; text-align: center; font: 400 11px var(--sans); color: var(--off);
+  text-align: center; font: 400 11px var(--sans); color: var(--off);
   border: 1px solid var(--hair); padding: 3px 0;
 }
-.th-srow .th-sa { flex: 0 0 150px; font: 400 14px var(--serif); color: var(--text); }
-.th-srow .th-sn { flex: 1; padding: 7px 10px; font-size: 12px; }
+.th-srow .th-sa { font: 400 14px var(--serif); color: var(--text); }
+.th-srow .th-sacts { display: flex; gap: 12px; align-items: center; }
+/* Qualified with .richtext so it beats forms.css, which sets a font shorthand on
+   every .richtext and loads after this file. */
+.th-srow .richtext.th-sn {
+  grid-column: 2 / 4; min-height: 52px; max-height: 130px;
+  font-family: var(--serif); font-size: 13.5px; line-height: 1.6;
+  padding: 8px 10px;
+}
 .th-addrow { display: flex; gap: 10px; align-items: center; }
 .th-addrow select { flex: 1; }
 .conn-aside .cta-btn { display: block; margin-top: 20px; }

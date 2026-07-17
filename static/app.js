@@ -1763,12 +1763,18 @@ function threadsHtml() {
       // Resolve the step to a real node rather than lowercasing the name into an
       // id — a step whose painter isn't on the map just isn't clickable.
       const node = CONN.data.nodes.find((n) => n.name.toLowerCase() === s.artist.toLowerCase());
+      /* Only the top of the card is the painter's: the portrait and the name. The
+         note below is prose, left outside the button so a painting it names can be
+         its own link — and so the reader can rest a cursor on a sentence without
+         the whole card offering to take them somewhere else. */
       return (j ? '<span class="th-arrow">→</span>' : "") +
-        '<button type="button" class="th-step"' +
+        '<div class="th-step">' +
+        '<button type="button" class="th-who"' +
         (node ? ' data-select="' + esc(node.id) + '"' : " disabled") + ">" +
         '<img src="/thumb/' + s.cover + '" loading="lazy" alt="">' +
-        '<span><span class="nm">' + esc(s.artist) + "</span>" +
-        (s.note ? '<span class="note">' + esc(s.note) + "</span>" : "") + "</span></button>";
+        '<span class="nm">' + esc(s.artist) + "</span></button>" +
+        (s.note ? '<div class="note">' + linkXrefs(richDescHtml(s.note), s.xref) + "</div>" : "") +
+        "</div>";
     }).join("");
     return '<div class="thread">' +
       '<div class="th-eyebrow">Thread ' + String(i + 1).padStart(2, "0") + "</div>" +
@@ -1962,6 +1968,9 @@ function threadDialog(existing) {
     '<textarea id="th-desc" rows="2" placeholder="How open-air river painting left ' +
     'Barbizon and ended up beside the Yarra."></textarea></label>' +
     '<label>Steps <span class="tiny">in order — at least two</span></label>' +
+    '<p class="tiny lk-hint">A line on each saying why they follow the last one. ' +
+    "Italicise a painting’s title and the step carries the reader to it.</p>" +
+    fmtBarHtml() +
     '<div id="th-steps" class="th-steps"></div>' +
     '<div class="th-addrow"><select id="th-pick">' +
     nodes.map((n) => '<option value="' + esc(n.name) + '">' + esc(n.name) + "</option>").join("") +
@@ -1973,34 +1982,70 @@ function threadDialog(existing) {
   const q = (s) => m.el.querySelector(s);
   if (existing) { q("#th-title").value = existing.title; q("#th-desc").value = existing.description || ""; }
 
+  /* Which step editor the shared format bar acts on: the one holding the caret.
+
+     Asked of the selection rather than remembered from a focus event. execCommand
+     works on the selection, so this is the same question put directly — and it
+     can't drift out of step with a listener that didn't fire. The bar's buttons
+     preventDefault on mousedown, so the caret is still here when they're clicked. */
+  const activeStep = () => {
+    const n = (getSelection() || {}).anchorNode;
+    const el = !n ? null : (n.nodeType === 1 ? n : n.parentElement);
+    return (el && el.closest(".th-sn")) || null;
+  };
+
+  /* Read every editor back into `steps`. Called before anything that rewrites the
+     list and before saving, rather than trusting an `input` event: a format-bar
+     edit doesn't always raise one, so a note bolded and then moved with ↑ would
+     otherwise lose the bolding on the way. */
+  const pullAll = () => {
+    m.el.querySelectorAll(".th-sn").forEach((ed) => {
+      const i = +ed.dataset.i;
+      if (steps[i]) steps[i].note = ed.textContent.trim() ? sanitizeRich(ed.innerHTML) : "";
+    });
+  };
+
+  /* Never pulls: by the time paint runs, `steps` has already been reordered, while
+     the editors still on screen carry their old indices — reading them here would
+     file each note against whichever step now holds its number. Every caller pulls
+     first, while the two still agree. */
   const paint = () => {
     q("#th-steps").innerHTML = steps.map((s, i) =>
       '<div class="th-srow"><span class="th-n">' + (i + 1) + "</span>" +
       '<span class="th-sa">' + esc(s.artist) + "</span>" +
-      '<input class="th-sn" data-i="' + i + '" value="' + esc(s.note) +
-      '" placeholder="why they follow the last one">' +
+      '<span class="th-sacts">' +
       '<button type="button" class="linkbtn" data-up="' + i + '"' + (i ? "" : " disabled") + ">↑</button>" +
-      '<button type="button" class="linkbtn" data-rm="' + i + '">remove</button></div>').join("") ||
+      '<button type="button" class="linkbtn" data-rm="' + i + '">remove</button></span>' +
+      '<div class="th-sn richtext" contenteditable="true" data-i="' + i + '" ' +
+      'aria-label="Why ' + esc(s.artist) + ' follows the last step"></div>' +
+      "</div>").join("") ||
       '<p class="tiny">No steps yet — pick a painter below.</p>';
-    q("#th-steps").querySelectorAll(".th-sn").forEach((inp) =>
-      inp.addEventListener("input", () => { steps[+inp.dataset.i].note = inp.value; }));
+    q("#th-steps").querySelectorAll(".th-sn").forEach((ed) => {
+      // innerHTML, not a value attribute: the note is markup now, and an attribute
+      // would show the curator their own tags.
+      ed.innerHTML = richDescHtml(steps[+ed.dataset.i].note || "");
+    });
     q("#th-steps").querySelectorAll("[data-rm]").forEach((b) =>
-      b.addEventListener("click", () => { steps.splice(+b.dataset.rm, 1); paint(); }));
+      b.addEventListener("click", () => { pullAll(); steps.splice(+b.dataset.rm, 1); paint(); }));
     q("#th-steps").querySelectorAll("[data-up]").forEach((b) =>
       b.addEventListener("click", () => {
+        pullAll();
         const i = +b.dataset.up;
         steps.splice(i - 1, 0, steps.splice(i, 1)[0]);
         paint();
       }));
   };
+  wireFmtBar(m.el, activeStep, (msg) => { q("#th-msg").textContent = msg; });
   paint();
   q("#th-add").addEventListener("click", () => {
+    pullAll();
     steps.push({ artist: q("#th-pick").value, note: "" });
     paint();
   });
   q("#th-cancel").addEventListener("click", m.close);
   q("#thform").addEventListener("submit", async (e) => {
     e.preventDefault();
+    pullAll();
     const body = { title: q("#th-title").value, description: q("#th-desc").value, steps: steps };
     try {
       await api(existing ? "/api/threads/" + encodeURIComponent(existing.id) : "/api/threads", {
@@ -3685,13 +3730,22 @@ function fmtBarHtml() {
   );
 }
 
-/* Wire a format bar to its editor. `root` scopes the lookups, `ed` is the
-   contenteditable, `onErr` reports a blocked clipboard. */
+/* Wire a format bar to its editor. `root` scopes the lookups, `onErr` reports a
+   blocked clipboard, and `ed` is the contenteditable — or a function returning it,
+   for a bar that serves several. A thread has one bar over a list of steps: twelve
+   copies of it would be more chrome than composer. */
 function wireFmtBar(root, ed, onErr) {
+  const target = typeof ed === "function" ? ed : () => ed;
+  const cmd = (c) => {
+    const e = target();
+    if (!e) return;          // a shared bar with nothing focused yet
+    e.focus();
+    document.execCommand(c);
+  };
   try { document.execCommand("styleWithCSS", false, false); } catch (e) {}
   root.querySelectorAll(".fmtbtn[data-cmd]").forEach((b) => {
     b.addEventListener("mousedown", (e) => e.preventDefault());  // keep the text selection
-    b.addEventListener("click", () => { ed.focus(); document.execCommand(b.dataset.cmd); });
+    b.addEventListener("click", () => cmd(b.dataset.cmd));
   });
 
   /* Paste as plain text: insert the clipboard with its markup stripped, so text
@@ -3699,7 +3753,9 @@ function wireFmtBar(root, ed, onErr) {
   const pasteBtn = root.querySelector(".fmt-paste");
   pasteBtn.addEventListener("mousedown", (e) => e.preventDefault());
   pasteBtn.addEventListener("click", async () => {
-    ed.focus();
+    const e = target();
+    if (!e) return;
+    e.focus();
     try {
       const text = await navigator.clipboard.readText();
       if (text) document.execCommand("insertText", false, text);
@@ -3711,12 +3767,15 @@ function wireFmtBar(root, ed, onErr) {
     }
   });
   const fontSel = root.querySelector(".fmt-font"), sizeSel = root.querySelector(".fmt-size");
-  fontSel.addEventListener("change", () => {
-    if (fontSel.value) { ed.focus(); document.execCommand("fontName", false, fontSel.value); fontSel.value = ""; }
+  const apply = (sel, command) => sel.addEventListener("change", () => {
+    const e = target();
+    if (!sel.value || !e) return;
+    e.focus();
+    document.execCommand(command, false, sel.value);
+    sel.value = "";
   });
-  sizeSel.addEventListener("change", () => {
-    if (sizeSel.value) { ed.focus(); document.execCommand("fontSize", false, sizeSel.value); sizeSel.value = ""; }
-  });
+  apply(fontSel, "fontName");
+  apply(sizeSel, "fontSize");
 }
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
