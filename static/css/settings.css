@@ -7,6 +7,11 @@
 .settings-meta .app-version {
   font: 600 9.5px var(--sans); letter-spacing: .2em; color: var(--off); text-transform: uppercase;
 }
+/* The one number here anyone reads off the screen and compares with another
+   site's, so it gets to be legible rather than a whisper next to the version. */
+.settings-meta .app-build {
+  color: var(--dim); font-variant-numeric: tabular-nums; cursor: help;
+}
 .settings-meta .app-stats { display: flex; flex-direction: column; gap: 2px; }
 .settings-meta .app-stats span { font: 400 11.5px var(--sans); color: var(--dim); }
 /* slim sticky section index */

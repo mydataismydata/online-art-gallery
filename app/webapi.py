@@ -817,6 +817,7 @@ def api_works_autofill_batch():
 def api_stats():
     s = library.stats()
     s["version"] = config.VERSION
+    s["build"] = config.BUILD      # which push this box is running; None if unstamped
     return jsonify(s)
 
 

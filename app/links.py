@@ -36,6 +36,14 @@ _PRECEDENCE = ("curator", "influence", "movement", "place_time", "subject")
 TYPES = _PRECEDENCE
 HAND_TYPES = ("influence", "curator")
 
+# What the map is willing to draw. Subject is left off it: it chains everyone who
+# shares a genre, and being the weakest link there is (_PRECEDENCE), an edge only
+# ever survives to the map when a pair has nothing better to say than "both painted
+# landscapes" — a haze across the whole graph that tells you nothing you couldn't
+# have guessed. It stays on an artist's own page, where it's one card among a few
+# and the shared subject is worth the mention.
+MAP_TYPES = ("curator", "influence", "movement", "place_time")
+
 TYPE_META = {
     "movement":   {"label": "Movement",     "color": "#7f96ad",
                    "desc": "Painters who belong to the same school."},
@@ -508,6 +516,9 @@ def _ring(members, cx, cy, cell):
 def graph():
     """Everything the Connections page draws."""
     links, profiles = all_links()
+    # Filtered before anything counts it, so a painter held on by a subject edge
+    # alone doesn't take a place on a map that won't draw their edge.
+    links = [l for l in links if l["type"] in MAP_TYPES]
 
     degree = defaultdict(int)
     for l in links:
@@ -556,7 +567,7 @@ def graph():
         "nodes": nodes,
         "links": [_public_link(l, index) for l in links],
         "clusters": labels,
-        "types": {t: dict(TYPE_META[t], count=counts[t]) for t in TYPES},
+        "types": {t: dict(TYPE_META[t], count=counts[t]) for t in MAP_TYPES},
         "canvas": {"w": CANVAS_W, "h": CANVAS_H},
         "truncated": truncated,
         # Every painter in the museum, drawn or not. MAX_NODES is a limit on what

@@ -1,9 +1,25 @@
+import json
 import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 VERSION = "0.1"
+
+
+def _build():
+    """The id stamped into build.json by bump_build.py at the last push.
+
+    Read once, at import: it describes the checkout, and the checkout can't change
+    under a running process without a restart. None when there's no build.json —
+    a working copy that has never been pushed still has to run."""
+    try:
+        return int(json.loads((ROOT / "build.json").read_text(encoding="utf-8"))["build"])
+    except Exception:
+        return None
+
+
+BUILD = _build()
 
 # Public mode: the read-only "snapshot" deployment (e.g. the VPS). When on, the
 # gallery is browsable anonymously and every add/download/edit/AI/source route is

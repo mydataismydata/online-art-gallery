@@ -1293,7 +1293,10 @@ const FACETS = [["era", "Era"], ["medium", "Medium"], ["style", "Style"],
 
 /* The five kinds of thread. Mirrors links.TYPE_META on the server; the colours
    are design tokens and also appear in css/base.css, so they're stated where each
-   surface draws them rather than plumbed through every response. */
+   surface draws them rather than plumbed through every response.
+
+   All five are here because an artist's page shows all five. The map draws fewer
+   (links.MAP_TYPES) — it says which in its payload, and the chips follow it. */
 const LINK_TYPES = {
   movement:   { label: "Movement",     color: "#7f96ad", dash: "",    w: 1.4 },
   influence:  { label: "Influence",    color: "#c2a061", dash: "",    w: 1.9 },
@@ -1423,7 +1426,9 @@ function renderConnections() {
   const seg = CONN_MODES.map((m) =>
     '<button type="button" data-mode="' + m + '" class="' + (CONN.mode === m ? "on" : "") + '">' +
     m.charAt(0).toUpperCase() + m.slice(1) + "</button>").join("");
-  const chips = LINK_ORDER.map((t) => {
+  // Only the kinds the map actually draws — the server decides which those are
+  // (links.MAP_TYPES), so a type it won't draw can't leave a dead chip behind.
+  const chips = LINK_ORDER.filter((t) => g.types[t]).map((t) => {
     const meta = LINK_TYPES[t], on = !CONN.off.has(t);
     const count = (g.types[t] || {}).count || 0;
     return '<button type="button" class="typechip' + (on ? " on" : "") + '" data-type="' + t +
@@ -2506,8 +2511,16 @@ function settingsHeadHtml(s) {
     fmtBytes(s.images_bytes || 0) + " of images",
     s.disk_free != null ? fmtBytes(s.disk_free) + " free" : "",
   ].filter(Boolean);
+  // The build id is how you tell one site's code from another's: compare this
+  // number here and on the public server. Absent on a checkout never pushed.
+  const build = s.build != null
+    ? ' <span class="app-build" title="Build ' + esc(String(s.build)) +
+      " — compare this with the other site to see if it has pulled the latest code" +
+      '">build ' + esc(String(s.build)) + "</span>"
+    : "";
   return '<div class="pagehead settings-head"><h1>Settings</h1>' +
-    '<div class="settings-meta"><div class="app-version">v' + esc(s.version || "?") + "</div>" +
+    '<div class="settings-meta"><div class="app-version">v' + esc(s.version || "?") +
+    build + "</div>" +
     '<div class="app-stats">' + stats.map((r) => "<span>" + esc(r) + "</span>").join("") +
     "</div></div></div>";
 }
