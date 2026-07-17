@@ -7,8 +7,9 @@ the code repo):
     work's reduced-size (<=VIEW_MAX) WebP plus a completed placard into <repo>/works/,
     then commits and pushes. Each work is stamped with a persistent `pid`, so
     re-pushing a fixed placard or a better image updates the same public work
-    instead of duplicating it. Artist bios (<repo>/artists/) and collections
-    (<repo>/collections/) go along with them.
+    instead of duplicating it. Artist bios (<repo>/artists/), collections
+    (<repo>/collections/) and the curator's connections — hand-written links
+    (<repo>/links/) and threads (<repo>/threads/) — go along with them.
 
   * pull_and_import()    -- run on the PUBLIC box (GALLERY_PUBLIC=1). git-pulls the
     repo and imports every works/<pid>.json into the local library, as if the work
@@ -32,13 +33,21 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import config, library, thumbs, artistinfo
+from . import config, library, thumbs, artistinfo, links, threads
 from . import collections as coll
-from .names import safe_name, parse_year, slugify
+from .names import safe_name, parse_year, slugify, fold
 
 WORKS_SUBDIR = "works"
 ARTISTS_SUBDIR = "artists"
 COLLECTIONS_SUBDIR = "collections"
+LINKS_SUBDIR = "links"
+THREADS_SUBDIR = "threads"
+
+# Everything that isn't a work travels the same way: one deterministic JSON file
+# per record, named by the record's own id, in its own directory. `_sync` writes
+# one only when its bytes actually change, which is what keeps the repo quiet —
+# re-exporting an untouched gallery stages nothing at all.
+_EXTRAS = ("bios", "collections", "links", "threads")
 
 # Placard fields carried to the public site: everything the viewer shows plus
 # provenance. Width/height are intentionally omitted -- the public work's real
@@ -199,10 +208,10 @@ def repo_status():
     wd = repo / WORKS_SUBDIR
     if wd.is_dir():
         st["works"] = sum(1 for _ in wd.glob("*.json"))
-    ad = repo / ARTISTS_SUBDIR
-    st["artists"] = sum(1 for _ in ad.glob("*.json")) if ad.is_dir() else None
-    cd = repo / COLLECTIONS_SUBDIR
-    st["collections"] = sum(1 for _ in cd.glob("*.json")) if cd.is_dir() else None
+    for key, sub in (("artists", ARTISTS_SUBDIR), ("collections", COLLECTIONS_SUBDIR),
+                     ("links", LINKS_SUBDIR), ("threads", THREADS_SUBDIR)):
+        d = repo / sub
+        st[key] = sum(1 for _ in d.glob("*.json")) if d.is_dir() else None
     st["last_export"] = last_export()
     try:
         st["new_count"] = len(unpublished_works())
@@ -214,6 +223,9 @@ def repo_status():
         st["placard_changes"] = None
     st["bio_changes"] = pending_bios()
     st["collection_changes"] = pending_collections()
+    st["link_changes"] = pending_links()
+    st["thread_changes"] = pending_threads()
+    st["threads_held"] = held_threads()
     return st
 
 
@@ -294,41 +306,64 @@ def _artist_blobs():
     return out
 
 
-def _bio_diff(repo):
-    """(slug, name, blob) for each bio the repo doesn't already hold verbatim."""
-    adir = repo / ARTISTS_SUBDIR
+# ---------------- repo records: diff / sync / read ----------------
+
+def _diff(repo, subdir, blobs):
+    """(key, label, blob) for each record the repo doesn't already hold verbatim."""
+    d = repo / subdir
     out = []
-    for slug, (name, blob) in _artist_blobs().items():
-        p = adir / (slug + ".json")
+    for key, (label, blob) in blobs.items():
+        p = d / (key + ".json")
         try:
             if p.read_text(encoding="utf-8") == blob:
                 continue
         except OSError:
             pass
-        out.append((slug, name, blob))
+        out.append((key, label, blob))
     return out
 
 
-def pending_bios():
-    """How many artist bios differ from what the public site holds. None if there's
-    no usable repo to compare against."""
+def _sync(repo, subdir, blobs):
+    """Write every changed record into the repo. Returns their labels."""
+    changed = _diff(repo, subdir, blobs)
+    if changed:
+        (repo / subdir).mkdir(parents=True, exist_ok=True)
+    for key, _label, blob in changed:
+        (repo / subdir / (key + ".json")).write_text(blob, encoding="utf-8")
+    return [label for _key, label, _blob in changed]
+
+
+def _pending(subdir, blobs_fn):
+    """How many records differ from what the public site holds. None if there's no
+    usable repo to compare against."""
     repo = repo_path()
     if not _is_git_repo(repo):
         return None
     try:
-        return len(_bio_diff(repo))
+        return len(_diff(repo, subdir, blobs_fn()))
     except Exception:
         return None
 
 
-def sync_artists(repo):
-    """Write every changed bio into the repo. Returns the artists written."""
-    changed = _bio_diff(repo)
-    if changed:
-        (repo / ARTISTS_SUBDIR).mkdir(parents=True, exist_ok=True)
-    for slug, _name, blob in changed:
-        (repo / ARTISTS_SUBDIR / (slug + ".json")).write_text(blob, encoding="utf-8")
-    return [name for _slug, name, _blob in changed]
+def _read_records(repo, subdir):
+    """Every readable record in a repo directory. Unparseable files are skipped
+    rather than failing the pull — one bad file shouldn't cost the whole import."""
+    d = repo / subdir
+    if not d.is_dir():
+        return []
+    out = []
+    for jf in sorted(d.glob("*.json")):
+        try:
+            rec = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(rec, dict) and rec.get("id"):
+            out.append(rec)
+    return out
+
+
+def pending_bios():
+    return _pending(ARTISTS_SUBDIR, _artist_blobs)
 
 
 # ---------------- collections ----------------
@@ -368,41 +403,92 @@ def _collection_blobs():
     return out
 
 
-def _collection_diff(repo):
-    """(cid, title, blob) for each collection the repo doesn't already hold verbatim."""
-    cdir = repo / COLLECTIONS_SUBDIR
-    out = []
-    for cid, (title, blob) in _collection_blobs().items():
-        p = cdir / (cid + ".json")
-        try:
-            if p.read_text(encoding="utf-8") == blob:
-                continue
-        except OSError:
-            pass
-        out.append((cid, title, blob))
+def pending_collections():
+    return _pending(COLLECTIONS_SUBDIR, _collection_blobs)
+
+
+# ---------------- connections: hand-written links + threads ----------------
+
+def _published_artists():
+    """Folded names of every painter with work on the public site."""
+    return {fold(w["artist"]) for w in library.all_works()
+            if w.get("pid") and w.get("artist")}
+
+
+def _link_blobs():
+    """{id: (label, json)} for every hand-written link between two published painters.
+
+    Links travel by artist NAME. That's what identifies a painter everywhere else in
+    this app, and unlike a work id it means the same thing on both boxes — the public
+    library rebuilds its own ids, but Delacroix is Delacroix.
+
+    Only the hand-written kinds are stored at all: movement, place & time and subject
+    are recomputed on the far side from the bios and the works' own tags, both of
+    which already travel, so they arrive for free. A link naming a painter the public
+    site hasn't got would never draw — the graph only joins artists it holds — so it
+    stays home rather than leaking the name of someone who isn't there."""
+    have = _published_artists()
+    out = {}
+    for l in links.stored_links():
+        a, b = l.get("a") or "", l.get("b") or ""
+        if fold(a) not in have or fold(b) not in have:
+            continue
+        rec = {"id": l["id"]}
+        for f in ("a", "b", "type", "note", "directed", "created_by", "created"):
+            v = l.get(f)
+            if v not in (None, "", False):
+                rec[f] = v
+        out[l["id"]] = ("%s — %s" % (a, b),
+                        json.dumps(rec, ensure_ascii=False, indent=1, sort_keys=True))
     return out
 
 
-def pending_collections():
-    """How many collections differ from what the public site holds, or None if
-    there's no usable repo to compare against."""
-    repo = repo_path()
-    if not _is_git_repo(repo):
-        return None
+def _thread_blobs():
+    """{id: (title, json)} for threads whose every painter is on the public site.
+
+    A thread is an argument, and an argument with a step cut out of the middle is
+    worse than no argument at all — so unlike a link, a thread travels whole or not
+    at all. One goes over the moment the last painter it names does."""
+    have = _published_artists()
+    out = {}
+    for t in threads.all_records():
+        steps = t.get("steps") or []
+        if len(steps) < 2 or any(fold(s.get("artist") or "") not in have for s in steps):
+            continue
+        rec = {"id": t["id"],
+               "steps": [{"artist": s["artist"], "note": s.get("note") or ""}
+                         for s in steps]}
+        for f in ("title", "description", "created_by", "created"):
+            v = t.get(f)
+            if v not in (None, ""):
+                rec[f] = v
+        out[t["id"]] = (t.get("title") or t["id"],
+                        json.dumps(rec, ensure_ascii=False, indent=1, sort_keys=True))
+    return out
+
+
+def pending_links():
+    return _pending(LINKS_SUBDIR, _link_blobs)
+
+
+def pending_threads():
+    return _pending(THREADS_SUBDIR, _thread_blobs)
+
+
+def held_threads():
+    """Threads waiting on a painter who hasn't been published yet. Worth counting
+    separately: they aren't pending — there's nothing the owner can push — and
+    without saying so their absence from the public site looks like a fault."""
     try:
-        return len(_collection_diff(repo))
+        have = _published_artists()
     except Exception:
-        return None
-
-
-def sync_collections(repo):
-    """Write every changed collection into the repo. Returns the titles written."""
-    changed = _collection_diff(repo)
-    if changed:
-        (repo / COLLECTIONS_SUBDIR).mkdir(parents=True, exist_ok=True)
-    for cid, _title, blob in changed:
-        (repo / COLLECTIONS_SUBDIR / (cid + ".json")).write_text(blob, encoding="utf-8")
-    return [title for _cid, title, _blob in changed]
+        return 0
+    n = 0
+    for t in threads.all_records():
+        steps = t.get("steps") or []
+        if len(steps) >= 2 and any(fold(s.get("artist") or "") not in have for s in steps):
+            n += 1
+    return n
 
 
 # ---------------- push (local box) ----------------
@@ -458,23 +544,24 @@ def publish_works(ids):
     if published:
         library.invalidate()
 
-    # Always: editing a bio or re-hanging a collection is a publishable change on
-    # its own, with no new artwork attached. Neither writes anything when unchanged,
-    # so this is free.
-    try:
-        bios = sync_artists(repo)
-    except Exception as e:
-        bios = []
-        errors.append({"id": "artists", "error": str(e)})
-    try:
-        cols = sync_collections(repo)
-    except Exception as e:
-        cols = []
-        errors.append({"id": "collections", "error": str(e)})
+    # Always: editing a bio, re-hanging a collection, writing an influence link or a
+    # thread is a publishable change on its own, with no new artwork attached. None
+    # of them write anything when unchanged, so this is free.
+    extra = {}
+    for name, subdir, blobs_fn in (
+            ("bios", ARTISTS_SUBDIR, _artist_blobs),
+            ("collections", COLLECTIONS_SUBDIR, _collection_blobs),
+            ("links", LINKS_SUBDIR, _link_blobs),
+            ("threads", THREADS_SUBDIR, _thread_blobs)):
+        try:
+            extra[name] = _sync(repo, subdir, blobs_fn())
+        except Exception as e:
+            extra[name] = []
+            errors.append({"id": name, "error": str(e)})
 
-    result = {"published": published, "bios": len(bios), "collections": len(cols),
-              "pids": pids, "errors": errors,
+    result = {"published": published, "pids": pids, "errors": errors,
               "committed": False, "pushed": False, "commit": None, "message": None}
+    result.update({k: len(extra[k]) for k in _EXTRAS})
 
     _git(repo, "add", "-A")
     _, staged, _ = _git(repo, "status", "--porcelain")
@@ -485,7 +572,7 @@ def publish_works(ids):
     if published:
         _record_export(published)
 
-    _git(repo, "commit", "-m", _commit_message(published, artists, bios, cols))
+    _git(repo, "commit", "-m", _commit_message(published, artists, extra))
     result["committed"] = True
     _, sha_out, _ = _git(repo, "rev-parse", "--short", "HEAD", check=False)
     result["commit"] = sha_out.strip() or None
@@ -493,7 +580,7 @@ def publish_works(ids):
         _git(repo, "push", timeout=600)
         result["pushed"] = True
         result["message"] = ("Pushed %s to the public server."
-                             % _summary(published, len(bios), len(cols)))
+                             % _summary(published, extra))
     except Exception as e:
         result["message"] = ("Committed locally but the push failed: %s — the commit "
                               "is saved; retry once git access is sorted." % e)
@@ -510,14 +597,18 @@ def _and(bits):
     return bits[0] if bits else "nothing"
 
 
-def _summary(works, bios, cols):
-    bits = []
-    if works:
-        bits.append(_plural(works, "work"))
-    if bios:
-        bits.append(_plural(bios, "bio"))
-    if cols:
-        bits.append(_plural(cols, "collection"))
+# The singular of each extra, for prose. Keyed off _EXTRAS so a new kind of thing
+# that travels can't be added to the export and forgotten in what it says it did.
+_NOUN = {"bios": "bio", "collections": "collection", "links": "link",
+         "threads": "thread"}
+
+
+def _summary(works, extra):
+    bits = [_plural(works, "work")] if works else []
+    for k in _EXTRAS:
+        n = len(extra.get(k) or [])
+        if n:
+            bits.append(_plural(n, _NOUN[k]))
     return _and(bits)
 
 
@@ -525,15 +616,15 @@ def _names(items):
     return ", ".join(items[:3]) + (" +%d more" % (len(items) - 3) if len(items) > 3 else "")
 
 
-def _commit_message(published, artists, bios, cols):
+def _commit_message(published, artists, extra):
     parts = []
     if published:
         who = _names(artists)
         parts.append("%d work(s)%s" % (published, (": " + who) if who else ""))
-    if bios:
-        parts.append("%d bio(s): %s" % (len(bios), _names(bios)))
-    if cols:
-        parts.append("%d collection(s): %s" % (len(cols), _names(cols)))
+    for k in _EXTRAS:
+        items = extra.get(k) or []
+        if items:
+            parts.append("%d %s(s): %s" % (len(items), _NOUN[k], _names(items)))
     return "Publish " + " + ".join(parts)
 
 
@@ -678,19 +769,10 @@ def _import_collections(repo):
     holding it. Recomputing the ids from the pids on every pull repairs that with
     no change on the private box at all — so the comparison is against the live
     record, not the file."""
-    cdir = repo / COLLECTIONS_SUBDIR
     out = {"added": 0, "updated": 0, "unchanged": 0}
-    if not cdir.is_dir():
-        return out
     wid_by_pid = {w["pid"]: w["id"] for w in library.all_works() if w.get("pid")}
 
-    for jf in sorted(cdir.glob("*.json")):
-        try:
-            rec = json.loads(jf.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(rec, dict):
-            continue
+    for rec in _read_records(repo, COLLECTIONS_SUBDIR):
         # A pid with no work here is one the owner deleted on this box (it's
         # tombstoned, so it never came back) -- the collection simply hangs without it.
         rec["work_ids"] = [wid_by_pid[p] for p in rec.get("work_pids") or []
@@ -771,14 +853,21 @@ def pull_and_import():
     except Exception as e:
         bios = {"added": 0, "updated": 0, "unchanged": 0}
         errors.append({"pid": "artists", "error": str(e)})
-    try:
-        cols = _import_collections(repo)
-    except Exception as e:
-        cols = {"added": 0, "updated": 0, "unchanged": 0}
-        errors.append({"pid": "collections", "error": str(e)})
+    # Collections resolve pids against the library, so they follow the works. Links
+    # and threads name painters, who are just there once the works are.
+    imports = {"collections": lambda: _import_collections(repo),
+               "links": lambda: links.import_published(_read_records(repo, LINKS_SUBDIR)),
+               "threads": lambda: threads.import_published(_read_records(repo, THREADS_SUBDIR))}
+    got = {}
+    for name, fn in imports.items():
+        try:
+            got[name] = fn()
+        except Exception as e:
+            got[name] = {"added": 0, "updated": 0, "unchanged": 0}
+            errors.append({"pid": name, "error": str(e)})
     if added or updated:
         _prewarm(touched)
 
-    return {"added": added, "updated": updated, "unchanged": unchanged,
-            "skipped": skipped, "errors": errors, "pull": pull_msg,
-            "total": len(placards), "bios": bios, "collections": cols}
+    return dict({"added": added, "updated": updated, "unchanged": unchanged,
+                 "skipped": skipped, "errors": errors, "pull": pull_msg,
+                 "total": len(placards), "bios": bios}, **got)

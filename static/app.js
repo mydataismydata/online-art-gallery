@@ -2609,36 +2609,48 @@ function publishPanelHtml(st) {
   const plaN = st && st.placard_changes != null ? st.placard_changes : null;
   const bioN = st && st.bio_changes != null ? st.bio_changes : null;
   const colN = st && st.collection_changes != null ? st.collection_changes : null;
+  const lnkN = st && st.link_changes != null ? st.link_changes : null;
+  const thrN = st && st.thread_changes != null ? st.thread_changes : null;
+  const heldN = (st && st.threads_held) || 0;
   const last = st && st.last_export;
   const lastTxt = last
     ? "Last export: " + last.at + " · " + last.count + " work(s)."
     : "No exports yet.";
-  // Four separate reasons to export: a new painting, a placard you've corrected
-  // since publishing it, a rewritten bio, or a collection you've re-hung. Any one
-  // of them stands alone.
+  // Every separate reason to export: a new painting, a placard you've corrected
+  // since publishing it, a rewritten bio, a collection you've re-hung, a link or a
+  // thread you've written. Any one of them stands alone.
   const n = (v, one, many) => v + " " + (v === 1 ? one : many);
   const pend = [];
   if (newN) pend.push(n(newN, "new work", "new works"));
   if (plaN) pend.push(n(plaN, "fixed placard", "fixed placards"));
   if (bioN) pend.push(n(bioN, "changed bio", "changed bios"));
   if (colN) pend.push(n(colN, "changed collection", "changed collections"));
-  const known = newN != null && plaN != null && bioN != null && colN != null;
+  if (lnkN) pend.push(n(lnkN, "changed link", "changed links"));
+  if (thrN) pend.push(n(thrN, "changed thread", "changed threads"));
+  const known = [newN, plaN, bioN, colN, lnkN, thrN].every((v) => v != null);
+  // A thread travels whole or not at all, so one naming an unpublished painter has
+  // nothing to push — say so, or its absence over there looks like a fault.
+  const heldTxt = heldN
+    ? " " + n(heldN, "thread is", "threads are") + " waiting on painters you " +
+      "haven't published yet."
+    : "";
   const nothing = known && !pend.length;
   const newTxt = !known ? ""
     : (nothing ? "Nothing pending. " : "Waiting to go: " + pend.join(", ") + ". ");
   return setSec("public", "Public server",
     "Everything your gallery has that the public site doesn't — new paintings, " +
-    "placards you've corrected since publishing them, rewritten artist bios, and " +
-    "your collections — goes over in one push. <b>Push to public</b> on an artist " +
-    "page sends just the works you select, and is the way to send a better image " +
-    "of a painting that's already up. " + repoPill(st),
+    "placards you've corrected since publishing them, rewritten artist bios, your " +
+    "collections, and the connections you've written by hand — goes over in one " +
+    "push. <b>Push to public</b> on an artist page sends just the works you select, " +
+    "and is the way to send a better image of a painting that's already up. " +
+    repoPill(st),
     '<div class="publishpanel">' +
     '<div class="exportbox"><div class="bf-actions">' +
     '<button type="button" class="cta-btn" id="export-new"' + (nothing ? " disabled" : "") + ">" +
     "Export everything pending" + (pend.length ? " (" + pend.join(" · ") + ")" : "") +
     "</button>" +
     '<span class="formmsg" id="export-msg"></span></div>' +
-    '<p class="tiny">' + esc(newTxt) + esc(lastTxt) +
+    '<p class="tiny">' + esc(newTxt) + esc(lastTxt) + esc(heldTxt) +
     " A large first export can take a few minutes.</p></div>" +
     '<form class="dlform repoform" id="repoform">' +
     "<label>Content repo folder</label>" +
@@ -2685,16 +2697,20 @@ function wirePublishPanel() {
   });
 }
 
-// Public box: pull the latest published works + bios + collections into the gallery.
+// Public box: pull the latest published works, bios, collections and connections.
 function pullPanelHtml(st) {
   const holds = [];
-  if (st && st.works != null) holds.push(st.works + (st.works === 1 ? " work" : " works"));
-  if (st && st.artists != null) holds.push(st.artists + (st.artists === 1 ? " bio" : " bios"));
-  if (st && st.collections != null)
-    holds.push(st.collections + (st.collections === 1 ? " collection" : " collections"));
+  const has = (k, one, many) => {
+    if (st && st[k] != null) holds.push(st[k] + " " + (st[k] === 1 ? one : many));
+  };
+  has("works", "work", "works");
+  has("artists", "bio", "bios");
+  has("collections", "collection", "collections");
+  has("links", "link", "links");
+  has("threads", "thread", "threads");
   return setSec("pull", "Pull new artwork",
-    "Fetch the latest works, artist bios and collections your local gallery pushed, " +
-    "and import them here. " + repoPill(st) +
+    "Fetch the latest works, artist bios, collections and connections your local " +
+    "gallery pushed, and import them here. " + repoPill(st) +
     (holds.length ? " · " + holds.join(" · ") + " in the repo" : ""),
     '<div class="pullpanel"><div class="bf-actions">' +
     '<button type="button" class="cta-btn" id="pull-btn">Pull new artwork</button>' +
@@ -2709,18 +2725,22 @@ function wirePullPanel() {
     btn.disabled = true; const orig = btn.textContent; btn.textContent = "Pulling…";
     try {
       const r = await api("/api/pull", { method: "POST" });
-      const b = r.bios || { added: 0, updated: 0 };
-      const c = r.collections || { added: 0, updated: 0 };
-      const bioN = (b.added || 0) + (b.updated || 0);
-      const colN = (c.added || 0) + (c.updated || 0);
+      const KINDS = [["bios", "bio", "bios"], ["collections", "collection", "collections"],
+                     ["links", "link", "links"], ["threads", "thread", "threads"]];
+      const lines = ["Works: added " + r.added + ", updated " + r.updated + ", " +
+                     r.unchanged + " unchanged."];
+      const touched = [];
+      KINDS.forEach(([k, one, many]) => {
+        const v = r[k] || { added: 0, updated: 0 };
+        const n = (v.added || 0) + (v.updated || 0);
+        lines.push(many[0].toUpperCase() + many.slice(1) + ": added " + (v.added || 0) +
+                   ", updated " + (v.updated || 0) + ".");
+        if (n) touched.push(n + " " + (n === 1 ? one : many));
+      });
       msg.className = "formmsg ok";
-      msg.textContent = "Works: added " + r.added + ", updated " + r.updated + ", " +
-        r.unchanged + " unchanged. Bios: added " + (b.added || 0) +
-        ", updated " + (b.updated || 0) + ". Collections: added " + (c.added || 0) +
-        ", updated " + (c.updated || 0) + ".";
+      msg.textContent = lines.join(" ");
       toast("Pull complete: +" + r.added + " new, " + r.updated + " updated" +
-            (bioN ? ", " + bioN + " bio" + (bioN === 1 ? "" : "s") : "") +
-            (colN ? ", " + colN + " collection" + (colN === 1 ? "" : "s") : "") + ".");
+            (touched.length ? ", " + touched.join(", ") : "") + ".");
     } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = orig; }
   });

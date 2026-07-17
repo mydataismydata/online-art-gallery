@@ -117,6 +117,48 @@ def delete(tid):
     _save(rest)
 
 
+def all_records():
+    """Every thread as stored, with steps unresolved. For the publisher, which wants
+    the artist names as written rather than a view with the missing ones dropped."""
+    return _load()
+
+
+def import_published(recs):
+    """Take the threads published from the private box, keyed by their own id.
+    Threads written here are left alone. Returns {"added","updated","unchanged"}."""
+    cur = _load()
+    by_id = {t.get("id"): t for t in cur if t.get("id")}
+    stats = {"added": 0, "updated": 0, "unchanged": 0}
+
+    incoming = {}
+    for r in recs or []:
+        tid = (r.get("id") or "").strip()
+        if not tid:
+            continue
+        try:
+            title, steps = _validate(r.get("title"), r.get("steps"))
+        except ValueError:
+            continue                       # malformed — not worth failing the pull over
+        incoming[tid] = {
+            "id": tid, "title": title,
+            "description": (r.get("description") or "").strip()[:600],
+            "steps": steps, "created_by": r.get("created_by"),
+            "created": r.get("created"), "source": "published",
+        }
+
+    out = [t for t in cur if t.get("id") not in incoming]
+    for tid, rec in incoming.items():
+        old = by_id.get(tid)
+        if old and all(old.get(k) == rec[k] for k in ("title", "description", "steps")):
+            stats["unchanged"] += 1
+        else:
+            stats["updated" if old else "added"] += 1
+        out.append(rec)
+    if stats["added"] or stats["updated"]:
+        _save(out)
+    return stats
+
+
 def rename(old, new):
     """Follow an artist rename/merge, so a thread keeps its path."""
     old_k = fold((old or "").strip())

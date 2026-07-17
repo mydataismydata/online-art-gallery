@@ -151,6 +151,52 @@ def get_link(link_id):
     return next((l for l in _load() if l["id"] == link_id), None)
 
 
+def import_published(recs):
+    """Take the links published from the private box, keyed by their own id.
+
+    Links written *here* are left alone, with one exception: a published link owns
+    its pair, so a local link between the same two painters is dropped to make room.
+    That reads as harsh until you look at the alternative — the graph only ever draws
+    a pair's strongest link, so keeping both would leave one of them invisible and
+    therefore impossible to remove. These are authored on the private box; it wins.
+
+    Returns {"added", "updated", "unchanged"}."""
+    cur = _load()
+    by_id = {l.get("id"): l for l in cur if l.get("id")}
+    stats = {"added": 0, "updated": 0, "unchanged": 0}
+
+    incoming, claimed = {}, set()
+    for r in recs or []:
+        lid = (r.get("id") or "").strip()
+        a, b = (r.get("a") or "").strip(), (r.get("b") or "").strip()
+        if not lid or not a or not b or _key(a) == _key(b):
+            continue
+        if r.get("type") not in HAND_TYPES:
+            continue
+        incoming[lid] = {
+            "id": lid, "a": a, "b": b, "type": r["type"],
+            "note": (r.get("note") or "").strip()[:600],
+            "directed": bool(r.get("directed")) and r["type"] == "influence",
+            "created_by": r.get("created_by"), "created": r.get("created"),
+            "source": "published",
+        }
+        claimed.add(_pair_key(a, b))
+
+    out = [l for l in cur
+           if l.get("id") not in incoming and _pair_key(l["a"], l["b"]) not in claimed]
+    dropped = len(cur) - len(out) - sum(1 for i in incoming if i in by_id)
+    for lid, rec in incoming.items():
+        old = by_id.get(lid)
+        if old and all(old.get(k) == rec[k] for k in ("a", "b", "type", "note", "directed")):
+            stats["unchanged"] += 1
+        else:
+            stats["updated" if old else "added"] += 1
+        out.append(rec)
+    if stats["added"] or stats["updated"] or dropped:
+        _save(out)
+    return stats
+
+
 def rename(old, new):
     """Keep hand-written links attached when an artist is renamed or merged into
     another. Called from the rename route — without it a repoint would silently
