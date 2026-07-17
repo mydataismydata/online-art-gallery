@@ -1056,8 +1056,13 @@ kbd {
 /* ---------- fullscreen viewer ---------- */
 #viewer { position: fixed; inset: 0; z-index: 100; background: var(--bg-viewer); display: none; }
 #viewer.open { display: block; }
-#vstage { position: absolute; inset: 0; display: flex; overflow: hidden; }
-#vimg { margin: auto; user-select: none; -webkit-user-drag: none; transition: opacity .15s; }
+/* The stage owns every touch on it: pinch, pan and swipe are all ours, so the
+   browser must not also try to scroll or magnify underneath us. */
+#vstage { position: absolute; inset: 0; display: flex; overflow: hidden; touch-action: none; }
+#vimg {
+  margin: auto; user-select: none; -webkit-user-drag: none; transition: opacity .15s;
+  transform-origin: center center;
+}
 #viewer.fit #vimg { width: 100%; height: 100%; object-fit: scale-down; cursor: zoom-in; }
 #viewer.actual #vstage { overflow: auto; scrollbar-width: none; }
 #viewer.actual #vstage::-webkit-scrollbar { display: none; }
@@ -1204,8 +1209,13 @@ a.pl-xref:focus-visible { outline: 2px solid rgba(42,36,28,.5); outline-offset: 
   box-shadow: 0 12px 34px rgba(0,0,0,.5); transition: opacity .25s;
 }
 #plpill .i { font: italic 400 12px var(--serif); }
-#viewer.placards.collapsed #plpill { display: inline-flex; }
+/* Shown wherever there's a placard to read and it isn't already open — folded
+   away, or switched off entirely. On a phone this is the only door to one. */
+#viewer.pl-avail #plpill { display: inline-flex; }
 #viewer.idle #plpill { opacity: 0; pointer-events: none; }
+/* The pill stands in the caption's corner, so the caption steps aside rather than
+   run its title underneath it. Only when the pill is actually there. */
+#viewer.pl-avail #vcap { padding-left: 152px; }
 
 /* ---------- placard editor ---------- */
 .modal.modal-wide { max-width: min(620px, 94vw); }
@@ -1373,4 +1383,20 @@ a.pl-xref:focus-visible { outline: 2px solid rgba(42,36,28,.5); outline-offset: 
   .anum { width: 16px; font-size: 11px; }
   .athumb { width: 58px; height: 44px; }
   .atext .at { font-size: 14px; }
+
+  /* ---------- the viewer on a phone ---------- */
+  /* No keyboard to press and no room for a hint about one. */
+  #vhints { display: none; }
+  /* Swipe walks the room here, and two 54px arrows would sit on almost a third of
+     the screen swallowing the very gesture that replaces them. */
+  .vnav { display: none; }
+  /* The same round "i" the grid uses, sized for a thumb — a phone has no "p" key,
+     so this is the only way to a placard. */
+  #plpill {
+    left: 14px; bottom: 14px; width: 38px; height: 38px; border-radius: 50%;
+    padding: 0; gap: 0; justify-content: center; font-size: 0;
+    letter-spacing: normal;
+  }
+  #plpill .i { font: italic 400 16px var(--serif); }
+  #viewer.pl-avail #vcap { padding-left: 64px; }
 }

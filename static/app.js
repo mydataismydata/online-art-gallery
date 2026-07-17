@@ -3766,6 +3766,13 @@ function setPlacardCollapsed(on) {
   syncPlacard();
 }
 
+/* Where there's a placard worth opening. Mirrors placardHtml: a visitor needs
+   something written to read, but the owner gets the empty card too — it's where
+   they write it. */
+function hasPlacard(w) {
+  return !!(w && (w.description || isOwner()));
+}
+
 function syncPlacard() {
   const on = placardsOn();
   const collapsed = placardCollapsed();
@@ -3773,7 +3780,13 @@ function syncPlacard() {
   viewer.classList.toggle("collapsed", on && collapsed);
   const el = document.getElementById("placard");
   if (!el) return;
-  if (on && !collapsed && viewer.classList.contains("open") && V.list[V.i]) {
+  const cur = V.list[V.i];
+  const showing = !!(on && !collapsed && viewer.classList.contains("open") && cur);
+  /* The pill is the way back to a placard you've folded away — and on a phone,
+     where there's no "p" key to press, the only way to one at all. Offered only
+     where there's something to read, the same rule the grid's "i" follows. */
+  viewer.classList.toggle("pl-avail", hasPlacard(cur) && !showing);
+  if (showing) {
     el.innerHTML = placardHtml(V.list[V.i]);
     el.hidden = false;
     const eb = document.getElementById("pl-edit");
@@ -3937,6 +3950,7 @@ function showWork(i) {
   const w = V.list[V.i];
   viewer.classList.add("loading");
   setFit(true);
+  vzReset(false);        // a new painting arrives framed, not where the last one was left
   vimg.src = viewSrc(w);
   vcap.innerHTML = caption(w);
   syncPlacard();
@@ -3992,7 +4006,14 @@ document.addEventListener("fullscreenchange", () => {
 $("#vprev").addEventListener("click", (e) => { e.stopPropagation(); showWork(V.i - 1); });
 $("#vnext").addEventListener("click", (e) => { e.stopPropagation(); showWork(V.i + 1); });
 $("#vclose").addEventListener("click", (e) => { e.stopPropagation(); closeViewer(); });
-$("#plpill").addEventListener("click", (e) => { e.stopPropagation(); setPlacardCollapsed(false); });
+/* "i" means show me the placard, whatever the standing preference says — the same
+   thing pressing "p" does when placards are off. The card's own ✕ folds it back to
+   this pill, so the two are a pair. */
+$("#plpill").addEventListener("click", (e) => {
+  e.stopPropagation();
+  setPlacards(true);
+  setPlacardCollapsed(false);
+});
 
 document.addEventListener("keydown", (e) => {
   if (!viewer.classList.contains("open")) return;
@@ -4102,6 +4123,7 @@ viewer.addEventListener("pointermove", wake);
    though panning has the pointer captured on the stage (which would otherwise
    swallow the image's click). */
 vstage.addEventListener("click", (e) => {
+  if (lastPointerType !== "mouse") return;   // a finger zooms by pinching, not tapping
   if (dragMoved) { dragMoved = false; return; }
   if (viewer.classList.contains("fit")) {
     if (e.target !== vimg) return;   // in fit view only the painting zooms in, not the letterbox
@@ -4121,7 +4143,158 @@ vstage.addEventListener("click", (e) => {
   }
 });
 
-/* drag to pan at 1:1 (mouse; touch scrolls natively) */
+/* ---------- touch: pinch to zoom, drag to pan, swipe to walk ---------- */
+
+/* A phone has no keyboard, no hover, and no filmstrip, so what your fingers do is
+   the viewer's whole vocabulary there. Tap used to jump the painting to 1:1, which
+   meant you couldn't touch it without it lurching at you.
+
+   Now: pinch zooms, continuously, as far in as the pixels go; one finger pans what
+   you've zoomed into; and a sideways drag walks to the next painting. Tap does
+   nothing at all, which is the point — you can rest a thumb on a picture and just
+   look at it.
+
+   The mouse keeps its own model (click = 1:1, drag = pan) and the two never meet:
+   only a click reaches `actual`, and only a finger reaches this transform. */
+const VZ = { z: 1, x: 0, y: 0, sw: 0 };   // sw: how far a swipe has dragged so far
+const vpoints = new Map();
+let gesture = null, lastPointerType = "mouse";
+
+function vzApply(animate) {
+  vimg.style.transition = animate ? "transform .22s ease, opacity .15s" : "";
+  vimg.style.transform = (VZ.z === 1 && !VZ.x && !VZ.y && !VZ.sw)
+    ? ""
+    : "translate(" + (VZ.x + VZ.sw) + "px," + VZ.y + "px) scale(" + VZ.z + ")";
+}
+
+function vzReset(animate) {
+  VZ.z = 1; VZ.x = 0; VZ.y = 0; VZ.sw = 0;
+  viewer.classList.remove("zoomed");
+  vzApply(animate);
+}
+
+/* Where the paint actually is. #vimg fills the stage and object-fit: scale-down
+   letterboxes the painting inside it, so the element's own box says nothing about
+   the picture's edges — and the pan limits are about the picture. */
+function paintedBox() {
+  const r = vstage.getBoundingClientRect();
+  const nw = vimg.naturalWidth, nh = vimg.naturalHeight;
+  if (!nw || !nh) return { w: r.width, h: r.height, stage: r, scale: 1 };
+  const s = Math.min(1, Math.min(r.width / nw, r.height / nh));   // = scale-down
+  return { w: nw * s, h: nh * s, stage: r, scale: s };
+}
+
+// Far enough in to read the brushwork: 1:1 with the pixels we actually hold. A
+// small painting still gets a little magnification rather than none.
+function vzMax() {
+  const s = paintedBox().scale;
+  return Math.max(2, Math.min(8, s ? 1 / s : 4));
+}
+
+// The painting can only travel as far as its own overhang, so it can't be shoved
+// off into the letterbox and lost.
+function vzClamp() {
+  const b = paintedBox();
+  const mx = Math.max(0, (b.w * VZ.z - b.stage.width) / 2);
+  const my = Math.max(0, (b.h * VZ.z - b.stage.height) / 2);
+  VZ.x = Math.max(-mx, Math.min(mx, VZ.x));
+  VZ.y = Math.max(-my, Math.min(my, VZ.y));
+}
+
+function vzZoomTo(z, cx, cy) {
+  const b = paintedBox();
+  const z0 = VZ.z;
+  z = Math.max(1, Math.min(vzMax(), z));
+  if (z === z0) return;
+  // Whatever is under the fingers stays under the fingers.
+  const px = cx - (b.stage.left + b.stage.width / 2);
+  const py = cy - (b.stage.top + b.stage.height / 2);
+  VZ.x = px - (px - VZ.x) * (z / z0);
+  VZ.y = py - (py - VZ.y) * (z / z0);
+  VZ.z = z;
+  vzClamp();
+  viewer.classList.toggle("zoomed", VZ.z > 1);
+  vzApply(false);
+}
+
+vstage.addEventListener("pointerdown", (e) => {
+  lastPointerType = e.pointerType;
+  if (e.pointerType === "mouse") return;
+  vpoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  // Capture so a finger that slides off the edge still finishes its gesture. It
+  // can throw if that pointer is already gone by the time we get here.
+  try { vstage.setPointerCapture(e.pointerId); } catch (_) { /* nothing to hold */ }
+  if (vpoints.size === 2) {
+    const [a, b] = [...vpoints.values()];
+    gesture = { kind: "pinch", d: Math.hypot(a.x - b.x, a.y - b.y), z: VZ.z };
+  } else if (vpoints.size === 1) {
+    // Undecided until it moves: a drag on an unzoomed painting is a walk to the
+    // next one, but only once it proves it's going sideways.
+    gesture = { kind: VZ.z > 1 ? "pan" : "maybe", x: e.clientX, y: e.clientY,
+                ox: VZ.x, oy: VZ.y };
+  }
+});
+
+vstage.addEventListener("pointermove", (e) => {
+  if (!vpoints.has(e.pointerId)) return;
+  vpoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  wake();
+  if (!gesture) return;
+  if (gesture.kind === "pinch") {
+    if (vpoints.size >= 2) {
+      const [a, b] = [...vpoints.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (gesture.d > 0)
+        vzZoomTo(gesture.z * (d / gesture.d), (a.x + b.x) / 2, (a.y + b.y) / 2);
+    }
+    return;
+  }
+  const dx = e.clientX - gesture.x, dy = e.clientY - gesture.y;
+  if (gesture.kind === "maybe") {
+    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+    // Decided once and for all, so a wandering finger can't turn a walk into a
+    // pan halfway through.
+    gesture.kind = Math.abs(dx) > Math.abs(dy) ? "swipe" : "still";
+  }
+  if (gesture.kind === "swipe") {
+    VZ.sw = dx;                       // the painting follows the finger
+    vzApply(false);
+  } else if (gesture.kind === "pan") {
+    VZ.x = gesture.ox + dx;
+    VZ.y = gesture.oy + dy;
+    vzClamp();
+    vzApply(false);
+  }
+});
+
+function endTouch(e) {
+  if (!vpoints.has(e.pointerId)) return;
+  vpoints.delete(e.pointerId);
+  if (gesture && gesture.kind === "swipe") {
+    const dx = VZ.sw;
+    VZ.sw = 0;
+    // A walk is a shove, not a twitch — a fifth of the screen, and never so far
+    // that a big phone makes it work.
+    const far = Math.abs(dx) > Math.min(90, vstage.clientWidth * 0.2);
+    if (far && V.list.length > 1) showWork(V.i + (dx < 0 ? 1 : -1));
+    else vzApply(true);               // not far enough: let it fall back
+  }
+  if (!vpoints.size) {
+    gesture = null;
+  } else if (vpoints.size === 1) {
+    // A pinch that lost a finger carries on as a pan from where the other one is,
+    // rather than jumping because the anchor changed.
+    const [p] = [...vpoints.values()];
+    gesture = { kind: VZ.z > 1 ? "pan" : "still", x: p.x, y: p.y, ox: VZ.x, oy: VZ.y };
+  }
+}
+["pointerup", "pointercancel"].forEach((ev) => vstage.addEventListener(ev, endTouch));
+
+// A rotated phone changes what "fitted" means, so anything zoomed is now framed
+// against a box that no longer exists.
+window.addEventListener("resize", () => { if (VZ.z > 1 || VZ.x || VZ.y) vzReset(false); });
+
+/* drag to pan at 1:1 (mouse; touch has its own model above) */
 vstage.addEventListener("pointerdown", (e) => {
   if (e.pointerType !== "mouse" || !viewer.classList.contains("actual")) return;
   dragState = { x: e.clientX, y: e.clientY, l: vstage.scrollLeft, t: vstage.scrollTop };
