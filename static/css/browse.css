@@ -1,0 +1,27 @@
+/* BROWSE
+   Browse: the facet rail and its chips. */
+
+/* ---------- browse ---------- */
+.facet-tabs {
+  display: flex; gap: 26px; border-bottom: 1px solid var(--hair); margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.facet-tabs a {
+  font: 400 11px var(--sans); letter-spacing: .2em; text-transform: uppercase;
+  color: var(--dim2); padding: 0 0 10px; border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+}
+.facet-tabs a:hover { color: var(--text); }
+.facet-tabs a.active { font-weight: 600; color: var(--display2); border-bottom-color: var(--gold); }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 30px; }
+.chip {
+  display: inline-flex; gap: 8px; align-items: baseline;
+  border: 1px solid var(--hair-mid); border-radius: 30px; padding: 8px 16px;
+  color: var(--text); font: 400 12.5px var(--sans);
+  transition: border-color .25s ease, background .25s ease;
+}
+.chip:hover { border-color: var(--gold-line); color: var(--text); }
+.chip.active { background: var(--gold-tint2); border-color: var(--gold-line2); color: var(--display2); }
+.chip .n { font-size: 10.5px; color: var(--off); }
+.chip.active .n { color: var(--gold); }
+.chip-summary { font: italic 400 13px var(--serif); color: var(--faint); margin-left: 4px; }

@@ -1,0 +1,100 @@
+/* FORMS
+   Form controls everywhere (inputs, selects, textareas), the
+   Add-artist and downloads panels, and the artist bio disclosure. */
+
+/* ---------- add / downloads ---------- */
+.addwrap { display: grid; grid-template-columns: minmax(300px, 460px) 1fr; gap: 44px; align-items: start; }
+@media (max-width: 900px) { .addwrap { grid-template-columns: 1fr; } }
+.dlform { border: 1px solid var(--hair); padding: 26px 28px; }
+.dlform label, .srcform > label, .srcform .fmhdr, .bioform label, .authform label {
+  display: block; font: 600 10px var(--sans); letter-spacing: .2em;
+  text-transform: uppercase; color: var(--faint); margin: 18px 0 6px;
+}
+.dlform label:first-child, .srcform > label:first-of-type, .authform label:first-of-type { margin-top: 0; }
+input[type=text], input[type=password], input[type=email], input[type=number],
+input:not([type]), select, textarea, .richtext, .rp-search, .invlink {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--hair); background: none;
+  color: var(--text); font: 400 13px var(--sans); border-radius: 0;
+}
+input::placeholder, textarea::placeholder { color: var(--off); }
+input:focus, select:focus, textarea:focus, .richtext:focus, .rp-search:focus {
+  outline: none; border-color: var(--gold-line2);
+}
+select {
+  appearance: none; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--faint) 50%),
+                    linear-gradient(135deg, var(--faint) 50%, transparent 50%);
+  background-position: calc(100% - 16px) calc(50% + 1px), calc(100% - 11px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 32px;
+}
+/* The open dropdown is drawn by the browser, not by us. It inherits the select's
+   colour — near-white, right for our dark panel — but not its background, which is
+   `none`: the list falls back to the platform's white and the names all but vanish
+   on it. The options need a background of their own, so the pair travels together. */
+select option, select optgroup {
+  background: var(--raised2); color: var(--text);
+}
+/* The file picker sits above the text field, which stays available for a URL or a
+   real server-side path. The native button is the one control here that can't be
+   restyled, so it's given the hairline treatment and left alone. */
+.filepick {
+  width: 100%; padding: 9px 12px; margin-bottom: 8px; cursor: pointer;
+  border: 1px dashed var(--hair-dash); background: none;
+  color: var(--dim); font: 400 12.5px var(--sans);
+}
+.filepick:hover { border-color: var(--gold-line); }
+.filepick::file-selector-button {
+  margin-right: 12px; padding: 6px 14px; cursor: pointer; border-radius: 20px;
+  border: 1px solid var(--hair-strong); background: none;
+  color: var(--dim2); font: 400 11px var(--sans); letter-spacing: .1em; text-transform: uppercase;
+}
+.filepick:hover::file-selector-button { color: var(--display2); border-color: var(--gold-line); }
+.dlform .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.dlform > button, .srcform button[type=submit] { margin-top: 22px; }
+.dlform .hint { font: 400 12px/1.6 var(--sans); color: var(--faint); margin: 12px 0 0; }
+.dlform .warn { font: 400 12px var(--sans); color: var(--warn); margin: 10px 0 0; }
+.formmsg { margin: 12px 0 0; font: 400 12px var(--sans); color: var(--dim); }
+.formmsg.err { color: var(--warn); }
+.formmsg.ok { color: var(--ok); }
+
+.job { border: 1px solid var(--hair); padding: 18px 20px; margin-bottom: 16px; }
+.job .head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.job .q { font: 400 18px var(--serif); color: var(--text); }
+.job .src { font: 400 11.5px var(--sans); color: var(--faint); }
+.job .badge {
+  margin-left: auto; font: 400 9.5px var(--sans); letter-spacing: .18em;
+  text-transform: uppercase; padding: 4px 10px; border-radius: 20px;
+  border: 1px solid var(--hair-mid); color: var(--dim2);
+}
+.job .badge.running { color: var(--gold); border-color: var(--gold-line); }
+.job .badge.done { color: var(--ok); border-color: rgba(127,163,137,.45); }
+.job .badge.error { color: var(--warn); border-color: rgba(191,126,99,.45); }
+.job .counts { font: 400 12px var(--sans); color: var(--faint); margin: 9px 0 8px; }
+.job-artists { font: 400 12.5px var(--sans); margin: 0 0 8px; }
+.job pre, .tr-block, .testout .tsample {
+  border: 1px solid var(--hair-soft); padding: 9px 12px; margin: 0;
+  max-height: 190px; overflow: auto; background: rgba(0,0,0,.18);
+  font: 400 11px/1.5 ui-monospace, Consolas, monospace; color: var(--faint);
+  white-space: pre-wrap; word-break: break-word;
+}
+.job .cancel { margin-top: 10px; }
+
+/* ---------- artist bio panel (disclosure) ---------- */
+#biobar { margin-top: 18px; }
+.bio { border-top: 1px solid var(--hair); padding-top: 18px; max-width: 780px; }
+.bio.empty { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.movements { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.movements .mv {
+  border: 1px solid var(--gold-line); color: var(--gold); border-radius: 20px;
+  padding: 4px 13px; font: 400 11.5px var(--sans); letter-spacing: .04em;
+}
+.bio .facts { display: flex; flex-wrap: wrap; gap: 24px; font: 400 13.5px var(--sans); color: var(--text); }
+.bio .fact b {
+  color: var(--faint); font: 600 10px var(--sans); letter-spacing: .18em;
+  text-transform: uppercase;
+}
+.bio .bioctl { display: flex; align-items: center; gap: 18px; margin-top: 16px; }
+.bio-msg { font: 400 12px var(--sans); color: var(--faint); }
+.bioform { border-top: 1px solid var(--hair); padding-top: 18px; max-width: 640px; }
+.bioform .bf-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.bf-actions { display: flex; align-items: center; gap: 18px; margin-top: 22px; flex-wrap: wrap; }

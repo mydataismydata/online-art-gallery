@@ -1,0 +1,98 @@
+/* ARTIST
+   One painter's page, and the connections strip along it. */
+
+/* ---------- artist page ---------- */
+.artist-head {
+  display: grid; grid-template-columns: 1fr 320px; gap: 64px; align-items: start;
+  margin-top: 26px; padding-bottom: 44px; border-bottom: 1px solid var(--hair);
+}
+@media (max-width: 900px) { .artist-head { grid-template-columns: 1fr; gap: 34px; } }
+.artist-title { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+.artist-title h1 { font: 400 54px/1.05 var(--serif); color: var(--display); }
+.artist-life { font: italic 400 20px var(--serif); color: var(--faint); }
+.artist-eyebrow {
+  margin: 14px 0 0; font: 600 10.5px var(--sans); letter-spacing: .26em;
+  text-transform: uppercase; color: var(--gold);
+}
+.artist-bio {
+  margin: 22px 0 0; max-width: 640px;
+  font: 400 15.5px/1.75 var(--serif); color: #c9bda9; text-wrap: pretty;
+}
+/* Collapsed to an opening glimpse; the toggle below expands it. Clamping the box
+   rather than truncating the text means nothing is lost and no ellipsis is faked. */
+.artist-bio.clamped {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+#bio-more { margin-top: 12px; }
+/* The bio carries the same small allowlist as a placard: work titles arrive
+   italicised, and paragraphs are a blank line (<br><br>) rather than <p>. */
+.artist-bio em, .artist-bio i, .bio-rich em, .bio-rich i { font-style: italic; }
+.artist-bio font[size="2"] { font-size: .85em; }
+.artist-bio font[size="3"] { font-size: 1em; }
+.artist-bio font[size="5"] { font-size: 1.35em; }
+.artist-title.editing { align-items: center; }
+.artist-title #ren-in {
+  font: 400 34px var(--serif); padding: 4px 10px; min-width: 320px;
+  background: none; color: var(--text); border: 1px solid var(--gold-line2);
+}
+.artist-title #ren-in:focus { outline: none; }
+.ownertools { display: flex; align-items: center; gap: 22px; margin-top: 30px; flex-wrap: wrap; }
+.ownertools .otlabel {
+  font: 600 10px var(--sans); letter-spacing: .22em; color: var(--off);
+  text-transform: uppercase;
+}
+.statcard { display: flex; flex-direction: column; border: 1px solid rgba(216,192,150,.14); padding: 26px 28px; }
+.statrow {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 14px;
+  padding: 9px 0; border-bottom: 1px solid rgba(216,192,150,.09);
+}
+.statrow:last-of-type { border-bottom: none; }
+.statrow .k {
+  font: 400 12px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--faint);
+}
+.statrow .v { font: 400 16px var(--serif); color: var(--text); }
+.statrow.lead .v { font-size: 20px; }
+.statcard .cta-btn { margin-top: 18px; }
+
+/* ---------- connections strip (artist page) ---------- */
+.connstrip { margin-top: 44px; }
+.conngrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 22px; margin-top: 24px;
+}
+.conncard {
+  display: flex; gap: 16px; align-items: flex-start;
+  border: 1px solid rgba(216,192,150,.14); padding: 20px 22px;
+  transition: border-color .3s ease, background .3s ease;
+}
+/* --tc / --tcb / --tcbg are set inline per card: each link type tints its own
+   hover, so the strip is colour-coded without five near-identical rules. */
+.conncard:hover { border-color: var(--tcb); background: var(--tcbg); }
+.conncard img {
+  width: 58px; height: 58px; border-radius: 50%; object-fit: cover;
+  border: 1px solid var(--hair-dash); flex-shrink: 0; background: var(--raised3);
+}
+.conncard .cbody { display: block; min-width: 0; }
+.conn-open { font: 400 12px var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+.works-sec { margin-top: 52px; }
+.works-sec .sechead { margin-bottom: 24px; }
+.works-sec .worktools { margin-bottom: 0; }
+.sechead h2 .note { font: 400 14px var(--sans); color: var(--faint); margin-left: 8px; }
+.conncard .ctype { display: flex; align-items: center; gap: 8px; }
+.conncard .cdot { width: 7px; height: 7px; border-radius: 50%; }
+.conncard .clabel { font: 600 9.5px var(--sans); letter-spacing: .2em; text-transform: uppercase; }
+.conncard .cname { display: block; margin-top: 7px; font: 400 18px var(--serif); color: var(--text); }
+.conncard .cnote {
+  display: block; margin-top: 6px; font: 400 13.5px/1.55 var(--sans);
+  color: var(--dim); text-wrap: pretty;
+}
+.conncard .cnote.quoted { font: italic 400 13.5px/1.55 var(--serif); }
+.conncard.ghost {
+  flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  border: 1px dashed var(--hair-dash); text-align: center;
+}
+.conncard.ghost:hover { border-color: rgba(194,160,97,.55); }
+.conncard.ghost .star { font: 400 22px var(--serif); color: var(--gold); }
+.conncard.ghost .glabel {
+  font: 400 12px/1.6 var(--sans); letter-spacing: .1em; color: var(--dim2);
+}

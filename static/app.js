@@ -1285,7 +1285,7 @@ const FACETS = [["era", "Era"], ["medium", "Medium"], ["style", "Style"],
 /* ============================== connections ============================== */
 
 /* The five kinds of thread. Mirrors links.TYPE_META on the server; the colours
-   are design tokens and also appear in style.css, so they're stated where each
+   are design tokens and also appear in css/base.css, so they're stated where each
    surface draws them rather than plumbed through every response. */
 const LINK_TYPES = {
   movement:   { label: "Movement",     color: "#7f96ad", dash: "",    w: 1.4 },

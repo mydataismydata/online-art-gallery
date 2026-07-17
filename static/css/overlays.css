@@ -1,0 +1,57 @@
+/* OVERLAYS
+   Things that sit on top of a screen rather than being one:
+   auth forms, modals, toasts, disclosures. */
+
+/* ---------- auth ---------- */
+.authwrap { display: flex; justify-content: center; padding: 8vh 20px 40px; }
+.authcard { width: 100%; max-width: 380px; border: 1px solid var(--hair); padding: 34px 32px; }
+.authcard h1 { font: 400 27px var(--serif); color: var(--display2); margin: 0 0 8px; }
+.authcard > .sub { font: 400 13px/1.6 var(--sans); color: var(--dim); margin: 0 0 20px; }
+.authform textarea { resize: vertical; font-family: var(--sans); line-height: 1.5; }
+.authform > .cta-btn { width: 100%; margin-top: 24px; }
+.authform .formmsg { margin-top: 12px; }
+
+/* ---------- modal ---------- */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 200; background: rgba(13,11,8,.72);
+  display: flex; align-items: flex-start; justify-content: center; padding: 10vh 20px 20px;
+}
+.modal {
+  width: 100%; max-width: 440px; background: var(--panel);
+  border: 1px solid var(--hair-strong); padding: 28px;
+  box-shadow: 0 24px 70px rgba(0,0,0,.65);
+}
+.modal h2 { font: 400 22px var(--serif); color: var(--display2); margin: 0 0 16px; }
+/* the tile "i" popup: the placard brings its own card, so drop the modal chrome */
+.modal.modal-placard { background: none; border: 0; padding: 0; box-shadow: none; max-width: 420px; }
+.modal.modal-placard .pl-card { max-height: 76vh; }
+.addmenu-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; margin-bottom: 16px; }
+.addmenu-item {
+  text-align: left; background: none; border: 1px solid var(--hair);
+  color: var(--text); padding: 11px 14px; font: 400 15px var(--serif); cursor: pointer;
+}
+.addmenu-item:hover, .addmenu-item.active { border-color: var(--gold-line); color: var(--gold-hi); }
+.addmenu-item .tiny { float: right; }
+.rp-sub { font: 400 13px/1.6 var(--sans); color: var(--dim); margin: 0 0 16px; }
+.rp-search { margin-bottom: 14px; }
+.modal-actions { display: flex; align-items: center; gap: 18px; margin-top: 16px; }
+
+/* ---------- toast ---------- */
+#toast {
+  position: fixed; left: 50%; bottom: 30px; transform: translate(-50%, 20px); z-index: 300;
+  background: var(--panel); border: 1px solid var(--gold-line); color: var(--text);
+  padding: 12px 22px; font: 400 13px var(--sans);
+  box-shadow: 0 16px 40px rgba(0,0,0,.5);
+  opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- disclosure ---------- */
+.disclosure {
+  background: none; border: none; cursor: pointer; padding: 2px 0;
+  font: 400 12.5px var(--sans); color: var(--faint);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.disclosure:hover { color: var(--gold); }
+.disclosure .caret { font-size: 10px; transition: transform .25s ease; }
+.disclosure.open .caret { transform: rotate(180deg); }

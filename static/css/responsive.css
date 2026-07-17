@@ -1,0 +1,104 @@
+/* RESPONSIVE
+   Every breakpoint in the museum, in one place.
+
+   Deliberately not split across the files above. A media query has no extra
+   specificity — it wins by coming later — so scattering these among the
+   components would hand the last file loaded the power to quietly undo an
+   earlier one's phone layout. Kept together, and loaded last, they can only
+   override what they mean to. */
+
+/* ---------- responsive ---------- */
+@media (max-width: 900px) {
+  #topbar { padding: 12px 18px; }
+  .page { padding: 32px 20px 30px; }
+  .hero-in, .conn-sub { padding-left: 20px; padding-right: 20px; }
+  .conn-main { padding: 24px 20px 30px; }
+  #foot { padding: 22px 20px 28px; flex-direction: column; align-items: flex-start; gap: 10px; }
+  .artist-title h1 { font-size: 38px; }
+  .pagehead h1 { font-size: 32px; }
+  .vnav { width: 54px; font-size: 34px; }
+  #placard { left: 16px; bottom: 16px; width: calc(100vw - 32px); }
+  #plpill { left: 16px; bottom: 16px; }
+  #vfilm { display: none; }
+}
+
+/* ---------- phones ---------- */
+/* The header's whole job here is the wordmark and a way out; everything else
+   folds behind the three lines rather than stacking down the screen. */
+@media (max-width: 720px) {
+  #topbar { padding: 10px 14px; gap: 12px; }
+  #navtoggle { display: flex; }
+  .brand { min-width: 0; flex-shrink: 1; }
+  .brand-name.full { display: none; }
+  .brand-name.compact { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .brand-eyebrow { overflow: hidden; text-overflow: ellipsis; }
+
+  .topright {
+    display: none; position: absolute; top: 100%; left: 0; right: 0;
+    flex-direction: column; align-items: stretch; gap: 0;
+    padding: 6px 14px 14px; background: rgba(23,19,16,.98);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--hair); box-shadow: 0 18px 40px rgba(0,0,0,.5);
+  }
+  #topbar.navopen .topright { display: flex; }
+  #mainnav { flex-direction: column; align-items: stretch; gap: 0; }
+  #mainnav a {
+    padding: 14px 2px; border-bottom: 1px solid var(--hair-soft);
+    border-bottom-color: var(--hair-soft); font-size: 12px;
+  }
+  #mainnav a.active { border-bottom-color: var(--gold); }
+  .nav-div { display: none; }
+  /* Sign in / the user chip live in the menu too, not out in the header. */
+  #userbox { padding: 14px 2px 2px; gap: 10px; }
+
+  .hero { height: 220px; }
+  .hero-title { font-size: 22px; }
+  .page { padding: 24px 16px 24px; }
+  .pagehead { margin-bottom: 26px; }
+  .pagehead h1 { font-size: 26px; }
+  .artist-title h1 { font-size: 28px; }
+  .artist-life { font-size: 15px; }
+  .artist-head { margin-top: 18px; padding-bottom: 28px; }
+  .artist-bio { margin-top: 16px; font-size: 14.5px; }
+  .sechead h2, .sec, .dh .disclosure { font-size: 19px; }
+  .sechead h2 .note { font-size: 12px; margin-left: 0; }
+  .connstrip { margin-top: 32px; }
+  .works-sec { margin-top: 32px; }
+  .conngrid { gap: 14px; margin-top: 16px; }
+
+  /* The stats card repeats what the headings already say ("Works 3 · 1852–1878"),
+     and a four-row table is a lot of screen to say it twice. */
+  .statcard { display: none; }
+  /* Both of these are reachable by opening Connections — the count is the strip
+     itself, and the ghost card at its end goes to the map. */
+  .connstrip .note, .connstrip .conn-open { display: none; }
+
+  .searchbox { width: 100%; }
+  .pagehead .headact { width: 100%; }
+  .masonry { columns: 1; }
+
+  /* Arranging on a phone: the handle grows into a real target and the date goes,
+     but the thumbnail stays — you're moving a painting, and you have to see which. */
+  .arow { gap: 10px; padding: 8px 4px; }
+  .agrip { width: 34px; height: 44px; }
+  .agrip::before { left: 11px; top: 14px; }
+  .anum { width: 16px; font-size: 11px; }
+  .athumb { width: 58px; height: 44px; }
+  .atext .at { font-size: 14px; }
+
+  /* ---------- the viewer on a phone ---------- */
+  /* No keyboard to press and no room for a hint about one. */
+  #vhints { display: none; }
+  /* Swipe walks the room here, and two 54px arrows would sit on almost a third of
+     the screen swallowing the very gesture that replaces them. */
+  .vnav { display: none; }
+  /* The same round "i" the grid uses, sized for a thumb — a phone has no "p" key,
+     so this is the only way to a placard. */
+  #plpill {
+    left: 14px; bottom: 14px; width: 38px; height: 38px; border-radius: 50%;
+    padding: 0; gap: 0; justify-content: center; font-size: 0;
+    letter-spacing: normal;
+  }
+  #plpill .i { font: italic 400 16px var(--serif); }
+  #viewer.pl-avail #vcap { padding-left: 64px; }
+}

@@ -5,7 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>The Gallery</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-<link rel="stylesheet" href="/static/style.css">
+<!-- One screen per file, in cascade order: base first (every other file leans on
+     its tokens), breakpoints last (see responsive.css for why they live together). -->
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/grids.css">
+<link rel="stylesheet" href="/static/css/artist.css">
+<link rel="stylesheet" href="/static/css/browse.css">
+<link rel="stylesheet" href="/static/css/collections.css">
+<link rel="stylesheet" href="/static/css/connections.css">
+<link rel="stylesheet" href="/static/css/forms.css">
+<link rel="stylesheet" href="/static/css/settings.css">
+<link rel="stylesheet" href="/static/css/viewer.css">
+<link rel="stylesheet" href="/static/css/overlays.css">
+<link rel="stylesheet" href="/static/css/responsive.css">
 </head>
 <body>
 <header id="topbar">

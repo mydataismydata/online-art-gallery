@@ -1,0 +1,114 @@
+/* COLLECTIONS
+   A curator's rooms: the cards, the collection page,
+   and arranging one by hand. */
+
+/* ---------- collections ---------- */
+.col-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 36px; }
+@media (max-width: 620px) { .col-grid { grid-template-columns: 1fr; } }
+.col-card { display: flex; flex-direction: column; gap: 14px; color: var(--text); }
+.col-mosaic {
+  display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr;
+  gap: 3px; height: 250px; border: 1px solid var(--mat); background: var(--raised3);
+}
+.col-mosaic .m1 { grid-row: 1 / 3; }
+.col-mosaic .m1.wide { grid-column: 1 / -1; }
+.col-card .cbody { display: block; }
+.col-mosaic span { overflow: hidden; display: block; background: var(--raised3); }
+.col-mosaic img { width: 100%; height: 100%; object-fit: cover; transition: filter .4s ease; }
+.col-mosaic .m2 img, .col-mosaic .m3 img { filter: brightness(.85); }
+.col-card:hover .col-mosaic img { filter: brightness(1.02); }
+.col-card .ctitle { font: 400 23px var(--serif); color: var(--text); }
+.col-byline { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.col-byline .by { font: 400 12px var(--sans); color: var(--dim2); }
+.col-note {
+  display: block; margin-top: 8px; font: italic 400 13.5px/1.55 var(--serif);
+  color: var(--faint); text-wrap: pretty;
+}
+.col-nocover {
+  grid-column: 1 / -1; grid-row: 1 / 3; display: flex;
+  align-items: center; justify-content: center; font-size: 44px; color: #3a3128;
+}
+.col-new .col-mosaic {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; border: 1px dashed var(--hair-dash); background: none;
+}
+.col-new .plus { font: 400 38px var(--serif); color: var(--gold); line-height: 1; }
+.col-new .nlabel { font: 400 12px var(--sans); letter-spacing: .16em; color: var(--dim2); text-transform: uppercase; }
+.col-new:hover .col-mosaic { border-color: var(--gold-line); }
+.col-desc { font: italic 400 15px/1.7 var(--serif); color: var(--dim); max-width: 780px; margin: 14px 0 0; }
+.col-ctl { display: flex; align-items: center; gap: 18px; margin-top: 18px; flex-wrap: wrap; }
+/* The hang order sits with the collection's own controls, and reads as a caption
+   rather than a form: it's one quiet choice, not a filter bar. */
+.col-sort {
+  display: flex; align-items: center; gap: 9px;
+  font: 600 10px var(--sans); letter-spacing: .2em; text-transform: uppercase;
+  color: var(--faint);
+}
+.col-sort select {
+  width: auto; padding: 6px 30px 6px 10px; font-size: 12px;
+  letter-spacing: normal; text-transform: none; color: var(--dim2);
+  border-color: var(--hair);
+}
+.col-sort select:hover { color: var(--text); border-color: var(--hair-strong); }
+/* Arrange is a mode, so the button has to say whether you're in it. */
+.linkbtn.on { color: var(--gold); border-bottom-color: var(--gold-line); }
+
+/* ---------- arranging a collection by hand ---------- */
+.arrange-hint {
+  font: italic 400 14px/1.6 var(--serif); color: var(--dim);
+  max-width: 640px; margin: 22px 0 0;
+}
+.arrange { list-style: none; margin: 18px 0 0; padding: 0; max-width: 720px; }
+.arow {
+  display: flex; align-items: center; gap: 16px; padding: 10px 12px;
+  background: var(--panel); border: 1px solid transparent;
+  border-bottom-color: var(--hair-soft);
+  /* Only the pieces move, never the list: a row that grows on hover would shift
+     every row under it mid-drag. */
+  transition: background .2s ease;
+}
+.arow:last-child { border-bottom-color: transparent; }
+.arow:hover { background: var(--raised2); }
+/* The grip is the only part that drags, so it's the only part that refuses to
+   scroll — everywhere else on the row, a finger still moves the page. */
+.agrip {
+  flex: 0 0 auto; width: 30px; height: 34px; cursor: grab; touch-action: none;
+  position: relative;
+}
+.agrip::before {
+  content: ""; position: absolute; left: 9px; top: 9px; width: 11px; height: 15px;
+  background-image: radial-gradient(circle, var(--off) 1px, transparent 1.2px);
+  background-size: 5px 5px;
+}
+.agrip:hover::before {
+  background-image: radial-gradient(circle, var(--gold) 1px, transparent 1.2px);
+}
+.anum {
+  flex: 0 0 auto; width: 22px; text-align: right;
+  font: 400 12px var(--sans); color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.athumb {
+  flex: 0 0 auto; width: 74px; height: 52px; overflow: hidden;
+  border: 1px solid var(--mat); background: var(--raised3); line-height: 0;
+}
+.athumb img { width: 100%; height: 100%; object-fit: cover; }
+.atext { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.atext .at {
+  font: italic 400 15px/1.3 var(--serif); color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.atext .am {
+  font: 400 11.5px var(--sans); color: var(--dim2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Held: lifted off the wall and clearly the thing you're moving. Gold is doing
+   wayfinding here — it marks the one row your hand is on. */
+.arrange .arow.dragging {
+  background: var(--raised3); border-color: var(--gold-line);
+  pointer-events: none;      /* so the drop target under the pointer can be found */
+}
+.arranging { cursor: grabbing; }
+.arranging .agrip { cursor: grabbing; }
+.arranging .arow:hover { background: var(--panel); }
+.arranging .arow.dragging:hover { background: var(--raised3); }

@@ -1,0 +1,201 @@
+/* VIEWER
+   The fullscreen viewer, the museum placard on it, and the
+   placard editor. */
+
+/* ---------- fullscreen viewer ---------- */
+#viewer { position: fixed; inset: 0; z-index: 100; background: var(--bg-viewer); display: none; }
+#viewer.open { display: block; }
+/* The stage owns every touch on it: pinch, pan and swipe are all ours, so the
+   browser must not also try to scroll or magnify underneath us. */
+#vstage { position: absolute; inset: 0; display: flex; overflow: hidden; touch-action: none; }
+#vimg {
+  margin: auto; user-select: none; -webkit-user-drag: none; transition: opacity .15s;
+  transform-origin: center center;
+}
+#viewer.fit #vimg { width: 100%; height: 100%; object-fit: scale-down; cursor: zoom-in; }
+#viewer.actual #vstage { overflow: auto; scrollbar-width: none; }
+#viewer.actual #vstage::-webkit-scrollbar { display: none; }
+#viewer.actual #vimg { width: auto; height: auto; max-width: none; max-height: none; cursor: grab; }
+#viewer.actual #vstage.dragging, #viewer.actual #vstage.dragging #vimg { cursor: grabbing; }
+#viewer.loading #vimg { opacity: .3; }
+#vscrim {
+  position: absolute; left: 0; right: 0; top: 0; height: 110px; z-index: 2;
+  background: linear-gradient(to bottom, rgba(13,11,8,.75), transparent);
+  pointer-events: none; transition: opacity .25s;
+}
+#vspin {
+  display: none; position: absolute; left: 50%; top: 50%; margin: -17px 0 0 -17px;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid rgba(236,227,210,.15); border-top-color: rgba(236,227,210,.7);
+  animation: vspin .8s linear infinite; pointer-events: none;
+}
+#viewer.loading #vspin { display: block; }
+@keyframes vspin { to { transform: rotate(360deg); } }
+.vnav {
+  position: absolute; top: 0; bottom: 0; width: 76px; border: none; background: none;
+  color: rgba(236,227,210,.35); font: 400 44px var(--serif); cursor: pointer; z-index: 3;
+  transition: color .25s, opacity .25s;
+}
+.vnav:hover { color: var(--text); }
+#vprev { left: 0; }
+#vnext { right: 0; }
+#vclose {
+  position: absolute; top: 14px; right: 18px; z-index: 4; width: 40px; height: 40px;
+  border: none; background: none; color: rgba(236,227,210,.5);
+  font: 300 24px/1 var(--sans); cursor: pointer; transition: color .25s, opacity .25s;
+}
+#vclose:hover { color: var(--text); }
+#vcount {
+  position: absolute; top: 22px; left: 26px; z-index: 3; color: rgba(236,227,210,.65);
+  font: 400 12.5px var(--sans); letter-spacing: .14em; transition: opacity .25s;
+}
+#vartist {
+  position: absolute; top: 22px; left: 50%; transform: translateX(-50%); z-index: 3;
+  color: rgba(236,227,210,.45); font: 400 11px var(--sans); letter-spacing: .22em;
+  text-transform: uppercase; transition: opacity .25s; white-space: nowrap;
+}
+#vhints {
+  position: absolute; right: 26px; bottom: 22px; z-index: 3; text-align: right;
+  color: rgba(236,227,210,.4); font: 400 11px/1.7 var(--sans); transition: opacity .25s;
+  pointer-events: none;
+}
+#vcap {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+  padding: 46px 26px 20px;
+  background: linear-gradient(to top, rgba(13,11,8,.8), transparent);
+  transition: opacity .25s; pointer-events: none;
+}
+#vcap .vtitle { font: italic 400 21px var(--serif); }
+#vcap .vmeta { color: rgba(236,227,210,.62); font: 400 13px var(--sans); margin-top: 4px; }
+#vcap a { pointer-events: auto; color: var(--gold); }
+#viewer.idle #vcap, #viewer.idle .vnav, #viewer.idle #vclose, #viewer.idle #vcount,
+#viewer.idle #vartist, #viewer.idle #vhints, #viewer.idle #vfilm, #viewer.idle #vscrim {
+  opacity: 0; pointer-events: none;
+}
+#viewer.idle #vstage { cursor: none; }
+#vflash {
+  position: absolute; left: 50%; bottom: 92px; transform: translate(-50%, 10px);
+  z-index: 6; background: rgba(13,11,8,.94); border: 1px solid var(--gold-line);
+  color: var(--text); padding: 11px 20px; font: 400 13px var(--sans);
+  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease;
+}
+#vflash.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* filmstrip of sibling works */
+#vfilm {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 4;
+  display: flex; gap: 8px; max-width: min(52vw, 620px); overflow-x: auto;
+  padding: 4px 2px; transition: opacity .25s; scrollbar-width: none;
+}
+#vfilm::-webkit-scrollbar { display: none; }
+#vfilm img {
+  height: 52px; width: auto; opacity: .45; cursor: pointer; flex: 0 0 auto;
+  transition: opacity .25s ease;
+}
+#vfilm img:hover { opacity: .9; }
+#vfilm img.on { opacity: 1; outline: 1px solid var(--gold); outline-offset: 2px; }
+#viewer.placards #vcap { display: none; }   /* the placard stands in for the plain caption */
+
+/* ---------- museum placard ---------- */
+#placard { position: absolute; left: 34px; bottom: 34px; z-index: 5; width: 398px; max-width: calc(100vw - 68px); }
+.pl-card {
+  position: relative; background: #f1eadb; color: #40382d;
+  padding: 22px 24px 20px; font-family: var(--serif);
+  box-shadow: 0 24px 70px rgba(0,0,0,.65);
+  max-height: 64vh; display: flex; flex-direction: column;
+}
+.pl-close {
+  position: absolute; top: 12px; right: 13px;
+  background: none; border: 0; color: #8a7c66; cursor: pointer;
+  font: 300 15px/1 var(--sans); padding: 3px 5px;
+}
+.pl-close:hover { color: #262019; }
+.pl-artist {
+  display: block; font: 600 11px var(--sans); letter-spacing: .26em;
+  text-transform: uppercase; color: #6b5e4a; padding-right: 20px;
+}
+a.pl-artist { color: #6b5e4a; text-decoration: none; cursor: pointer; }
+a.pl-artist:hover { color: #262019; }
+.pl-title { font: italic 400 21px/1.35 var(--serif); color: #262019; margin-top: 10px; }
+.pl-name { font-style: italic; }
+.pl-date { font-style: normal; }
+.pl-medium { font: 400 12px var(--sans); color: #8a7c66; margin-top: 7px; }
+.pl-rule { height: 1px; background: rgba(42,36,28,.16); margin: 15px 0 14px; }
+.pl-desc {
+  font: 400 14px/1.7 var(--serif); color: #40382d; overflow: auto; flex: 1; min-height: 0;
+}
+.pl-desc em, .pl-desc i { font-style: italic; }
+/* A title that names a painting in this museum. The placard is paper, so this is
+   ink and a hairline rule — gold belongs to the dark room, not to the card. It
+   stays italic: it's still a title, it just happens to be somewhere you can go. */
+a.pl-xref {
+  color: inherit; text-decoration: none; cursor: pointer;
+  border-bottom: 1px solid rgba(42,36,28,.42);
+  transition: color .2s ease, border-color .2s ease;
+}
+a.pl-xref:hover, a.pl-xref:focus-visible { color: #1c1712; border-bottom-color: #1c1712; }
+a.pl-xref:focus-visible { outline: 2px solid rgba(42,36,28,.5); outline-offset: 2px; }
+.pl-empty { font-style: italic; color: #8a7c66; }
+.pl-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 16px; flex-wrap: wrap;
+}
+.pl-edit {
+  background: none; border: 1px solid rgba(42,36,28,.3); color: #40382d;
+  font: 400 10.5px var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  padding: 8px 14px; cursor: pointer; transition: background .25s ease;
+}
+.pl-edit:hover { background: rgba(42,36,28,.08); }
+.pl-src { font: 400 10.5px var(--sans); color: #8a7c66; margin-left: auto; }
+.pl-src a { color: #6b5e4a; text-decoration: underline; }
+/* collapsed: a paper pill in the same corner */
+#plpill {
+  position: absolute; left: 34px; bottom: 34px; z-index: 5;
+  background: #f1eadb; color: #40382d; border: none; cursor: pointer;
+  font: 400 11px var(--sans); letter-spacing: .16em; text-transform: uppercase;
+  padding: 9px 16px; display: none; align-items: center; gap: 7px;
+  box-shadow: 0 12px 34px rgba(0,0,0,.5); transition: opacity .25s;
+}
+#plpill .i { font: italic 400 12px var(--serif); }
+/* Shown wherever there's a placard to read and it isn't already open — folded
+   away, or switched off entirely. On a phone this is the only door to one. */
+#viewer.pl-avail #plpill { display: inline-flex; }
+#viewer.idle #plpill { opacity: 0; pointer-events: none; }
+/* The pill stands in the caption's corner, so the caption steps aside rather than
+   run its title underneath it. Only when the pill is actually there. */
+#viewer.pl-avail #vcap { padding-left: 152px; }
+
+/* ---------- placard editor ---------- */
+.modal.modal-wide { max-width: min(620px, 94vw); }
+.ew-autobar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.ew-autohint { flex: 1 1 180px; min-width: 0; }
+/* Flash on a field a lookup just wrote, so you can see what changed under you. */
+.justfilled { outline: 1px solid var(--gold); outline-offset: 1px; }
+.modal-drag { cursor: move; user-select: none; }
+.ew-hintrow { margin-bottom: 4px; }
+.ew-hintrow textarea { margin-top: 6px; }
+.ew-trace { margin: 4px 0 14px; }
+.ew-trace summary { cursor: pointer; font: 400 12px var(--sans); color: var(--dim2); }
+.ew-trace summary:hover { color: var(--gold); }
+.tr-h {
+  font: 600 9.5px var(--sans); letter-spacing: .2em; text-transform: uppercase;
+  color: var(--faint); margin: 10px 0 4px;
+}
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) { .row3 { grid-template-columns: 1fr; } }
+.fmtbar { display: flex; gap: 6px; align-items: center; margin: 8px 0; }
+.fmtbtn {
+  background: none; border: 1px solid var(--hair); color: var(--text);
+  width: 30px; height: 28px; cursor: pointer; font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.fmtbtn svg { display: block; }
+.fmtbtn:hover { border-color: var(--gold-line); color: var(--gold); }
+.fmtbar select { width: auto; height: 28px; padding: 0 26px 0 8px; font-size: 12px; }
+.richtext { min-height: 150px; max-height: 280px; overflow: auto; font-size: 14px; line-height: 1.6; }
+/* A bio runs longer than a placard's note — give it room before it scrolls. */
+.bio-rich { min-height: 190px; max-height: 340px; font-family: var(--serif); font-size: 14.5px; line-height: 1.7; }
+.pl-desc font[size="2"], .richtext font[size="2"] { font-size: .85em; }
+.pl-desc font[size="3"], .richtext font[size="3"] { font-size: 1em; }
+.pl-desc font[size="5"], .richtext font[size="5"] { font-size: 1.35em; }
