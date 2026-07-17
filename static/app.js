@@ -811,7 +811,11 @@ async function homeView() {
    they're the machine reporting a fact. */
 function connCardHtml(c) {
   const t = LINK_TYPES[c.type] || LINK_TYPES.movement;
-  const note = c.type === "curator" ? "“" + esc(c.note) + "”" : esc(c.note);
+  // A curator's note is their prose, marks and all; a derived one is a phrase the
+  // server built, so it has nothing to render and is escaped as it always was.
+  const body = c.derived ? esc(c.note)
+    : linkXrefs(richDescHtml(c.note), c.xref, true);
+  const note = c.type === "curator" ? "“" + body + "”" : body;
   return (
     '<a class="conncard" href="#/connections?artist=' + encodeURIComponent(c.other) +
       '" style="' + typeVars(t) + '">' +
@@ -925,6 +929,9 @@ async function artistView(name) {
     wireDisclosure("bio-toggle", "biobar");
     wireDisclosure("conn-toggle", "conngrid");
     wireBioClamp();
+    // A painting named in a connection note opens where you're standing.
+    const cg = document.getElementById("conngrid");
+    if (cg) wireXrefs(cg);
     if (isOwner()) { wireRename(name); wireRepoint(name); }
     bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
     const g = document.getElementById("grid");
@@ -1814,7 +1821,9 @@ function asideHtml() {
       (mineToEdit ? '<span class="cedit" data-del-link="' + esc(l.id) + '" role="button">remove</span>' : "") +
       "</span>" +
       '<span class="cname">' + esc(other.name) + "</span>" +
-      (l.note ? '<span class="cnote">' + esc(l.note) + "</span>" : "") + "</button>";
+      (l.note ? '<span class="cnote">' +
+        (l.derived ? esc(l.note) : linkXrefs(richDescHtml(l.note), l.xref, true)) +
+        "</span>" : "") + "</button>";
   }).join("");
   const dates = [n.born && n.died ? n.born + "–" + n.died : "",
                  n.works + (n.works === 1 ? " work" : " works") + " in the collection"]
@@ -1838,6 +1847,9 @@ function wireAside() {
   if (x) x.addEventListener("click", () => { CONN.sel = null; connSyncUrl(); renderConnections(); });
   const add = $("#aside-add");
   if (add) add.addEventListener("click", () => addLinkDialog(connNode(CONN.sel)));
+  // Wired before the row's own click delegation gets a look in, so a painting
+  // named in a note opens it rather than selecting the painter next door.
+  wireXrefs(app);
   const nt = $("#th-new");
   if (nt) nt.addEventListener("click", () => threadDialog(null));
   app.querySelectorAll("[data-edit-thread]").forEach((b) =>
@@ -1889,14 +1901,21 @@ function addLinkDialog(from) {
     '<label class="lk-dir" hidden><span class="optrow">' +
     '<input type="checkbox" id="lk-dir"><span>' + esc(from.name) +
     " influenced them (rather than the other way round)</span></span></label>" +
-    "<label>Note<textarea id=\"lk-note\" rows=\"3\" placeholder=\"" +
-    "e.g. Degas admired Menzel and painted a copy of The Dinner at the Ball from memory, 1879." +
-    "\"></textarea></label>" +
+    "<label>Note</label>" +
+    '<p class="tiny lk-hint">A few sentences is fine. Italicise a painting’s title ' +
+    "and the note carries the reader to it, the same as a placard does — e.g. " +
+    "“Degas admired Menzel and painted a copy of <i>The Dinner at the Ball</i> " +
+    "from memory in 1879, having seen it once.”</p>" +
+    fmtBarHtml() +
+    '<div class="richtext lk-rich" id="lk-note" contenteditable="true"></div>' +
     '<div class="bf-actions"><button type="submit" class="cta-btn">Add link</button>' +
     '<button type="button" class="linkbtn" id="lk-cancel">cancel</button>' +
     '<span class="formmsg err" id="lk-msg"></span></div></form>');
+  m.el.querySelector(".modal").classList.add("modal-wide");
   const q = (s) => m.el.querySelector(s);
+  const ed = q("#lk-note");
   const type = q("#lk-type");
+  wireFmtBar(m.el, ed, (msg) => { q("#lk-msg").textContent = msg; });
   type.addEventListener("change", () => {
     q(".lk-dir").hidden = type.value !== "influence";
   });
@@ -1908,7 +1927,9 @@ function addLinkDialog(from) {
       await api("/api/links", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          a: from.name, b: b.name, type: type.value, note: q("#lk-note").value,
+          a: from.name, b: b.name, type: type.value,
+          // Same rule as a placard: markup only if they actually wrote something.
+          note: ed.textContent.trim() ? sanitizeRich(ed.innerHTML) : "",
           directed: q("#lk-dir").checked,
         }),
       });
@@ -3560,17 +3581,23 @@ function aiTextToRich(s) {
 
    Runs last, on markup sanitizeRich has already cleaned, because that allowlist
    strips <a>: added any earlier, these links would scrub themselves away. The em
-   is kept and the link goes inside it, so a cross-reference still reads as a title. */
-function linkXrefs(html, xref) {
+   is kept and the link goes inside it, so a cross-reference still reads as a title.
+
+   `nested` is for notes that already sit inside something clickable — a connection
+   card is one big <a>, an aside row is one big <button>, and neither may contain an
+   <a>: the parser hoists a nested anchor straight out of its card. There it's a
+   span that says it's a link, and wireXrefs makes it behave like one. */
+function linkXrefs(html, xref, nested) {
   if (!xref) return html;
   const tpl = document.createElement("template");
   tpl.innerHTML = html;
   tpl.content.querySelectorAll("em, i").forEach((el) => {
     const id = xref[el.textContent.trim()];
-    if (!id || el.querySelector("a")) return;
-    const a = document.createElement("a");
+    if (!id || el.querySelector(".pl-xref")) return;
+    const a = document.createElement(nested ? "span" : "a");
     a.className = "pl-xref";
-    a.href = "#";
+    if (nested) { a.setAttribute("role", "link"); a.tabIndex = 0; }
+    else { a.href = "#"; }
     a.dataset.work = id;
     a.title = "Go to this painting";
     while (el.firstChild) a.appendChild(el.firstChild);
@@ -3597,14 +3624,27 @@ async function jumpToWork(id) {
 
 /* One listener for every placard, wherever it is drawn: the viewer repaints its
    card on each work, and the "i" modal builds another. */
+/* Any tag, not just <a>: a cross-reference inside a card or an aside row is a span
+   (see linkXrefs), and it still has to go somewhere when clicked.
+
+   preventDefault is what stops the card it sits in from navigating — an ancestor
+   <a> follows on the click's default action, which stopPropagation alone doesn't
+   touch. stopPropagation handles the listener side: the viewer reads a bare click
+   as "next", and the aside delegates row clicks to select the other painter. */
 function wireXrefs(root, before) {
-  root.querySelectorAll("a.pl-xref").forEach((a) =>
-    a.addEventListener("click", (e) => {
+  root.querySelectorAll(".pl-xref").forEach((a) => {
+    const go = (e) => {
       e.preventDefault();
-      e.stopPropagation();       // the viewer treats a bare click as "next"
+      e.stopPropagation();
       if (before) before();
       jumpToWork(a.dataset.work);
-    }));
+    };
+    a.addEventListener("click", go);
+    // A span isn't a link to the keyboard unless we say so.
+    if (a.tagName !== "A") a.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") go(e);
+    });
+  });
 }
 
 /* ---------- shared rich-text editor (placard + artist bio) ---------- */

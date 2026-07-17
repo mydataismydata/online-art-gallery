@@ -181,11 +181,23 @@
   display: block; margin-top: 4px; font: italic 400 12.5px/1.55 var(--serif);
   color: var(--dim2); text-wrap: pretty;
 }
+.aside-conn .cnote b, .aside-conn .cnote strong { font-weight: 700; color: var(--text); }
+.aside-conn .cnote u { text-decoration: underline; }
 .aside-conn .cedit {
   margin-left: auto; font: 400 10px var(--sans); color: var(--off);
   border-bottom: 1px solid var(--hair-dash); cursor: pointer;
 }
 .aside-conn .cedit:hover { color: var(--warn); }
+/* The link note is read as serif on the wall, so it's written in serif too: what
+   you type is what it will look like.
+
+   Qualified with .richtext on purpose. forms.css sets a `font` shorthand on every
+   .richtext and loads after this file, so a bare .lk-rich would tie on specificity
+   and lose on order — silently, and only for this one editor. */
+.richtext.lk-rich { font-family: var(--serif); font-size: 14.5px; line-height: 1.7; }
+.lk-hint { margin: 0 0 2px; max-width: 62ch; }
+.lk-hint i { font-style: italic; color: var(--dim); }
+
 .th-act { display: flex; gap: 16px; margin-top: 18px; }
 .threads-wrap { max-width: 1080px; }
 /* thread composer */

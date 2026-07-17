@@ -21,9 +21,11 @@ attached when a painter is renamed or merged.
 """
 import json
 import math
+import re
 import secrets
 import time
 from collections import Counter, defaultdict
+from html import unescape
 
 from . import config, library, artistinfo
 from .names import fold
@@ -52,6 +54,19 @@ TYPE_META = {
 MAX_NODES = 60
 CANVAS_W, CANVAS_H = 1600, 780
 _MARGIN_X, _MARGIN_Y = 150, 120
+
+
+# A note is a curator's prose — a few sentences, with the same small set of marks
+# a placard allows. It's held as markup, so measuring it means measuring what they
+# actually wrote: count the tags and heavy formatting would eat the allowance, and
+# an editor left alone still hands back a stray <br>.
+_TAG_RE = re.compile(r"<[^>]+>")
+MAX_NOTE = 2000
+
+
+def note_text(note):
+    """What the curator wrote, with the markup taken off."""
+    return unescape(_TAG_RE.sub(" ", note or "")).strip()
 
 
 def _key(name):
@@ -98,10 +113,13 @@ def create_link(a, b, type_, note, directed=False, created_by=None):
     if type_ not in HAND_TYPES:
         raise ValueError("Only influence and curator links are written by hand.")
     note = (note or "").strip()
-    if type_ == "curator" and not note:
+    text = note_text(note)
+    if type_ == "curator" and not text:
         raise ValueError("A curator link needs a note — that's the whole point of it.")
-    if len(note) > 600:
-        raise ValueError("Keep the note under 600 characters.")
+    if len(text) > MAX_NOTE:
+        raise ValueError("Keep the note under %d characters." % MAX_NOTE)
+    if not text:
+        note = ""            # an editor left alone hands back <br>; store nothing
 
     links = _load()
     for l in links:
@@ -129,9 +147,12 @@ def update_link(link_id, note=None, directed=None):
         if l["id"] == link_id:
             if note is not None:
                 note = note.strip()
-                if l["type"] == "curator" and not note:
+                text = note_text(note)
+                if l["type"] == "curator" and not text:
                     raise ValueError("A curator link needs a note.")
-                l["note"] = note[:600]
+                if len(text) > MAX_NOTE:
+                    raise ValueError("Keep the note under %d characters." % MAX_NOTE)
+                l["note"] = note if text else ""
             if directed is not None and l["type"] == "influence":
                 l["directed"] = bool(directed)
             _save(links)
@@ -530,9 +551,10 @@ def graph():
     counts = defaultdict(int)
     for l in links:
         counts[l["type"]] += 1
+    index = library.title_index()
     return {
         "nodes": nodes,
-        "links": [_public_link(l) for l in links],
+        "links": [_public_link(l, index) for l in links],
         "clusters": labels,
         "types": {t: dict(TYPE_META[t], count=counts[t]) for t in TYPES},
         "canvas": {"w": CANVAS_W, "h": CANVAS_H},
@@ -547,7 +569,7 @@ def graph():
     }
 
 
-def _public_link(l):
+def _public_link(l, index=None):
     # a_id/b_id are the node keys the map joins on. Sent explicitly rather than
     # re-derived in the browser: Python's casefold() and JS's toLowerCase() don't
     # agree on every name, and a near-miss would silently drop an edge.
@@ -556,6 +578,12 @@ def _public_link(l):
            "directed": bool(l.get("directed")), "derived": bool(l.get("derived"))}
     if l.get("id"):
         out["id"] = l["id"]
+    # A note that names a painting in italics gets somewhere to go, on the same
+    # terms a placard does — derived here because only the server knows the library.
+    if index is not None:
+        xr = library.xref_in(out["note"], index)
+        if xr:
+            out["xref"] = xr
     return out
 
 
@@ -567,17 +595,22 @@ def for_artist(name, limit=None):
     if k not in profiles:
         return []
     rank = {t: i for i, t in enumerate(_PRECEDENCE)}
+    index = library.title_index()
     mine = []
     for l in links:
         if _key(l["a"]) != k and _key(l["b"]) != k:
             continue
         other = profiles[_key(l["b"] if _key(l["a"]) == k else l["a"])]
-        mine.append({
+        rec = {
             "type": l["type"], "note": l.get("note") or "",
             "derived": bool(l.get("derived")), "id": l.get("id"),
             "directed": bool(l.get("directed")),
             "from_me": bool(l.get("directed")) and _key(l["a"]) == k,
             "other": other["name"], "cover": other["cover"], "works": other["works"],
-        })
+        }
+        xr = library.xref_in(rec["note"], index)
+        if xr:
+            rec["xref"] = xr
+        mine.append(rec)
     mine.sort(key=lambda m: (rank.get(m["type"], 99), m["other"].casefold()))
     return mine[:limit] if limit else mine

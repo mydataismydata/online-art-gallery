@@ -161,34 +161,50 @@ _EM_RE = re.compile(r"<(?:em|i)\b[^>]*>(.*?)</(?:em|i)>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
-def _link_descriptions(works):
-    """Resolve each placard's italicised artwork titles to the works they name.
-
-    Derived per scan and never stored: it follows the library, so retitling a
-    painting silently fixes every placard that mentions it, and a work that leaves
-    takes its links with it. The ids are local, which is also why this must never
-    be published — the public box works its own out from its own library.
+def title_index(works=None):
+    """{folded title: work id} for every painting its title names on its own.
 
     A title two paintings share ("Portrait of a Young Girl" belongs to both Corot
-    and Courbet in one real catalogue) resolves to neither. Sending a reader to a
-    coin-flip is worse than leaving the words as words."""
+    and Courbet in one real catalogue) is left out: sending a reader to a coin-flip
+    is worse than leaving the words as words. Short or generic titles are out for
+    the same reason — they'd match ordinary prose rather than a painting.
+
+    Pass `works` from inside a scan; it defaults to asking for one."""
+    works = all_works() if works is None else works
     keys = [fold(w["title"]) for w in works]
     seen = Counter(keys)
-    by_title = {}
+    out = {}
     for w, k in zip(works, keys):
-        # Short or generic titles would match ordinary prose, not a painting.
         if seen[k] == 1 and len(k) >= 4 and k != "untitled":
-            by_title[k] = w["id"]
+            out[k] = w["id"]
+    return out
+
+
+def xref_in(html, index, exclude=None):
+    """{title as written: work id} for the italicised titles in `html` that name a
+    painting we hold. `exclude` drops a self-reference — a placard needn't point at
+    its own painting.
+
+    Always derived on read, never stored: it follows the library, so retitling a
+    painting silently fixes every text that mentions it, and a work that leaves
+    takes its links with it. The ids are local, which is also why this must never
+    be published — the public box works its own out from its own library."""
+    if not html or "<" not in html:
+        return {}
+    out = {}
+    for m in _EM_RE.finditer(html):
+        text = _TAG_RE.sub("", m.group(1)).strip()
+        wid = index.get(fold(text))
+        if wid and wid != exclude:
+            out[text] = wid
+    return out
+
+
+def _link_descriptions(works):
+    """Resolve each placard's italicised artwork titles to the works they name."""
+    index = title_index(works)
     for w in works:
-        d = w.get("description") or ""
-        if "<" not in d:
-            continue
-        out = {}
-        for m in _EM_RE.finditer(d):
-            text = _TAG_RE.sub("", m.group(1)).strip()
-            wid = by_title.get(fold(text))
-            if wid and wid != w["id"]:
-                out[text] = wid
+        out = xref_in(w.get("description") or "", index, exclude=w["id"])
         if out:
             w["xref"] = out
 
