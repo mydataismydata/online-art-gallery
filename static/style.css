@@ -822,6 +822,13 @@ select {
   background-position: calc(100% - 16px) calc(50% + 1px), calc(100% - 11px) calc(50% + 1px);
   background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; padding-right: 32px;
 }
+/* The open dropdown is drawn by the browser, not by us. It inherits the select's
+   colour — near-white, right for our dark panel — but not its background, which is
+   `none`: the list falls back to the platform's white and the names all but vanish
+   on it. The options need a background of their own, so the pair travels together. */
+select option, select optgroup {
+  background: var(--raised2); color: var(--text);
+}
 /* The file picker sits above the text field, which stays available for a URL or a
    real server-side path. The native button is the one control here that can't be
    restyled, so it's given the hairline treatment and left alone. */

@@ -1870,9 +1870,13 @@ function wireAside() {
 
 /* ---------- authoring ---------- */
 
+/* `artists` is every painter in the museum; `nodes` is only the ones the map had
+   room to draw. Anyone you can name belongs in the picker. */
+function connArtists() { return CONN.data.artists || CONN.data.nodes || []; }
+
 function addLinkDialog(from) {
   if (!from) return;
-  const others = CONN.data.nodes.filter((n) => n.id !== from.id);
+  const others = connArtists().filter((n) => n.id !== from.id);
   const opts = others.map((n) =>
     '<option value="' + esc(n.id) + '">' + esc(n.name) + "</option>").join("");
   const m = modal(
@@ -1920,7 +1924,7 @@ function addLinkDialog(from) {
    added one at a time rather than through a multi-select, because the order is
    the whole argument. */
 function threadDialog(existing) {
-  const nodes = CONN.data.nodes;
+  const nodes = connArtists();
   const steps = existing
     ? existing.steps.map((s) => ({ artist: s.artist, note: s.note }))
     : [];

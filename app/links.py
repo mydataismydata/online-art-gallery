@@ -493,11 +493,24 @@ def graph():
         degree[_key(l["a"])] += 1
         degree[_key(l["b"])] += 1
 
-    # Too many painters to draw? Keep the best-connected, then the best-represented.
+    # Whoever a curator has written about by hand. Counting degree alone ranks a
+    # painter's one deliberate influence link below somebody else's two incidental
+    # "same movement" chain edges — backwards, when a hand-written link outranks
+    # every derived kind there is (_PRECEDENCE). Cutting one of these painters also
+    # drops the edge with them, so the map would answer a note someone sat down and
+    # wrote with "Influence 0".
+    hand = set()
+    for l in links:
+        if not l.get("derived"):
+            hand.add(_key(l["a"]))
+            hand.add(_key(l["b"]))
+
+    # Too many painters to draw? Keep the hand-linked, then the best-connected,
+    # then the best-represented.
     keys = list(profiles)
     truncated = 0
     if len(keys) > MAX_NODES:
-        keys.sort(key=lambda k: (-degree[k], -profiles[k]["works"], k))
+        keys.sort(key=lambda k: (k not in hand, -degree[k], -profiles[k]["works"], k))
         truncated = len(keys) - MAX_NODES
         keys = keys[:MAX_NODES]
     kept = set(keys)
@@ -524,6 +537,13 @@ def graph():
         "types": {t: dict(TYPE_META[t], count=counts[t]) for t in TYPES},
         "canvas": {"w": CANVAS_W, "h": CANVAS_H},
         "truncated": truncated,
+        # Every painter in the museum, drawn or not. MAX_NODES is a limit on what
+        # can be *drawn* without the map turning into a thicket — it was never meant
+        # to limit who a curator may write about. A link or a thread naming an
+        # off-map painter is kept and shown on their own artist page; the map just
+        # doesn't draw that edge. Pickers read this, never `nodes`.
+        "artists": [{"id": k, "name": profiles[k]["name"]}
+                    for k in sorted(profiles, key=lambda k: profiles[k]["name"].casefold())],
     }
 
 
