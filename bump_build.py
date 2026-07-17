@@ -52,8 +52,10 @@ def main():
         note = "+%d (%d minute%s since the last push)" % (
             step, minutes, "" if minutes == 1 else "s")
 
-    PATH.write_text(json.dumps({"build": build, "pushed": now.strftime(STAMP)},
-                               indent=1) + "\n", encoding="utf-8")
+    # newline="" so Python doesn't translate to CRLF: the repo pins LF
+    # (.gitattributes), and this file is rewritten on every single push.
+    with open(PATH, "w", encoding="utf-8", newline="") as f:
+        f.write(json.dumps({"build": build, "pushed": now.strftime(STAMP)}, indent=1) + "\n")
     print("build %d  %s" % (build, note))
     # Plain ASCII: this lands on a Windows console, which is not UTF-8.
     if build > 9999:
