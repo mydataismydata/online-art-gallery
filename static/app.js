@@ -233,7 +233,7 @@ function route() {
   if (segs[0] === "collection" && segs[1]) return collectionView(segs[1]);
   // Adding art doesn't exist on the public box, even for the owner.
   if (segs[0] === "add") return (isOwner() && !isPublic()) ? addView(segs[1] || "") : void goHome();
-  if (segs[0] === "settings") return isOwner() ? settingsView() : void goHome();
+  if (segs[0] === "settings") return isOwner() ? settingsView(segs[1] || "") : void goHome();
   homeView();
 }
 window.addEventListener("hashchange", route);
@@ -2261,7 +2261,7 @@ async function collectionsView() {
       count + (count === 1 ? " collection" : " collections") +
       " · Curators can gather works into their own rooms</p></div>" +
       (isOwner()
-        ? '<div class="headact"><a class="conn-open" href="#/settings">' +
+        ? '<div class="headact"><a class="conn-open" href="#/settings/people">' +
           "Invite a curator from settings →</a></div>"
         : "") + "</div>" +
       (count || canCurate()
@@ -2721,30 +2721,47 @@ function settingsHeadHtml(s) {
     "</div></div></div>";
 }
 
-/* Settings is one long page, so it carries its own index. Only lists the sections
-   this box actually has — the public server has no downloads or AI to jump to. */
-function setNavHtml(sections) {
-  return '<nav class="setnav">' + sections.map(([id, label]) =>
-    '<a href="#set-' + id + '" data-sec="' + id + '">' + esc(label) + "</a>").join("") + "</nav>";
+/* Settings is a tabbed page: one section shown at a time, chosen by the tab bar.
+   The active tab lives in the hash (#/settings/<id>) so it deep-links and survives
+   an in-place re-render, but switching tabs doesn't re-route — it toggles panels and
+   rewrites the hash with replaceState, which fires no hashchange. Only lists the
+   sections this box actually has (the public server has no downloads or AI). */
+function setTabsHtml(sections) {
+  return '<nav class="settabs" role="tablist">' + sections.map(([id, label]) =>
+    '<button type="button" class="settab" role="tab" data-sec="' + esc(id) + '">' +
+    esc(label) + "</button>").join("") + "</nav>";
 }
 
-function wireSetNav() {
-  const links = Array.from(document.querySelectorAll(".setnav a"));
-  if (!links.length) return;
-  links.forEach((a) => a.addEventListener("click", (e) => {
-    e.preventDefault();     // a bare #hash would be read as a route
-    const t = document.getElementById("set-" + a.dataset.sec);
-    if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
-  }));
-  // Light the section whose heading last crossed the index bar.
-  const secs = links.map((a) => document.getElementById("set-" + a.dataset.sec)).filter(Boolean);
-  const sync = () => {
-    let cur = secs[0];
-    for (const s of secs) if (s.getBoundingClientRect().top <= 140) cur = s;
-    links.forEach((a) => a.classList.toggle("active", cur && ("set-" + a.dataset.sec) === cur.id));
-  };
-  window.addEventListener("scroll", sync, { passive: true });
-  sync();
+function currentSettingsTab() {
+  const raw = (location.hash.slice(1) || "/").split("?")[0];
+  const segs = raw.split("/").filter(Boolean).map(decodeURIComponent);
+  return segs[0] === "settings" ? (segs[1] || "") : "";
+}
+
+/* Reveal one tab's panel and light its tab; an unknown or blank id falls back to
+   the first tab. Returns the id actually shown. */
+function showSettingsTab(id) {
+  const tabs = Array.from(document.querySelectorAll(".settab"));
+  if (!tabs.length) return "";
+  const ids = tabs.map((t) => t.dataset.sec);
+  if (ids.indexOf(id) < 0) id = ids[0];
+  tabs.forEach((t) => t.classList.toggle("active", t.dataset.sec === id));
+  document.querySelectorAll(".setsec").forEach((s) =>
+    s.classList.toggle("active", s.id === "set-" + id));
+  return id;
+}
+
+function wireSetTabs(active) {
+  const shown = showSettingsTab(active || currentSettingsTab());
+  document.querySelectorAll(".settab").forEach((t) => {
+    t.addEventListener("click", () => {
+      showSettingsTab(t.dataset.sec);
+      window.scrollTo(0, 0);
+      history.replaceState(null, "", "#/settings/" + t.dataset.sec);
+    });
+  });
+  // Keep the hash in step with what's shown (e.g. arrived at a bare #/settings).
+  if (shown) history.replaceState(null, "", "#/settings/" + shown);
 }
 
 /* Every settings section wears the same head: serif title, one line of sans
@@ -2754,9 +2771,9 @@ function setSec(id, title, note, body) {
     "</h2>" + (note ? '<p class="note">' + note + "</p>" : "") + "</div>" + body + "</section>";
 }
 
-async function settingsView() {
+async function settingsView(tab) {
   setNav("settings");
-  if (isPublic()) return settingsPublicView();
+  if (isPublic()) return settingsPublicView(tab);
   try {
     const [srcData, usersData, builtinData, aiData, statsData, pubData, feat] = await Promise.all([
       api("/api/custom_sources"),
@@ -2771,7 +2788,7 @@ async function settingsView() {
     const presets = srcData.presets || [];
     app.innerHTML = page(
       settingsHeadHtml(statsData) +
-      setNavHtml([["display", "Display"], ["people", "People"], ["public", "Public server"],
+      setTabsHtml([["display", "Display"], ["people", "People"], ["public", "Public server"],
                   ["ai", "Auto-fill"], ["builtin", "Built-in sources"], ["sources", "Download sources"]]) +
       displayPanelHtml(feat) +
       usersPanelHtml() +
@@ -2794,13 +2811,13 @@ async function settingsView() {
     wireSourceForm(presets);
     wireBuiltinSources();
     wirePublishPanel();
-    wireSetNav();
+    wireSetTabs(tab);
   } catch (e) { errbox(e); }
 }
 
 /* Settings on the public snapshot: no authoring/download/AI panels (those routes
    are refused there). Just the header, a Pull button, Display, and People. */
-async function settingsPublicView() {
+async function settingsPublicView(tab) {
   try {
     const [usersData, statsData, pubData, feat] = await Promise.all([
       api("/api/users"),
@@ -2810,7 +2827,7 @@ async function settingsPublicView() {
     ]);
     app.innerHTML = page(
       settingsHeadHtml(statsData) +
-      setNavHtml([["pull", "Pull artwork"], ["display", "Display"], ["people", "People"]]) +
+      setTabsHtml([["pull", "Pull artwork"], ["display", "Display"], ["people", "People"]]) +
       pullPanelHtml(pubData) +
       displayPanelHtml(feat) +
       usersPanelHtml());
@@ -2819,7 +2836,7 @@ async function settingsPublicView() {
     wireInvites();
     wireDisplayPanel();
     wirePullPanel();
-    wireSetNav();
+    wireSetTabs(tab);
   } catch (e) { errbox(e); }
 }
 
@@ -2988,34 +3005,108 @@ function aiKeyStateHtml(cfg) {
     (cfg.key_from_env ? ", from the environment" : "") + ".";
 }
 
+// The three editable prompts: [key, heading, one-line note on when it's sent].
+const AI_PROMPT_KINDS = [
+  ["work", "Single work", "Sent for one painting — the placard editor's Auto fill button."],
+  ["batch", "Multiple works", "Sent when you fill several of one artist's works in one go."],
+  ["artist", "Artist", "Sent to research one painter for their biography."],
+];
+
+function aiPromptBoxHtml(cfg, kind, title, note) {
+  const cur = (cfg.prompts && cfg.prompts[kind]) || "";
+  const tech = (cfg.technical && cfg.technical[kind]) || "";
+  const edited = cfg.prompts_customized && cfg.prompts_customized[kind];
+  return '<div class="promptbox" data-kind="' + kind + '">' +
+    '<div class="prompthead"><label for="ai-prompt-' + kind + '">' + esc(title) +
+    (edited ? ' <span class="promptcustom">edited</span>' : "") + "</label>" +
+    '<button type="button" class="linkbtn" data-reset-prompt="' + kind + '">Reset to default</button></div>' +
+    '<p class="promptnote">' + esc(note) + "</p>" +
+    '<textarea id="ai-prompt-' + kind + '" rows="8" spellcheck="false">' + esc(cur) + "</textarea>" +
+    '<details class="prompttech"><summary>Always appended automatically (not editable)</summary>' +
+    "<p>" + esc(tech) + "</p></details></div>";
+}
+
 function aiPanelHtml(cfg) {
   const opts = (cfg.known_models || []).map((mm) => '<option value="' + esc(mm) + '">').join("");
+  const envEp = cfg.endpoint_from_env;
+  const prompts = AI_PROMPT_KINDS.map(([k, t, n]) => aiPromptBoxHtml(cfg, k, t, n)).join("");
   return setSec("ai", "Auto-fill",
-    "The placard editor's <b>Auto fill</b> button researches a painting and fills " +
-    "in its details. It calls an OpenAI-compatible chat API (<code>" + esc(cfg.endpoint || "") + "</code>). " +
-    "Date, medium and genre may draw on Wikipedia; the description is required to come from a " +
-    "primary source.",
+    "The placard editor's <b>Auto fill</b> button researches a painting and fills in " +
+    "its details through an OpenAI-compatible chat API. Everything the call uses — where " +
+    "it goes, which model, how long to wait, and the wording of the prompts — is set here. " +
+    "The description is still required to come from a primary source, not Wikipedia.",
+    '<div class="aiwrap">' +
+    // ---------- API configuration ----------
     '<form class="dlform aiform" id="aiform">' +
+    '<p class="aside-label" style="margin-bottom:6px">API configuration</p>' +
+    "<label>Endpoint</label>" +
+    '<input id="ai-endpoint" type="text" autocomplete="off" spellcheck="false" value="' +
+    esc(cfg.endpoint || "") + '" placeholder="' + esc(cfg.default_endpoint || "") + '"' +
+    (envEp ? " disabled" : "") + ">" +
+    (envEp
+      ? '<p class="tiny">Set by the <code>GALLERY_AI_ENDPOINT</code> environment variable.</p>'
+      : '<p class="tiny">The chat-completions URL. Leave blank for the default.</p>') +
     "<label>Model</label>" +
     '<input id="ai-model" list="ai-models" autocomplete="off" placeholder="' + esc(cfg.default_model || "arya") + '">' +
     '<datalist id="ai-models">' + opts + "</datalist>" +
+    "<label>Model suggestions</label>" +
+    '<textarea id="ai-known" rows="4" spellcheck="false" placeholder="' +
+    esc((cfg.default_known_models || []).join("\n")) + '">' +
+    esc((cfg.known_models || []).join("\n")) + "</textarea>" +
+    '<p class="tiny">One model id per line — these only fill the Model dropdown above; ' +
+    "you can still type any id. Leave blank to restore the defaults.</p>" +
+    "<label>Request timeout (seconds)</label>" +
+    '<input id="ai-timeout" type="number" min="5" max="600" value="' + esc(String(cfg.timeout || "")) +
+    '" placeholder="' + esc(String(cfg.default_timeout || 90)) + '">' +
+    '<p class="tiny">How long to wait for a reply. A batch of works scales up from this.</p>' +
     "<label>API key</label>" +
     '<input id="ai-key" type="password" autocomplete="off" placeholder="' +
     (cfg.has_key ? "leave blank to keep current" : "paste your API key") + '">' +
     '<p class="tiny aikeystate">' + aiKeyStateHtml(cfg) + "</p>" +
-    '<button type="submit" class="cta-btn">Save</button>' +
-    '<p class="formmsg" id="ai-msg"></p></form>');
+    '<button type="submit" class="cta-btn">Save API settings</button>' +
+    '<p class="formmsg" id="ai-msg"></p></form>' +
+    // ---------- Prompts ----------
+    '<div class="aiprompts" id="aiprompts">' +
+    '<p class="aside-label" style="margin-bottom:8px">Research prompts</p>' +
+    '<p class="optnote" style="margin-bottom:18px">The instructions the model is given. ' +
+    "You edit only the research guidance — who it is, which sources to trust, what to leave " +
+    "blank. The JSON format each call needs is fixed and appended automatically (shown under " +
+    "each box), so a reworded prompt can't break the result. Empty a box and Save to restore " +
+    "its default.</p>" +
+    prompts +
+    '<div class="bf-actions"><button type="button" class="cta-btn" id="ai-prompts-save">Save prompts</button>' +
+    '<span class="formmsg" id="ai-prompts-msg"></span></div>' +
+    "</div></div>");
+}
+
+function markPromptEdited(kind, edited) {
+  const box = document.querySelector('.promptbox[data-kind="' + kind + '"]');
+  if (!box) return;
+  const tag = box.querySelector(".promptcustom");
+  if (edited && !tag) {
+    const lbl = box.querySelector("label");
+    if (lbl) lbl.insertAdjacentHTML("beforeend", ' <span class="promptcustom">edited</span>');
+  } else if (!edited && tag) {
+    tag.remove();
+  }
 }
 
 function wireAiPanel(cfg) {
   const model = $("#ai-model");
   if (model) model.value = cfg.model || "";
+
+  // ---------- API configuration ----------
   const form = $("#aiform");
-  if (!form) return;
-  form.addEventListener("submit", async (e) => {
+  if (form) form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const msg = $("#ai-msg"); msg.className = "formmsg";
-    const body = { model: $("#ai-model").value };
+    const body = {
+      model: $("#ai-model").value,
+      known_models: $("#ai-known").value,
+      timeout: $("#ai-timeout").value,
+    };
+    const ep = $("#ai-endpoint");
+    if (ep && !ep.disabled) body.endpoint = ep.value;   // env-pinned → leave the file alone
     const key = $("#ai-key").value.trim();
     if (key) body.api_key = key;
     try {
@@ -3023,11 +3114,52 @@ function wireAiPanel(cfg) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      cfg = r;
       $("#ai-key").value = "";
       $("#ai-key").placeholder = r.has_key ? "leave blank to keep current" : "paste your API key";
       const st = $(".aikeystate"); if (st) st.innerHTML = aiKeyStateHtml(r);
+      // Reflect any server-side normalisation (timeout clamped, model list cleaned).
+      if ($("#ai-timeout")) $("#ai-timeout").value = r.timeout;
+      if ($("#ai-known")) $("#ai-known").value = (r.known_models || []).join("\n");
+      if (ep && !ep.disabled) ep.value = r.endpoint || "";
       msg.className = "formmsg ok"; msg.textContent = "Saved.";
     } catch (err) { msg.className = "formmsg err"; msg.textContent = err.message; }
+  });
+
+  // ---------- Prompt editors ----------
+  // Reset just repopulates the box from the default; nothing is stored until Save.
+  document.querySelectorAll("[data-reset-prompt]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const kind = btn.getAttribute("data-reset-prompt");
+      const ta = $("#ai-prompt-" + kind);
+      if (ta) ta.value = (cfg.default_prompts && cfg.default_prompts[kind]) || "";
+    });
+  });
+  const psave = $("#ai-prompts-save");
+  if (psave) psave.addEventListener("click", async () => {
+    const msg = $("#ai-prompts-msg"); msg.className = "formmsg";
+    const prompts = {};
+    AI_PROMPT_KINDS.forEach(([k]) => {
+      const ta = $("#ai-prompt-" + k);
+      if (ta) prompts[k] = ta.value;
+    });
+    psave.disabled = true;
+    try {
+      const r = await api("/api/ai/config", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompts: prompts }),
+      });
+      cfg = r;
+      // A box left blank or matching the default comes back as the default text; sync
+      // the boxes and their "edited" markers to what was actually stored.
+      AI_PROMPT_KINDS.forEach(([k]) => {
+        const ta = $("#ai-prompt-" + k);
+        if (ta && r.prompts) ta.value = r.prompts[k];
+        markPromptEdited(k, r.prompts_customized && r.prompts_customized[k]);
+      });
+      msg.className = "formmsg ok"; msg.textContent = "Saved.";
+    } catch (err) { msg.className = "formmsg err"; msg.textContent = err.message; }
+    finally { psave.disabled = false; }
   });
 }
 

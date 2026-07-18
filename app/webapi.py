@@ -747,8 +747,17 @@ def api_ai_config():
 @bp.post("/api/ai/config")
 @auth.require_role("owner")
 def api_ai_config_save():
+    # Settings saves the API config and the prompts from separate forms; each sends
+    # only its own fields, and set_config leaves anything absent (None) untouched.
     data = request.get_json(silent=True) or {}
-    return jsonify(ai.set_config(model=data.get("model"), api_key=data.get("api_key")))
+    return jsonify(ai.set_config(
+        model=data.get("model"),
+        api_key=data.get("api_key"),
+        endpoint=data.get("endpoint"),
+        timeout=data.get("timeout"),
+        known_models=data.get("known_models"),
+        prompts=data.get("prompts"),
+    ))
 
 
 # Research one work via the configured model and return the fields it found. Does

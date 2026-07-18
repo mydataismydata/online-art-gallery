@@ -6,12 +6,17 @@ out of git). The key may instead come from the GALLERY_AI_KEY environment
 variable, which then takes precedence — handy for a systemd-managed deployment
 that would rather not keep the key in a file.
 
-The system prompt hard-codes the sourcing rules the owner asked for:
-  * date / medium / style / genre / school — Wikipedia / Wikimedia / Wikidata are
-                             acceptable
-  * description            — MUST come from a primary / authoritative source
-                             (the holding museum's catalogue entry, a catalogue
-                             raisonné, scholarly writing); Wikipedia is forbidden.
+Endpoint, model, request timeout and the model-suggestion list are all owner-set
+from Settings → Auto-fill, falling back to the DEFAULT_* constants below; the
+endpoint and key may also come from the environment, which wins over the file.
+
+The three research prompts (single work, batch, artist) are owner-editable too —
+DEFAULT_PROMPTS below is only the starting point. What the owner CANNOT edit is
+the JSON-format contract: every call appends a fixed _TECHNICAL suffix to the
+user message, so a well-meaning edit of the prompt can't break the machine-read
+output. The default prompts still carry the sourcing rules the owner asked for —
+Wikipedia is fine for date / medium / style / genre / school but forbidden for a
+description, which must come from a primary or authoritative source.
 """
 import json
 import os
@@ -22,17 +27,44 @@ import requests
 
 from . import config
 
-ENDPOINT = os.environ.get("GALLERY_AI_ENDPOINT", "https://gab.ai/v1/chat/completions")
+# Defaults for every AI knob — each overridable from Settings → Auto-fill and
+# persisted in data/ai_config.json. The endpoint additionally honours the
+# GALLERY_AI_ENDPOINT environment variable, which wins over the stored value.
+DEFAULT_ENDPOINT = "https://gab.ai/v1/chat/completions"
 DEFAULT_MODEL = "arya"
 # Suggestions offered in Settings; the field is free-text, so any model id works.
-KNOWN_MODELS = ["arya", "gpt-5.5", "claude-opus-4.8", "gemini-3.1-pro", "deepseek", "kimi"]
-_TIMEOUT = 90
+DEFAULT_KNOWN_MODELS = ["arya", "gpt-5.5", "claude-opus-4.8", "gemini-3.1-pro", "deepseek", "kimi"]
+DEFAULT_TIMEOUT = 90               # seconds, per single-work / artist call; batch scales up
+_TIMEOUT_MIN, _TIMEOUT_MAX = 5, 600   # clamp a hand-entered timeout to something sane
 
 # What we ask the model for, in order. Style, genre and school are three separate
 # axes so each can be browsed on its own; the field names match the sidecar's.
 _MODEL_FIELDS = ("artist", "title", "date", "medium", "style", "genre", "school",
                  "description")
 _FIELD_MAP = {}
+
+# The three prompt kinds the owner can edit, and the fixed JSON-format contract
+# appended (programmatically, to the user message) for each so the output stays
+# machine-readable no matter how the editable guidance is reworded.
+_PROMPT_KINDS = ("work", "batch", "artist")
+_TECHNICAL = {
+    "work": (
+        "Return ONLY a JSON object with these keys, all strings: "
+        "artist, title, date, medium, style, genre, school, description. "
+        "Output only the JSON object — no prose, no markdown, no code fences."
+    ),
+    "batch": (
+        "Return ONLY a JSON array, one object per numbered painting. Each element "
+        "has keys: n (the item number as given), date, medium, style, genre, school, "
+        "description. Include every item number exactly once. "
+        "Output only the JSON array — no prose, no markdown, no code fences."
+    ),
+    "artist": (
+        "Return ONLY a JSON object with these keys: born, died, birthplace, "
+        "nationality, movements (an array of strings), description (a string). "
+        "Output only the JSON object — no prose, no markdown, no code fences."
+    ),
+}
 
 # Appended to every system prompt below as a hard anti-fabrication rule. The whole
 # point of Auto-fill is a placard a visitor will trust, so a blank field always
@@ -57,12 +89,13 @@ _NO_FABRICATION = (
     "share the name. Never invent facts.\n\n"
 )
 
-_SYSTEM = (
+# Default editable "research guidance" for a single work — the persona, sourcing
+# rules and anti-fabrication guard. The JSON envelope is NOT here; _TECHNICAL["work"]
+# is appended to the user message at call time.
+_WORK_GUIDANCE = (
     "You are a museum registrar's cataloguing assistant. You are given the artist "
     "and title of a single painting held in a private gallery. Identify that exact "
-    "painting and return accurate catalogue metadata as STRICT JSON.\n\n"
-    "Return ONLY a JSON object with these keys, all strings: "
-    "artist, title, date, medium, style, genre, school, description.\n\n"
+    "painting and return accurate catalogue metadata.\n\n"
     "Sourcing rules — follow them exactly:\n"
     "- date, medium, style, genre, school: Wikipedia, Wikimedia and Wikidata are "
     "acceptable sources, as are museum catalogues. Keep each short and factual. "
@@ -86,9 +119,8 @@ _SYSTEM = (
     "using Wikipedia.\n"
     "- artist, title: return the canonical, corrected form if the supplied values "
     "are informal or misspelled; otherwise echo them back.\n\n"
-    + _NO_FABRICATION +
-    "Output only the JSON object — no prose, no markdown, no code fences."
-)
+    + _NO_FABRICATION
+).strip()
 
 
 class AIError(Exception):
@@ -115,26 +147,135 @@ def model():
     return (_load().get("model") or "").strip() or DEFAULT_MODEL
 
 
+def _endpoint_from_env():
+    return bool(os.environ.get("GALLERY_AI_ENDPOINT"))
+
+
+def endpoint():
+    """The chat-completions URL. Environment wins, then the stored value, then the
+    baked-in default — same precedence the key uses."""
+    return (os.environ.get("GALLERY_AI_ENDPOINT") or _load().get("endpoint")
+            or "").strip() or DEFAULT_ENDPOINT
+
+
+def known_models():
+    """The datalist of model suggestions shown in Settings — a stored list if the
+    owner set one, otherwise the defaults. Suggestions only; any id may be typed."""
+    km = _load().get("known_models")
+    if isinstance(km, list):
+        clean = [m.strip() for m in km if isinstance(m, str) and m.strip()]
+        if clean:
+            return clean
+    return list(DEFAULT_KNOWN_MODELS)
+
+
+def timeout():
+    """Per-request timeout in seconds for the single-work and artist calls, clamped
+    to a sane range. Batch scales up from this (see autofill_many)."""
+    try:
+        t = int(_load().get("timeout"))
+    except (TypeError, ValueError):
+        return DEFAULT_TIMEOUT
+    return max(_TIMEOUT_MIN, min(_TIMEOUT_MAX, t))
+
+
+def prompt(kind):
+    """The editable research guidance for one prompt kind ('work'/'batch'/'artist'):
+    the owner's stored override if any, else the default. The JSON-format contract is
+    NOT part of this — it is appended separately from _TECHNICAL at call time."""
+    stored = (_load().get("prompts") or {}).get(kind)
+    if isinstance(stored, str) and stored.strip():
+        return stored.strip()
+    return DEFAULT_PROMPTS[kind]
+
+
 def public_config():
-    """Config safe to hand the browser — never the raw key."""
+    """Config safe to hand the browser — never the raw key. Carries the defaults and
+    the fixed technical suffixes too, so Settings can show placeholders, offer
+    'reset to default', and display what gets appended automatically."""
     key = _api_key()
     return {
         "model": model(),
         "default_model": DEFAULT_MODEL,
-        "known_models": KNOWN_MODELS,
-        "endpoint": ENDPOINT,
+        "known_models": known_models(),
+        "default_known_models": list(DEFAULT_KNOWN_MODELS),
+        "endpoint": endpoint(),
+        "default_endpoint": DEFAULT_ENDPOINT,
+        "endpoint_from_env": _endpoint_from_env(),
+        "timeout": timeout(),
+        "default_timeout": DEFAULT_TIMEOUT,
         "has_key": bool(key),
         "key_hint": ("…" + key[-4:]) if len(key) >= 4 else ("set" if key else ""),
         "key_from_env": bool(os.environ.get("GALLERY_AI_KEY")),
+        "prompts": {k: prompt(k) for k in _PROMPT_KINDS},
+        "default_prompts": {k: DEFAULT_PROMPTS[k] for k in _PROMPT_KINDS},
+        "technical": {k: _TECHNICAL[k] for k in _PROMPT_KINDS},
+        "prompts_customized": {k: prompt(k) != DEFAULT_PROMPTS[k] for k in _PROMPT_KINDS},
     }
 
 
-def set_config(model=None, api_key=None):
-    """Persist the model and/or key. A blank api_key clears the stored key; None
-    leaves it untouched (so the browser can save a model without resending it)."""
+def _clean_model_list(val):
+    """Normalise the known-models field, accepting either a list or a newline/comma
+    separated string. Trims, drops blanks, de-dupes, preserves order."""
+    if isinstance(val, str):
+        parts = re.split(r"[\n,]+", val)
+    elif isinstance(val, list):
+        parts = val
+    else:
+        return []
+    seen, out = set(), []
+    for p in parts:
+        if isinstance(p, str):
+            p = p.strip()
+            if p and p not in seen:
+                seen.add(p)
+                out.append(p)
+    return out
+
+
+def set_config(model=None, api_key=None, endpoint=None, timeout=None,
+               known_models=None, prompts=None):
+    """Persist any subset of the AI settings. Each argument left as None is untouched;
+    a blank value resets that field to its default (so it stops being stored). This
+    lets Settings save the API config and the prompts from separate forms. Returns the
+    fresh public_config."""
     data = _load()
     if model is not None:
         data["model"] = (model or "").strip() or DEFAULT_MODEL
+    if endpoint is not None:
+        e = (endpoint or "").strip()
+        if e and e != DEFAULT_ENDPOINT:
+            data["endpoint"] = e
+        else:
+            data.pop("endpoint", None)          # blank or same-as-default → unset
+    if timeout is not None:
+        try:
+            t = int(timeout)
+        except (TypeError, ValueError):
+            t = 0
+        if t > 0:
+            data["timeout"] = max(_TIMEOUT_MIN, min(_TIMEOUT_MAX, t))
+        else:
+            data.pop("timeout", None)
+    if known_models is not None:
+        km = _clean_model_list(known_models)
+        if km and km != list(DEFAULT_KNOWN_MODELS):
+            data["known_models"] = km
+        else:
+            data.pop("known_models", None)
+    if isinstance(prompts, dict):
+        store = dict(data.get("prompts") or {})
+        for kind in _PROMPT_KINDS:
+            if kind in prompts:
+                t = (prompts[kind] or "").strip()
+                if t and t != DEFAULT_PROMPTS[kind]:   # store a real customisation only
+                    store[kind] = t
+                else:
+                    store.pop(kind, None)              # blank or exact-default → reset
+        if store:
+            data["prompts"] = store
+        else:
+            data.pop("prompts", None)
     if api_key is not None:
         k = (api_key or "").strip()
         if k:
@@ -177,9 +318,10 @@ def _chat(key, messages, max_tokens, timeout, trace=None):
     Pass a dict as `trace` to record exactly what was sent and what came back —
     including on failure, which is when it matters. The API key is never recorded:
     it travels in the Authorization header, which we deliberately don't copy in."""
+    url = endpoint()
     body = {"model": model(), "messages": messages, "temperature": 0.2, "max_tokens": max_tokens}
     if trace is not None:
-        trace.update({"endpoint": ENDPOINT, "model": body["model"],
+        trace.update({"endpoint": url, "model": body["model"],
                       "timeout": timeout, "request": body})
 
     def fail(msg):
@@ -190,7 +332,7 @@ def _chat(key, messages, max_tokens, timeout, trace=None):
     t0 = time.time()
     try:
         r = requests.post(
-            ENDPOINT,
+            url,
             headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
             json=body, timeout=timeout)
     except requests.RequestException as e:
@@ -250,10 +392,10 @@ def autofill(work, hint=None, trace=None):
                  "has other works with the same or a similar title, so use these "
                  "details to identify the right one, and catalogue THAT painting — "
                  "not another of the same name. Treat it as authoritative:\n%s\n" % hint)
-    user += "\nReturn the JSON described in your instructions."
+    user += "\n" + _TECHNICAL["work"]
 
-    content = _chat(key, [{"role": "system", "content": _SYSTEM},
-                          {"role": "user", "content": user}], 1500, _TIMEOUT, trace=trace)
+    content = _chat(key, [{"role": "system", "content": prompt("work")},
+                          {"role": "user", "content": user}], 1500, timeout(), trace=trace)
     parsed = _extract_json(content)
     if parsed is None:
         msg = "The AI didn't return usable JSON. Try again, or another model."
@@ -278,12 +420,10 @@ _ARTIST_STR_FIELDS = ("born", "died", "birthplace", "nationality", "description"
 # Unlike a painting's description, an artist bio MAY draw on Wikipedia — but it
 # isn't allowed to stop there. The movements it returns feed the Connections map's
 # clustering, so they have to be the canonical names rather than free prose.
-_ARTIST_SYSTEM = (
+_ARTIST_GUIDANCE = (
     "You are a museum registrar's research assistant. You are given the name of one "
     "painter whose work hangs in a private gallery. Identify that exact artist and "
-    "return accurate biographical metadata as STRICT JSON.\n\n"
-    "Return ONLY a JSON object with these keys: born, died, birthplace, nationality, "
-    "movements (an array of strings), description (a string).\n\n"
+    "return accurate biographical metadata.\n\n"
     "Sourcing rules — follow them exactly:\n"
     "- Wikidata and Wikipedia are acceptable starting points, but DO NOT stop there. "
     "Corroborate and extend them with primary and authoritative sources: the "
@@ -309,9 +449,8 @@ _ARTIST_SYSTEM = (
     "e.g. <em>The Dinner at the Ball</em>. Do NOT put artwork titles in quotation "
     "marks, and do NOT use markdown (no *asterisks*, no _underscores_). Use no HTML "
     "other than <em>.\n\n"
-    + _NO_FABRICATION +
-    "Output only the JSON object — no prose, no markdown, no code fences."
-)
+    + _NO_FABRICATION
+).strip()
 
 
 def autofill_artist(name, hint=None, trace=None):
@@ -337,10 +476,10 @@ def autofill_artist(name, hint=None, trace=None):
         user += ("\nThe gallery owner describes THIS artist as follows. Use it to "
                  "identify the right painter — others may share the name — and "
                  "research THAT one. Treat it as authoritative:\n%s\n" % hint)
-    user += "\nReturn the JSON described in your instructions."
+    user += "\n" + _TECHNICAL["artist"]
 
-    content = _chat(key, [{"role": "system", "content": _ARTIST_SYSTEM},
-                          {"role": "user", "content": user}], 1800, _TIMEOUT, trace=trace)
+    content = _chat(key, [{"role": "system", "content": prompt("artist")},
+                          {"role": "user", "content": user}], 1800, timeout(), trace=trace)
     parsed = _extract_json(content)
     if parsed is None:
         msg = "The AI didn't return usable JSON. Try again, or another model."
@@ -371,12 +510,10 @@ def autofill_artist(name, hint=None, trace=None):
 # Only the fill-in fields — artist and title are already known from the gallery.
 _BATCH_FIELDS = ("date", "medium", "style", "genre", "school", "description")
 
-_BATCH_SYSTEM = (
+_BATCH_GUIDANCE = (
     "You are a museum registrar's cataloguing assistant. You are given one artist "
     "and a numbered list of that artist's paintings. For EVERY item, return accurate "
-    "catalogue metadata as STRICT JSON.\n\n"
-    "Return ONLY a JSON array. Each element is an object with keys: "
-    "n (the item number as given), date, medium, style, genre, school, description.\n\n"
+    "catalogue metadata.\n\n"
     "Sourcing rules — follow them exactly:\n"
     "- date, medium, style, genre, school: Wikipedia, Wikimedia and Wikidata are "
     "acceptable, as are museum catalogues. Keep each short and factual. "
@@ -392,10 +529,17 @@ _BATCH_SYSTEM = (
     "paragraphs specific to THAT painting (its composition, subject and context), not "
     "a biography of the artist. If you cannot find a suitable non-Wikipedia source, "
     "use an empty string for description.\n\n"
-    + _NO_FABRICATION +
-    "Include every item number exactly once.\n\n"
-    "Output only the JSON array — no prose, no markdown, no code fences."
-)
+    + _NO_FABRICATION
+).strip()
+
+
+# The editable defaults, keyed by prompt kind. Assembled here, after all three
+# guidance blocks exist; prompt() and public_config() read through this.
+DEFAULT_PROMPTS = {
+    "work": _WORK_GUIDANCE,
+    "batch": _BATCH_GUIDANCE,
+    "artist": _ARTIST_GUIDANCE,
+}
 
 
 def _salvage_objects(text):
@@ -456,13 +600,16 @@ def autofill_many(artist, works):
             hints.append("medium so far: %s" % w["medium"])
         tail = (" — " + "; ".join(hints)) if hints else ""
         lines.append("%d. %s%s" % (i, w.get("title") or "(untitled)", tail))
-    user = ("Artist: %s\nPaintings:\n%s\n\nReturn the JSON array described in your "
-            "instructions, one object per numbered painting."
-            % (artist or "(unknown)", "\n".join(lines)))
+    user = ("Artist: %s\nPaintings:\n%s\n\n%s"
+            % (artist or "(unknown)", "\n".join(lines), _TECHNICAL["batch"]))
     max_tokens = min(900 + 320 * len(works), 8000)
-    timeout = min(120 + 6 * len(works), 300)
-    content = _chat(key, [{"role": "system", "content": _BATCH_SYSTEM},
-                          {"role": "user", "content": user}], max_tokens, timeout)
+    # A batch does more work than one lookup, so scale up from the configured base:
+    # +6s per painting, but never below the base and never past a 300s ceiling
+    # (unless the owner deliberately set the base higher still).
+    base = timeout()
+    call_timeout = min(base + 6 * len(works), max(300, base))
+    content = _chat(key, [{"role": "system", "content": prompt("batch")},
+                          {"role": "user", "content": user}], max_tokens, call_timeout)
 
     out = [{} for _ in works]
     for obj in _extract_array(content):
