@@ -73,9 +73,13 @@
 .map-node {
   position: absolute; transform: translate(-50%, -50%);
   display: flex; flex-direction: column; align-items: center; gap: 6px;
-  cursor: pointer; width: 130px; z-index: 2; background: none; border: none; padding: 0;
+  cursor: grab; width: 130px; z-index: 2; background: none; border: none; padding: 0;
   transition: opacity .3s ease;
 }
+/* Held: above its neighbours, and visibly in hand. The arrangement is the
+   viewer's own (see puckCache in app.js) — this is a table, not the catalogue. */
+.map-node.dragging { cursor: grabbing; z-index: 7; }
+.map-node.dragging img { box-shadow: 0 16px 38px rgba(0,0,0,.65); }
 .map-node img {
   border-radius: 50%; object-fit: cover; background: var(--raised3);
   border: 2px solid rgba(216,192,150,.35); box-shadow: 0 6px 18px rgba(0,0,0,.45);

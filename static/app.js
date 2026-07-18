@@ -1386,6 +1386,56 @@ function connNode(id) { return (CONN.data.nodes || []).find((n) => n.id === id);
 function nodeSize(n) { return 44 + Math.min(n.works, 20) * 2; }   // 44–84px
 function activeLinks() { return CONN.data.links.filter((l) => !CONN.off.has(l.type)); }
 
+/* ---------- the viewer's own arrangement ---------- */
+
+/* Anyone may slide the pucks around, and the arrangement is theirs alone: kept in
+   this browser's localStorage, sent nowhere, gone when the site's storage is
+   cleared. Only POSITIONS are cached, keyed by painter — never the painters or
+   the threads between them, which come fresh from the server on every visit. That
+   split is what keeps a rearranged map current: a new artist has no cached entry
+   and lands at the computed spot, a new connection is derived server-side and
+   simply draws. The cache cannot hold the museum back. */
+const PUCKS_KEY = "map-pucks";
+
+function puckCache() {
+  try { return JSON.parse(localStorage.getItem(PUCKS_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+function puckCount() { return Object.keys(puckCache()).length; }
+function savePuck(id, x, y) {
+  const c = puckCache();
+  c[id] = [Math.round(x * 10) / 10, Math.round(y * 10) / 10];
+  localStorage.setItem(PUCKS_KEY, JSON.stringify(c));
+}
+function clearPucks() { localStorage.removeItem(PUCKS_KEY); }
+
+// The same margins the server's layout keeps, so a parked puck can't be pushed
+// off the canvas and lost past the edge.
+function clampPuckX(x) { return Math.min(CONN.data.canvas.w - 70, Math.max(70, x)); }
+function clampPuckY(y) { return Math.min(CONN.data.canvas.h - 40, Math.max(40, y)); }
+
+/* Lay the viewer's positions over the fresh graph. Runs on every render, so it
+   holds however the data arrived — first load, a re-fetch after a new link, a
+   pull. Entries for painters no longer in the museum are pruned as they're
+   noticed (a rename changes the key, so that painter simply returns to their
+   computed spot — the map heals rather than remembers a ghost). */
+function overlayPucks() {
+  const g = CONN.data;
+  if (!g || !g.nodes) return;
+  const c = puckCache();
+  const have = new Set();
+  g.nodes.forEach((n) => {
+    have.add(n.id);
+    const p = c[n.id];
+    if (p) { n.x = clampPuckX(+p[0] || 0); n.y = clampPuckY(+p[1] || 0); }
+  });
+  let dropped = false;
+  Object.keys(c).forEach((k) => {
+    if (!have.has(k)) { delete c[k]; dropped = true; }
+  });
+  if (dropped) localStorage.setItem(PUCKS_KEY, JSON.stringify(c));
+}
+
 /* Keep the address bar shareable without re-routing: assigning location.hash
    would fire hashchange and reload the whole graph on every click. */
 function connSyncUrl() {
@@ -1423,6 +1473,7 @@ async function connectionsView(artist, mode) {
 }
 
 function renderConnections() {
+  overlayPucks();     // the viewer's own arrangement, over whatever just arrived
   const g = CONN.data;
   if (!g.nodes.length) {
     app.innerHTML = page(
@@ -1509,9 +1560,11 @@ function edgesHtml(ppu) {
     const t = LINK_TYPES[l.type] || LINK_TYPES.movement;
     const touches = sel && (l.a_id === sel || l.b_id === sel);
     const op = sel ? (touches ? .95 : .07) : (l.type === "curator" ? .7 : .45);
+    // data-a/b so a puck being dragged can find and redraw just its own threads.
     return '<path d="' + edgePath(a, b, ppu) + '" stroke="' + t.color +
       '" stroke-width="' + t.w + '" vector-effect="non-scaling-stroke"' +
       (t.dash ? ' stroke-dasharray="' + t.dash + '"' : "") +
+      ' data-a="' + esc(l.a_id) + '" data-b="' + esc(l.b_id) + '"' +
       ' opacity="' + op + '" fill="none"></path>';
   }).join("");
 }
@@ -1551,10 +1604,40 @@ function mapHtml() {
     '<button type="button" id="mapin" title="Zoom in" aria-label="Zoom in">+</button>' +
     '<button type="button" id="mapout" title="Zoom out" aria-label="Zoom out">&minus;</button>' +
     "</div></div>" +
-    '<p class="conn-caption">Click a painter to trace their connections · scroll or pinch ' +
-    "to spread them out · node size follows works in the collection · use the tags " +
-    "above to add or hide kinds of connection</p>"
+    '<p class="conn-caption" id="map-caption">' + mapCaptionHtml() + "</p>"
   );
+}
+
+/* Rebuilt in place after a drag drops, so "reset" appears the moment there's an
+   arrangement to reset — without repainting the whole map out from under it. */
+function mapCaptionHtml() {
+  return (
+    "Click a painter to trace their connections · drag one to park them where you " +
+    "like — remembered on this device only · scroll or pinch to spread them out · " +
+    "use the tags above to add or hide kinds of connection" +
+    (puckCount()
+      ? ' · <button type="button" class="linkbtn" id="map-reset">reset my arrangement</button>'
+      : "")
+  );
+}
+
+function syncMapCaption() {
+  const cap = $("#map-caption");
+  if (!cap) return;
+  cap.innerHTML = mapCaptionHtml();
+  wireMapReset();
+}
+
+function wireMapReset() {
+  const b = $("#map-reset");
+  if (b) b.addEventListener("click", async () => {
+    clearPucks();
+    // Refetch rather than un-move: the computed spots were overwritten in place,
+    // and the server is the one party that still knows them.
+    CONN.data = await api("/api/connections");
+    renderConnections();
+    toast("Every painter back to the drawn map.");
+  });
 }
 
 /* ---------- map zoom ---------- */
@@ -1627,11 +1710,12 @@ function wireMap() {
   $("#mapin").addEventListener("click", () => zoomTo(CONN.z * 1.45));
   $("#mapout").addEventListener("click", () => zoomTo(CONN.z / 1.45));
 
-  /* One finger drags, two pinch. Pointer events cover mouse, touch and pen at
-     once; the moves are watched on the window so a drag that outruns the cursor
-     and leaves the map doesn't just stop dead. */
+  /* One finger drags, two pinch — and a finger that lands ON a painter moves the
+     painter, not the map. Pointer events cover mouse, touch and pen at once; the
+     moves are watched on the window so a drag that outruns the cursor and leaves
+     the map doesn't just stop dead. */
   const pts = new Map();
-  let drag = null, pinch = null, swallow = false;
+  let drag = null, pinch = null, puck = null, swallow = false;
 
   const span = () => {
     const [a, b] = Array.from(pts.values());
@@ -1639,6 +1723,37 @@ function wireMap() {
       d: Math.hypot(a.x - b.x, a.y - b.y) || 1,
       cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,
     };
+  };
+
+  const positionPuck = (n, el) => {
+    el.style.left = (n.x / CONN.data.canvas.w * 100).toFixed(2) + "%";
+    el.style.top = (n.y / CONN.data.canvas.h * 100).toFixed(2) + "%";
+  };
+
+  // Only the threads tied to this painter are redrawn while they move — the rest
+  // of the svg has nothing to say about it, and a big museum has a lot of rest.
+  const redrawEdgesOf = (id) => {
+    const svg = $("#mapcanvas").querySelector("svg");
+    const ppu = view.clientWidth * CONN.z / CONN.data.canvas.w;
+    svg.querySelectorAll("path").forEach((p) => {
+      if (p.dataset.a !== id && p.dataset.b !== id) return;
+      const a = connNode(p.dataset.a), b = connNode(p.dataset.b);
+      if (a && b) p.setAttribute("d", edgePath(a, b, ppu));
+    });
+  };
+
+  const dropPuck = (restore) => {
+    if (!puck) return;
+    if (restore) {
+      puck.node.x = puck.ox; puck.node.y = puck.oy;
+      positionPuck(puck.node, puck.el);
+      redrawEdgesOf(puck.id);
+    } else if (puck.moved > 6) {
+      savePuck(puck.id, puck.node.x, puck.node.y);
+      syncMapCaption();          // "reset" appears once there's something to reset
+    }
+    puck.el.classList.remove("dragging");
+    puck = null;
   };
 
   view.addEventListener("pointerdown", (e) => {
@@ -1649,8 +1764,19 @@ function wireMap() {
     if (e.target.closest(".map-zoom")) return;
     swallow = false;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pts.size === 2) { pinch = span(); drag = null; }
-    else if (pts.size === 1) drag = { x: e.clientX, y: e.clientY, moved: 0 };
+    if (pts.size === 2) {
+      // A second finger means zoom, not placement: the held painter goes back
+      // where they were picked up, and the pinch takes over cleanly.
+      dropPuck(true);
+      pinch = span();
+      drag = null;
+    } else if (pts.size === 1) {
+      const el = e.target.closest(".map-node");
+      const n = el && connNode(el.dataset.select);
+      if (n) puck = { el, node: n, id: n.id, sx: e.clientX, sy: e.clientY,
+                      ox: n.x, oy: n.y, moved: 0 };
+      else drag = { x: e.clientX, y: e.clientY, moved: 0 };
+    }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
@@ -1660,7 +1786,22 @@ function wireMap() {
     const p = pts.get(e.pointerId);
     if (!p) return;
     p.x = e.clientX; p.y = e.clientY;
-    if (pinch && pts.size >= 2) {
+    if (puck && pts.size === 1) {
+      const dx = e.clientX - puck.sx, dy = e.clientY - puck.sy;
+      puck.moved = Math.max(puck.moved, Math.abs(dx) + Math.abs(dy));
+      if (puck.moved <= 6) return;   // under the click threshold it's still a click
+      swallow = true;
+      puck.el.classList.add("dragging");
+      /* Screen px -> canvas units, per axis: the canvas is 1600x780 stretched to
+         the view times zoom, and the two stretches differ. One shared ppu here
+         would make a puck drift off the pointer vertically. */
+      const px = view.clientWidth * CONN.z / CONN.data.canvas.w;
+      const py = view.clientHeight * CONN.z / CONN.data.canvas.h;
+      puck.node.x = clampPuckX(puck.ox + dx / px);
+      puck.node.y = clampPuckY(puck.oy + dy / py);
+      positionPuck(puck.node, puck.el);
+      redrawEdgesOf(puck.id);
+    } else if (pinch && pts.size >= 2) {
       // The fingers' midpoint is both the zoom focus and the pan handle, which
       // is what a two-finger drag feels like everywhere else.
       const m = span();
@@ -1684,6 +1825,7 @@ function wireMap() {
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
     if (pts.size) return;
+    dropPuck(false);             // parked where it was let go, and remembered
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);
@@ -1695,6 +1837,8 @@ function wireMap() {
   view.addEventListener("click", (e) => {
     if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; }
   }, true);
+
+  wireMapReset();
 }
 
 /* Both the rim trim and the pan clamp are measured against the window, so a
