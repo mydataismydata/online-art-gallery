@@ -2721,6 +2721,169 @@ function settingsHeadHtml(s) {
     "</div></div></div>";
 }
 
+/* ---------- bulk metadata paste ---------- */
+
+/* The empty shapes "Copy empty JSON" hands out. One record each; the keys are
+   exactly the CSV exports' columns, so the round trip is export, fill, paste. */
+const BULK_TPL = {
+  artists: [{ name: "", born: "", died: "", birthplace: "", nationality: "",
+              movements: [], description: "", wikidata_id: "", wikipedia_url: "" }],
+  works: [{ artist: "", title: "", date: "", medium: "", style: "", genre: "",
+            school: "", description: "" }],
+};
+
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; }
+  catch (e) {
+    // No clipboard permission (plain-http LAN, older browser): the hidden-
+    // textarea route asks nobody.
+    const ta = document.createElement("textarea");
+    ta.value = t;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e2) { /* stays false */ }
+    ta.remove();
+    return ok;
+  }
+}
+
+function bulkBoxHtml(kind, title, help) {
+  return (
+    '<div class="bulkbox" data-kind="' + kind + '">' +
+    '<div class="bulkhead"><p class="aside-label">' + esc(title) + "</p>" +
+    '<button type="button" class="linkbtn" data-tpl="' + kind + '">Copy empty JSON</button></div>' +
+    '<p class="tiny">' + help + "</p>" +
+    '<textarea rows="9" spellcheck="false" placeholder="[ { … }, { … } ]"></textarea>' +
+    '<div class="bf-actions"><button type="button" class="toolbtn" data-preview="' + kind + '">' +
+    "Preview changes</button>" +
+    '<span class="formmsg" data-msg></span></div>' +
+    '<div class="bulkout" data-out hidden></div></div>'
+  );
+}
+
+function bulkPanelHtml() {
+  return setSec("bulk", "Bulk data",
+    "Fill missing metadata in one paste: a JSON list per section below, matched " +
+    "against the museum first so you see what would change before anything does. " +
+    "Empty fields never blank a stored value, and unknown names are reported, " +
+    "never created.",
+    bulkBoxHtml("artists", "Artists",
+      "One record per painter, matched by <code>name</code> (accents and case " +
+      "forgiven). Fields: born, died, birthplace, nationality, movements " +
+      "(list or “a; b” — the first is the one the map clusters on), description, " +
+      "wikidata_id, wikipedia_url.") +
+    bulkBoxHtml("works", "Artworks",
+      "One record per painting, matched by <code>artist</code> + <code>title</code> " +
+      "together — those two identify the work and are never changed here (renames " +
+      "move files; do them in the placard editor). Fields: date, medium, style, " +
+      "genre, school, description. A painting the museum holds twice is brought " +
+      "up to the record on both copies."));
+}
+
+function one0(kind) { return kind === "artists" ? "artist" : "work"; }
+
+function bulkSummaryHtml(kind, r) {
+  const n = (v, w) => v + " " + (v === 1 ? w : w + "s");
+  const fields = Object.entries(r.fields || {}).sort((a, b) => b[1] - a[1])
+    .map(([f, c]) => esc(f) + " " + c).join(", ");
+  const bits = [n(r.total, "record")];
+  if (r.folded) bits.push(r.folded + " duplicate " + (r.folded === 1 ? "row" : "rows") + " folded");
+  if (r.invalid) bits.push(r.invalid + " unusable");
+  bits.push(r.changed
+    ? "<b>" + n(r.changed, one0(kind)) + " will change</b>" +
+      (kind === "works" && r.touched > r.changed ? " (" + r.touched + " copies)" : "")
+    : "<b>nothing to change</b>");
+  if (r.unchanged) bits.push(r.unchanged + " already match");
+  if (r.unknown.length) bits.push('<span class="bulk-unknown">' +
+    n(r.unknown.length + r.unknown_more, "unknown name") + "</span>");
+  let html = '<div class="bulk-sum">' + bits.join(" · ") + "</div>";
+  if (fields) html += '<p class="tiny">Fields touched: ' + fields + "</p>";
+  if (r.unknown.length) {
+    html += '<p class="tiny bulk-unknown">Not in the museum: ' +
+      r.unknown.map(esc).join(" · ") +
+      (r.unknown_more ? " · …and " + r.unknown_more + " more" : "") + "</p>";
+  }
+  html += r.details.map((d) =>
+    '<div class="bulkrow"><b>' + esc(d.label) + "</b>" +
+    (d.copies > 1 ? " ×" + d.copies + " copies" : "") + " · " +
+    Object.entries(d.changes).map(([f, ch]) =>
+      esc(f) + ": " + esc(ch[0]) + " → " + esc(ch[1])).join(" · ") +
+    "</div>").join("");
+  if (r.details_more) html += '<p class="tiny">…and ' + r.details_more + " more.</p>";
+  return html;
+}
+
+function wireBulkMeta() {
+  document.querySelectorAll(".bulkbox").forEach((box) => {
+    const kind = box.dataset.kind;
+    const ta = box.querySelector("textarea");
+    const msg = box.querySelector("[data-msg]");
+    const out = box.querySelector("[data-out]");
+    const btn = box.querySelector("[data-preview]");
+
+    box.querySelector("[data-tpl]").addEventListener("click", async () => {
+      const tpl = JSON.stringify(BULK_TPL[kind], null, 1);
+      if (await copyText(tpl)) {
+        toast("Empty JSON copied.");
+      } else {
+        // Couldn't reach the clipboard at all: hand the template over anyway.
+        if (!ta.value.trim()) ta.value = tpl;
+        toast("Clipboard blocked — dropped the template into the box instead.");
+      }
+    });
+
+    // A preview describes the paste it ran on; edit the paste and it's fiction.
+    ta.addEventListener("input", () => { out.hidden = true; out.innerHTML = ""; });
+
+    const run = async (apply) => {
+      msg.className = "formmsg";
+      msg.textContent = apply ? "Applying…" : "Comparing…";
+      btn.disabled = true;
+      try {
+        const r = await api("/api/metadata/bulk", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind, text: ta.value, apply }),
+        });
+        msg.textContent = "";
+        out.hidden = false;
+        if (apply) {
+          const done = r.applied + " " + (r.applied === 1 ? one0(kind) : one0(kind) + "s");
+          const unk = r.unknown.length + r.unknown_more;
+          out.innerHTML = '<div class="bulk-sum">Updated <b>' + done + "</b>." +
+            (unk ? ' <span class="bulk-unknown">' + unk + " unknown name" +
+                   (unk === 1 ? " was" : "s were") + " left alone.</span>" : "") + "</div>";
+          toast("Updated " + done + ".");
+        } else {
+          const target = kind === "works" ? r.touched : r.changed;
+          out.innerHTML = bulkSummaryHtml(kind, r) +
+            (r.changed
+              ? '<div class="bf-actions" style="margin-top:14px">' +
+                '<button type="button" class="cta-btn" data-apply>Apply — update ' +
+                target + " " + one0(kind) + (target === 1 ? "" : "s") + "</button>" +
+                '<span class="tiny">Re-checked against the museum when you apply.</span></div>'
+              : "");
+          const ap = out.querySelector("[data-apply]");
+          if (ap) ap.addEventListener("click", () => run(true));
+        }
+      } catch (e) {
+        msg.className = "formmsg err";
+        msg.textContent = e.message;
+        out.hidden = true;
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    btn.addEventListener("click", () => {
+      if (!ta.value.trim()) { msg.className = "formmsg err";
+        msg.textContent = "Paste a JSON list first — Copy empty JSON gives the shape."; return; }
+      run(false);
+    });
+  });
+}
+
 /* Settings is a tabbed page: one section shown at a time, chosen by the tab bar.
    The active tab lives in the hash (#/settings/<id>) so it deep-links and survives
    an in-place re-render, but switching tabs doesn't re-route — it toggles panels and
@@ -2789,10 +2952,12 @@ async function settingsView(tab) {
     app.innerHTML = page(
       settingsHeadHtml(statsData) +
       setTabsHtml([["display", "Display"], ["people", "People"], ["public", "Public server"],
-                  ["ai", "Auto-fill"], ["builtin", "Built-in sources"], ["sources", "Download sources"]]) +
+                  ["bulk", "Bulk data"], ["ai", "Auto-fill"],
+                  ["builtin", "Built-in sources"], ["sources", "Download sources"]]) +
       displayPanelHtml(feat) +
       usersPanelHtml() +
       publishPanelHtml(pubData) +
+      bulkPanelHtml() +
       aiPanelHtml(aiData) +
       builtinSourcesHtml(builtinData.sources || []) +
       setSec("sources", "Download sources",
@@ -2811,6 +2976,7 @@ async function settingsView(tab) {
     wireSourceForm(presets);
     wireBuiltinSources();
     wirePublishPanel();
+    wireBulkMeta();
     wireSetTabs(tab);
   } catch (e) { errbox(e); }
 }

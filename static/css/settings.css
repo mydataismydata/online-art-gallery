@@ -130,6 +130,29 @@ kbd {
 .exportbox { margin-bottom: 22px; }
 .repoform .invlink, .repoform code { word-break: break-all; }
 
+/* ---------- bulk metadata paste ---------- */
+.bulkbox { border: 1px solid var(--hair); padding: 26px 28px; margin-bottom: 26px; max-width: 920px; }
+.bulkhead { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
+.bulkhead .aside-label { margin: 0; }
+.bulkbox > .tiny { margin: 8px 0 0; max-width: 74ch; }
+.bulkbox textarea {
+  margin-top: 12px; min-height: 170px; resize: vertical;
+  font: 400 11.5px/1.6 ui-monospace, Consolas, monospace; color: var(--text);
+}
+.bulkbox .bf-actions { margin-top: 12px; }
+/* The verdict before the deed: counts first, then the rows they came from. */
+.bulkout { border-top: 1px dashed var(--hair); margin-top: 18px; padding-top: 16px; }
+.bulk-sum { font: 400 13.5px var(--sans); color: var(--dim); }
+.bulk-sum b { color: var(--text); font-weight: 400; }
+.bulk-unknown { color: var(--warn); }
+.bulkout .tiny { margin: 8px 0 0; }
+.bulkrow {
+  font: 400 12px/1.7 var(--sans); color: var(--dim2);
+  border-bottom: 1px solid var(--hair-soft); padding: 7px 2px;
+}
+.bulkrow:last-of-type { border-bottom: none; }
+.bulkrow b { font: 400 13.5px var(--serif); color: var(--text); }
+
 /* people */
 .usersgrid { display: grid; grid-template-columns: 1fr minmax(280px, 360px); gap: 40px; align-items: start; }
 @media (max-width: 900px) { .usersgrid { grid-template-columns: 1fr; } }

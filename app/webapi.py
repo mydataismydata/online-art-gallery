@@ -4,7 +4,7 @@ import time
 from flask import Blueprint, abort, jsonify, request, send_file
 
 from . import (config, library, thumbs, artistinfo, auth, collections,
-               metadata, ai, publish, site, links, threads)
+               metadata, ai, publish, site, links, threads, bulkmeta)
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
                                 list_builtin_configs, set_builtin_config, reset_builtin_config)
@@ -19,7 +19,7 @@ bp = Blueprint("api", __name__)
 _PRIVATE_ONLY_ENDPOINTS = {
     "api.api_rescan", "api.api_artist_rename",
     "api.api_artist_lookup", "api.api_artist_ai_lookup", "api.api_artist_save",
-    "api.api_work_find_metadata", "api.api_work_update",
+    "api.api_work_find_metadata", "api.api_work_update", "api.api_metadata_bulk",
     "api.api_ai_config", "api.api_ai_config_save",
     "api.api_work_autofill", "api.api_works_autofill_batch",
     "api.api_custom_sources", "api.api_custom_sources_save",
@@ -734,6 +734,24 @@ def api_work_update(wid):
     site.remap_featured({wid: w["id"]})
     collections.remap_works({wid: w["id"]})
     return jsonify({"work": w})
+
+
+# Bulk paste from Settings: one JSON list in, a diff out — and the same diff
+# written back when apply is set. Size-capped like the CSV upload; parse and
+# validation messages come from bulkmeta itself.
+@bp.post("/api/metadata/bulk")
+@auth.require_role("owner")
+def api_metadata_bulk():
+    data = request.get_json(silent=True) or {}
+    text = data.get("text") or ""
+    if len(text) > _MAX_UPLOAD:
+        return jsonify({"error": "That paste is over %d MB — split it up."
+                        % (_MAX_UPLOAD // (1 << 20))}), 400
+    try:
+        result = bulkmeta.run(data.get("kind"), text, apply=bool(data.get("apply")))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result)
 
 
 # ---------------- Auto-fill (AI metadata lookup — owner only) ----------------
