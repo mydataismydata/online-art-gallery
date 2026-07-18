@@ -1583,7 +1583,11 @@ function mapHtml() {
     return '<button type="button" class="map-node' + (isSel ? " sel" : "") + (dim ? " dim" : "") +
       '" data-select="' + esc(n.id) + '" style="left:' + (n.x / g.canvas.w * 100).toFixed(2) +
       "%;top:" + (n.y / g.canvas.h * 100).toFixed(2) + '%">' +
-      '<img src="/thumb/' + n.cover + '" loading="lazy" alt="" style="width:' + s +
+      // draggable=false: without it, dragging a portrait starts the browser's own
+      // image drag — a ghost thumbnail rides the cursor, the pointer stream is
+      // CANCELLED, and the puck dies a few pixels in. Synthetic pointer events
+      // never enter that machinery, which is how this survived every test.
+      '<img src="/thumb/' + n.cover + '" loading="lazy" alt="" draggable="false" style="width:' + s +
       "px;height:" + s + 'px">' +
       '<span class="nlabel">' + esc(n.name) + "</span></button>";
   }).join("");
@@ -1756,6 +1760,10 @@ function wireMap() {
     puck = null;
   };
 
+  // Belt to the img's draggable=false: nothing on the map may start a native
+  // drag, whatever it is — a drag here is always ours.
+  view.addEventListener("dragstart", (e) => e.preventDefault());
+
   view.addEventListener("pointerdown", (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     // The +/- control sits over the map but isn't part of it: a press that drifts
@@ -1825,7 +1833,10 @@ function wireMap() {
     pts.delete(e.pointerId);
     if (pts.size < 2) pinch = null;
     if (pts.size) return;
-    dropPuck(false);             // parked where it was let go, and remembered
+    // A cancel is the browser taking the pointer away mid-gesture — nobody chose
+    // that spot. Put the painter back rather than remember a half-drag; only a
+    // real release parks them.
+    dropPuck(e.type === "pointercancel");
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);

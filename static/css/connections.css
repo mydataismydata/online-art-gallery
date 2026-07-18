@@ -45,6 +45,9 @@
   /* The map has to own every touch inside it, or a pinch becomes a page scroll.
      It's a short strip on a phone — there's page above and below to swipe on. */
   touch-action: none;
+  /* And every mouse-drag: a drag across labels must move the map or a puck, not
+     start painting a text selection. */
+  user-select: none; -webkit-user-select: none;
 }
 .map-canvas {
   position: absolute; top: 0; left: 0;
@@ -84,6 +87,9 @@
   border-radius: 50%; object-fit: cover; background: var(--raised3);
   border: 2px solid rgba(216,192,150,.35); box-shadow: 0 6px 18px rgba(0,0,0,.45);
   transition: border-color .25s ease, box-shadow .25s ease;
+  /* Safari's flavour of draggable=false (see mapHtml) — a portrait must never
+     become the browser's own drag ghost. */
+  -webkit-user-drag: none;
 }
 .map-node .nlabel {
   font: 400 11.5px/1.35 var(--sans); color: #b3a48b; text-align: center;
