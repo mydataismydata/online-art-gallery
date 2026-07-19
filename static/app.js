@@ -401,6 +401,9 @@ function browseCtx(opts) {
       // grids mix artists, so they keep the free per-work Wikidata "Find metadata".
       actions.push(opts.artist ? "aimeta" : "metadata");
       if (opts.artist) actions.push("publish");
+      // JSON out for the selection — the works themselves, or their painters'
+      // records. The way back in is Settings → Import / export.
+      actions.push("exportsel");
     }
     if (opts.artist) actions.push("setcover");   // artist pages only
     actions.push("pinhero");                     // any grid — it's one work, anywhere
@@ -490,6 +493,11 @@ function renderSelCtl(works, rerender, ctx) {
   if (ctx.actions.includes("publish"))
     html += '<button id="selpublish" class="toolbtn"' + (n ? "" : " disabled") +
       ' title="Push these works to the public server">Push to public' + tag + "</button>";
+  if (ctx.actions.includes("exportsel"))
+    html += '<button id="selexportw" class="toolbtn"' + (n ? "" : " disabled") +
+      ' title="Download the selected works’ metadata as an editable JSON file — the way back in is Settings → Import / export">Export works' + tag + "</button>" +
+      '<button id="selexporta" class="toolbtn"' + (n ? "" : " disabled") +
+      ' title="Download the artist records of the selected works’ painters">Export artists</button>';
   if (ctx.actions.includes("uncollect"))
     html += '<button id="seluncollect" class="danger"' + (n ? "" : " disabled") + ">Remove" + tag + "</button>";
   if (ctx.actions.includes("delete"))
@@ -518,6 +526,24 @@ function renderSelCtl(works, rerender, ctx) {
   if (pin) pin.addEventListener("click", () => pinHero(rerender));
   const pub = $("#selpublish");
   if (pub) pub.addEventListener("click", () => publishSelection(ctx.artist, rerender));
+  const exw = $("#selexportw");
+  if (exw) exw.addEventListener("click", async () => {
+    try {
+      const nn = await exportMeta("works", { ids: Array.from(SEL.ids) }, "artworks-selected");
+      toast("Exported " + nn + (nn === 1 ? " work." : " works."));
+    } catch (e) { toast(e.message); }
+  });
+  const exa = $("#selexporta");
+  if (exa) exa.addEventListener("click", async () => {
+    // The painters OF the selection, each once — select three Faves by two hands
+    // and you get two artist records.
+    const names = Array.from(new Set(
+      works.filter((w) => SEL.ids.has(w.id)).map((w) => w.artist).filter(Boolean)));
+    try {
+      const nn = await exportMeta("artists", { names: names }, "artists-selected");
+      toast("Exported " + nn + (nn === 1 ? " artist." : " artists."));
+    } catch (e) { toast(e.message); }
+  });
 }
 
 /* "Set as thumbnail": make the one selected work the artist's representative
@@ -2760,13 +2786,47 @@ async function copyText(t) {
   }
 }
 
+function downloadText(filename, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  a.download = filename;
+  document.body.appendChild(a);          // Firefox won't click a detached anchor
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/* Fetch an export and hand it to the browser as a dated file. Raw text on
+   purpose: the server pretty-prints, and re-encoding it here would flatten the
+   very formatting that makes the file editable. Returns how many records went. */
+async function exportMeta(kind, filter, label) {
+  const r = await fetch("/api/metadata/export", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ kind }, filter || {})),
+  });
+  if (!r.ok) {
+    let msg = "Export failed.";
+    try { msg = (await r.json()).error || msg; } catch (e) { /* html error page */ }
+    throw new Error(msg);
+  }
+  const text = await r.text();
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadText("gallery-" + (label || kind) + "-" + stamp + ".json", text);
+  return JSON.parse(text).length;
+}
+
 function bulkBoxHtml(kind, title, help) {
   return (
     '<div class="bulkbox" data-kind="' + kind + '">' +
     '<div class="bulkhead"><p class="aside-label">' + esc(title) + "</p>" +
-    '<button type="button" class="linkbtn" data-tpl="' + kind + '">Copy empty JSON</button></div>' +
+    '<span class="bulkacts">' +
+    '<button type="button" class="linkbtn" data-export="' + kind + '">Export all</button>' +
+    '<button type="button" class="linkbtn" data-tpl="' + kind + '">Copy empty JSON</button>' +
+    "</span></div>" +
     '<p class="tiny">' + help + "</p>" +
-    '<textarea rows="9" spellcheck="false" placeholder="[ { … }, { … } ]"></textarea>' +
+    '<input type="file" class="filepick" accept=".json,application/json" data-file="' + kind + '"' +
+    ' title="Load a JSON file — an edited export, or anything in the same shape">' +
+    '<textarea rows="9" spellcheck="false" placeholder="[ { …, … } ] — paste records here, or load a file above"></textarea>' +
     '<div class="bf-actions"><button type="button" class="toolbtn" data-preview="' + kind + '">' +
     "Preview changes</button>" +
     '<span class="formmsg" data-msg></span></div>' +
@@ -2775,11 +2835,13 @@ function bulkBoxHtml(kind, title, help) {
 }
 
 function bulkPanelHtml() {
-  return setSec("bulk", "Bulk data",
-    "Fill missing metadata in one paste: a JSON list per section below, matched " +
-    "against the museum first so you see what would change before anything does. " +
-    "Empty fields never blank a stored value, and unknown names are reported, " +
-    "never created.",
+  return setSec("bulk", "Import & export",
+    "The round trip for metadata: <b>Export all</b> writes every record to a " +
+    "human-readable JSON file; edit it anywhere, then load or paste it back. " +
+    "Everything is matched against the museum first so you see what would change " +
+    "before anything does. Empty fields never blank a stored value, unknown names " +
+    "are reported, never created — and re-importing an untouched export changes " +
+    "nothing at all.",
     bulkBoxHtml("artists", "Artists",
       "One record per painter, matched by <code>name</code> (accents and case " +
       "forgiven). Fields: born, died, birthplace, nationality, movements " +
@@ -2843,6 +2905,34 @@ function wireBulkMeta() {
         if (!ta.value.trim()) ta.value = tpl;
         toast("Clipboard blocked — dropped the template into the box instead.");
       }
+    });
+
+    box.querySelector("[data-export]").addEventListener("click", async () => {
+      msg.className = "formmsg";
+      msg.textContent = "Exporting…";
+      try {
+        const n = await exportMeta(kind, null, kind === "works" ? "artworks" : kind);
+        msg.textContent = "";
+        toast("Exported " + n + " " + (n === 1 ? one0(kind) : one0(kind) + "s") + ".");
+      } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
+    });
+
+    /* A chosen file lands in the box and goes straight to the diff — reading the
+       numbers is the point of the trip, but writing anything stays behind the
+       same Apply click a paste gets. */
+    const file = box.querySelector("[data-file]");
+    file.addEventListener("change", () => {
+      const f = file.files && file.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        ta.value = rd.result;
+        out.hidden = true;
+        out.innerHTML = "";
+        file.value = "";        // re-choosing the same file later must still fire
+        run(false);
+      };
+      rd.readAsText(f);
     });
 
     // A preview describes the paste it ran on; edit the paste and it's fiction.
@@ -2963,7 +3053,7 @@ async function settingsView(tab) {
     app.innerHTML = page(
       settingsHeadHtml(statsData) +
       setTabsHtml([["display", "Display"], ["people", "People"], ["public", "Public server"],
-                  ["bulk", "Bulk data"], ["ai", "Auto-fill"],
+                  ["bulk", "Import / export"], ["ai", "Auto-fill"],
                   ["builtin", "Built-in sources"], ["sources", "Download sources"]]) +
       displayPanelHtml(feat) +
       usersPanelHtml() +

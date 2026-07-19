@@ -1,7 +1,8 @@
+import json
 import os
 import time
 
-from flask import Blueprint, abort, jsonify, request, send_file
+from flask import Blueprint, Response, abort, jsonify, request, send_file
 
 from . import (config, library, thumbs, artistinfo, auth, collections,
                metadata, ai, publish, site, links, threads, bulkmeta)
@@ -20,6 +21,7 @@ _PRIVATE_ONLY_ENDPOINTS = {
     "api.api_rescan", "api.api_artist_rename",
     "api.api_artist_lookup", "api.api_artist_ai_lookup", "api.api_artist_save",
     "api.api_work_find_metadata", "api.api_work_update", "api.api_metadata_bulk",
+    "api.api_metadata_export",
     "api.api_ai_config", "api.api_ai_config_save",
     "api.api_work_autofill", "api.api_works_autofill_batch",
     "api.api_custom_sources", "api.api_custom_sources_save",
@@ -752,6 +754,29 @@ def api_metadata_bulk():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(result)
+
+
+# The other direction: hand the records back as pretty JSON. An export is, byte
+# for byte, a valid import — re-importing an untouched file changes nothing.
+# Optional filters carry the Browse page's selection: work ids, or artist names.
+@bp.post("/api/metadata/export")
+@auth.require_role("owner")
+def api_metadata_export():
+    data = request.get_json(silent=True) or {}
+    kind = data.get("kind")
+    ids = data.get("ids")
+    names = data.get("names")
+    if kind == "artists":
+        recs = bulkmeta.export_artists(None if names is None
+                                       else [str(n) for n in names])
+    elif kind == "works":
+        recs = bulkmeta.export_works(None if ids is None
+                                     else [str(i) for i in ids])
+    else:
+        return jsonify({"error": "Unknown kind %r." % kind}), 400
+    body = json.dumps(recs, ensure_ascii=False, indent=1) + "\n"
+    return Response(body, mimetype="application/json", headers={
+        "Content-Disposition": "attachment; filename=gallery-%s.json" % kind})
 
 
 # ---------------- Auto-fill (AI metadata lookup — owner only) ----------------

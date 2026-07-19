@@ -229,6 +229,50 @@ def _apply_works(diff):
     return library.update_works_meta(diff["_writes"])
 
 
+# ---------------- export ----------------
+# The other half of the round trip. An export is, byte for byte, a valid import:
+# same keys, same matching, same field set — and every key is present even when
+# empty, because a blank "" against a field's name is what shows a human editing
+# the file WHAT can be filled in. Re-importing an untouched export changes
+# nothing; that symmetry is the tool's contract.
+
+def export_artists(names=None):
+    """Every artist's record (or just the named ones), import-shaped. An artist
+    with no bio at all still exports — name and blanks — because finding those
+    blanks is what the export is for."""
+    want = None if names is None else {fold(n) for n in names}
+    out = []
+    for a in library.artists():
+        if want is not None and fold(a["name"]) not in want:
+            continue
+        info = artistinfo.load(a["name"]) or {}
+        rec = {"name": a["name"]}
+        for f in ARTIST_FIELDS:
+            if f == "movements":
+                rec[f] = [str(m).strip() for m in (info.get("movements") or [])]
+            else:
+                rec[f] = (info.get(f) or "").strip()
+        out.append(rec)
+    return out
+
+
+def export_works(ids=None):
+    """Every work's record (or just the given ids), import-shaped, in the same
+    order the artists CSV used: painter A-Z, then earliest first. Descriptions
+    travel as stored — markup and all — so a round trip loses nothing."""
+    want = None if ids is None else set(ids)
+    rows = [w for w in library.all_works() if want is None or w["id"] in want]
+    rows.sort(key=lambda w: (w["artist"].casefold(), w["year"] or 9999,
+                             w["title"].casefold()))
+    out = []
+    for w in rows:
+        rec = {"artist": w["artist"], "title": w["title"]}
+        for f in WORK_FIELDS:
+            rec[f] = (w.get(f) or "").strip()
+        out.append(rec)
+    return out
+
+
 # ---------------- entry ----------------
 
 def run(kind, text, apply=False):

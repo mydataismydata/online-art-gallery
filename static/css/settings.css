@@ -134,6 +134,8 @@ kbd {
 .bulkbox { border: 1px solid var(--hair); padding: 26px 28px; margin-bottom: 26px; max-width: 920px; }
 .bulkhead { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; }
 .bulkhead .aside-label { margin: 0; }
+.bulkacts { display: flex; align-items: baseline; gap: 18px; }
+.bulkbox .filepick { margin-top: 12px; margin-bottom: 0; }
 .bulkbox > .tiny { margin: 8px 0 0; max-width: 74ch; }
 .bulkbox textarea {
   margin-top: 12px; min-height: 170px; resize: vertical;
