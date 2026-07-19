@@ -1428,9 +1428,12 @@ function puckCache() {
   catch (e) { return {}; }
 }
 function puckCount() { return Object.keys(puckCache()).length; }
-function savePuck(id, x, y) {
+function savePucks(entries) {
+  if (!entries.length) return;
   const c = puckCache();
-  c[id] = [Math.round(x * 10) / 10, Math.round(y * 10) / 10];
+  entries.forEach((e) => {
+    c[e[0]] = [Math.round(e[1] * 10) / 10, Math.round(e[2] * 10) / 10];
+  });
   localStorage.setItem(PUCKS_KEY, JSON.stringify(c));
 }
 function clearPucks() { localStorage.removeItem(PUCKS_KEY); }
@@ -1439,6 +1442,24 @@ function clearPucks() { localStorage.removeItem(PUCKS_KEY); }
 // off the canvas and lost past the edge.
 function clampPuckX(x) { return Math.min(CONN.data.canvas.w - 70, Math.max(70, x)); }
 function clampPuckY(y) { return Math.min(CONN.data.canvas.h - 40, Math.max(40, y)); }
+
+/* While a puck is in hand, the map behaves like a table of weak magnets: every
+   portrait repels whatever presses into it (same polarity), and the painters
+   connected to the one in hand are towed along after it (opposite polarity) —
+   near, never touching. All the measures are screen pixels, because "in the
+   way" and "too close" happen between portraits, and a portrait is a fixed
+   pixel circle at every zoom. */
+const MAG = {
+  gap: 14,        // clear air kept between two portrait rims
+  trail: 26,      // slack before a tow engages: a follower rides this far behind
+  pull: 0.12,     // fraction of the remaining distance a tow closes per step
+  pullMax: 14,    // px per step, so a far follower glides rather than teleports
+  relax: 0.5,     // fraction of an overlap shrugged off per step
+  settleMs: 400,  // the drift after release is brief, then everything parks
+};
+// How firmly each kind of connection tows. The hand-written ties pull
+// hardest; the derived, dashed kinds are looser.
+const MAG_W = { curator: 1, influence: 1, movement: 0.85, style: 0.5, place_time: 0.5 };
 
 /* Lay the viewer's positions over the fresh graph. Runs on every render, so it
    holds however the data arrived — first load, a re-fetch after a new link, a
@@ -1643,7 +1664,8 @@ function mapHtml() {
 function mapCaptionHtml() {
   return (
     "Click a painter to trace their connections · drag one to park them where you " +
-    "like — remembered on this device only · scroll or pinch to spread them out · " +
+    "like — their connections drift along and the crowd steps aside, remembered on " +
+    "this device only · scroll or pinch to spread them out · " +
     "use the tags above to add or hide kinds of connection" +
     (puckCount()
       ? ' · <button type="button" class="linkbtn" id="map-reset">reset my arrangement</button>'
@@ -1760,27 +1782,200 @@ function wireMap() {
     el.style.top = (n.y / CONN.data.canvas.h * 100).toFixed(2) + "%";
   };
 
-  // Only the threads tied to this painter are redrawn while they move — the rest
-  // of the svg has nothing to say about it, and a big museum has a lot of rest.
-  const redrawEdgesOf = (id) => {
+  // Only the threads tied to painters who moved are redrawn — the rest of the
+  // svg has nothing to say about it, and a big museum has a lot of rest.
+  const redrawEdgesAmong = (ids) => {
     const svg = $("#mapcanvas").querySelector("svg");
     const ppu = view.clientWidth * CONN.z / CONN.data.canvas.w;
     svg.querySelectorAll("path").forEach((p) => {
-      if (p.dataset.a !== id && p.dataset.b !== id) return;
+      if (!ids.has(p.dataset.a) && !ids.has(p.dataset.b)) return;
       const a = connNode(p.dataset.a), b = connNode(p.dataset.b);
       if (a && b) p.setAttribute("d", edgePath(a, b, ppu));
     });
   };
 
+  /* The magnet field around one drag. Built when a puck crosses the click
+     threshold, stepped on every pointer move, allowed a short drift after
+     release.
+
+     One humility keeps the field sane at every viewport: the magnets never
+     demand room the resting map didn't afford. Each pair's repulsion stops at
+     its own starting distance when that's tighter than the portrait ring, and
+     a towed painter follows at the offset it began with rather than being
+     reeled all the way in. Where the map is roomy that IS ring behaviour;
+     where portraits already sit closer than the ring (a phone at the wide
+     shot, where sixty screen px is half the canvas) the field preserves the
+     local density instead of fighting it — the constellation slides along
+     with the hand rather than detonating to the walls. */
+  const makeSim = (dragId) => {
+    const g = CONN.data;
+    const byId = new Map(g.nodes.map((n) => [n.id, n]));
+    const els = new Map();
+    $("#mapcanvas").querySelectorAll(".map-node").forEach((el) =>
+      els.set(el.dataset.select, el));
+    const start = new Map(g.nodes.map((n) => [n.id, [n.x, n.y]]));
+    const tow = new Map();      // neighbour id -> strongest visible tie's pull
+    activeLinks().forEach((l) => {
+      const o = l.a_id === dragId ? l.b_id : l.b_id === dragId ? l.a_id : null;
+      if (o) tow.set(o, Math.max(tow.get(o) || 0, MAG_W[l.type] || 0.5));
+    });
+    const active = new Set(tow.keys());   // who the field has reached so far
+    active.add(dragId);
+    const moved = new Set();              // everyone displaced at any point
+
+    const step = (towOn) => {
+      const kx = view.clientWidth * CONN.z / g.canvas.w || 1;
+      const ky = view.clientHeight * CONN.z / g.canvas.h || 1;
+      const D = byId.get(dragId);
+      const disp = new Map();
+      const shove = (id, dx, dy) => {
+        const v = disp.get(id) || [0, 0];
+        v[0] += dx; v[1] += dy;
+        disp.set(id, v);
+      };
+      // Opposite polarity: connected painters are towed after the hand — while
+      // it moves, and for a short glide after release. Not during the final
+      // park, or a straggler would cross the last stretch in one silent jump.
+      // Each follows at the offset it STARTED with, plus the trailing slack:
+      // the constellation translates with the hand rather than contracting
+      // onto it. That target means the field is born in equilibrium — nothing
+      // is pre-tensioned, so a nudge shorter than the slack stirs nobody, and
+      // every bit of motion in the map traces back to the drag itself.
+      if (towOn) tow.forEach((w, id) => {
+        const n = byId.get(id);
+        if (!n) return;
+        const dx = (n.x - D.x) * kx, dy = (n.y - D.y) * ky;
+        const d = Math.hypot(dx, dy) || 1;
+        const sd = start.get(dragId), sn = start.get(id);
+        const d0 = Math.hypot((sn[0] - sd[0]) * kx, (sn[1] - sd[1]) * ky);
+        if (d <= d0 + MAG.trail) return;  // near its place in the formation
+        const pull = Math.min(MAG.pullMax, (d - d0 - MAG.trail) * MAG.pull * w);
+        shove(id, -dx / d * pull, -dy / d * pull);
+      });
+      // Same polarity: whatever the disturbance presses into gives way.
+      const nodes = g.nodes;
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        for (let j = i + 1; j < nodes.length; j++) {
+          const b = nodes[j];
+          if (!active.has(a.id) && !active.has(b.id)) continue;
+          const dx = (b.x - a.x) * kx, dy = (b.y - a.y) * ky;
+          const d = Math.hypot(dx, dy);
+          const sa = start.get(a.id), sb = start.get(b.id);
+          const thr = Math.min((nodeSize(a) + nodeSize(b)) / 2 + MAG.gap,
+                               Math.hypot((sb[0] - sa[0]) * kx, (sb[1] - sa[1]) * ky));
+          if (d >= thr) continue;
+          const push = (thr - d) * MAG.relax;
+          // Dead underneath each other: part them along the canvas, any way.
+          const ux = d > 0.01 ? dx / d : 1, uy = d > 0.01 ? dy / d : 0;
+          if (a.id === dragId) shove(b.id, ux * push, uy * push);
+          else if (b.id === dragId) shove(a.id, -ux * push, -uy * push);
+          else {
+            shove(a.id, -ux * push / 2, -uy * push / 2);
+            shove(b.id, ux * push / 2, uy * push / 2);
+          }
+        }
+      }
+      // The hand is pinned to the pointer; everyone else drifts and clamps.
+      let maxd = 0;
+      const stirred = new Set([dragId]);
+      disp.forEach((v, id) => {
+        if (id === dragId) return;
+        const n = byId.get(id);
+        if (!n) return;
+        const x = clampPuckX(n.x + v[0] / kx), y = clampPuckY(n.y + v[1] / ky);
+        const went = Math.hypot((x - n.x) * kx, (y - n.y) * ky);
+        if (went < 0.05) return;
+        n.x = x; n.y = y;
+        maxd = Math.max(maxd, went);
+        active.add(id); moved.add(id); stirred.add(id);
+        const el = els.get(id);
+        if (el) positionPuck(n, el);
+      });
+      redrawEdgesAmong(stirred);
+      return maxd;
+    };
+
+    return {
+      step,
+      // A cancelled gesture never happened: everyone back where they started.
+      restore: () => {
+        const back = new Set(moved);
+        back.add(dragId);
+        back.forEach((id) => {
+          const n = byId.get(id), p = start.get(id);
+          if (!n || !p) return;
+          n.x = p[0]; n.y = p[1];
+          const el = els.get(id);
+          if (el) positionPuck(n, el);
+        });
+        redrawEdgesAmong(back);
+      },
+      // The whole rearrangement is the viewer's now — the towed and the
+      // shouldered-aside alike — or a re-render would snap them all back.
+      save: () => {
+        const D = byId.get(dragId);
+        const entries = [[dragId, D.x, D.y]];
+        moved.forEach((id) => {
+          const n = byId.get(id), p = start.get(id);
+          if (!n || !p) return;
+          if (Math.abs(n.x - p[0]) + Math.abs(n.y - p[1]) > 2) entries.push([id, n.x, n.y]);
+        });
+        savePucks(entries);
+      },
+    };
+  };
+
+  /* After release the field relaxes for a moment — towed painters glide a
+     little further, at the same pace they trailed at — then everything parks
+     and is remembered. Parking resolves only contact: any overlap the drag
+     left behind shrugs itself apart in a few converging steps, but no tow, so
+     a follower that didn't make it simply stays where it got to. Animated
+     where there are frames to animate on; completed on the spot where there
+     aren't (a hidden tab). */
+  let settling = null;          // { sim, raf }
+
+  const park = (sim) => {
+    for (let i = 0; i < 12; i++) if (sim.step(false) < 0.4) break;
+    sim.save();
+    syncMapCaption();           // "reset" appears once there's something to reset
+  };
+
+  const finishSettle = () => {
+    if (!settling) return;
+    cancelAnimationFrame(settling.raf);
+    const sim = settling.sim;
+    settling = null;
+    park(sim);
+  };
+
+  const settleOut = (sim) => {
+    if (document.hidden) {
+      for (let i = 0; i < 24; i++) if (sim.step(true) < 0.4) break;
+      park(sim);
+      return;
+    }
+    const t0 = performance.now();
+    settling = { sim, raf: 0 };
+    const tick = (t) => {
+      if (!settling || settling.sim !== sim) return;
+      if (t - t0 > MAG.settleMs || sim.step(true) < 0.4) finishSettle();
+      else settling.raf = requestAnimationFrame(tick);
+    };
+    settling.raf = requestAnimationFrame(tick);
+  };
+
   const dropPuck = (restore) => {
     if (!puck) return;
     if (restore) {
-      puck.node.x = puck.ox; puck.node.y = puck.oy;
-      positionPuck(puck.node, puck.el);
-      redrawEdgesOf(puck.id);
-    } else if (puck.moved > 6) {
-      savePuck(puck.id, puck.node.x, puck.node.y);
-      syncMapCaption();          // "reset" appears once there's something to reset
+      if (puck.sim) puck.sim.restore();
+      else {
+        puck.node.x = puck.ox; puck.node.y = puck.oy;
+        positionPuck(puck.node, puck.el);
+        redrawEdgesAmong(new Set([puck.id]));
+      }
+    } else if (puck.moved > 6 && puck.sim) {
+      settleOut(puck.sim);
     }
     puck.el.classList.remove("dragging");
     puck = null;
@@ -1796,6 +1991,9 @@ function wireMap() {
     // a few px there should still count as a press, not a drag that pans the map
     // and then eats its own click.
     if (e.target.closest(".map-zoom")) return;
+    // A new grab mid-drift finishes the old drift on the spot, so the field it
+    // snapshots is already at rest.
+    finishSettle();
     swallow = false;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 2) {
@@ -1808,7 +2006,7 @@ function wireMap() {
       const el = e.target.closest(".map-node");
       const n = el && connNode(el.dataset.select);
       if (n) puck = { el, node: n, id: n.id, sx: e.clientX, sy: e.clientY,
-                      ox: n.x, oy: n.y, moved: 0 };
+                      ox: n.x, oy: n.y, moved: 0, sim: null };
       else drag = { x: e.clientX, y: e.clientY, moved: 0 };
     }
     window.addEventListener("pointermove", onMove);
@@ -1826,6 +2024,9 @@ function wireMap() {
       if (puck.moved <= 6) return;   // under the click threshold it's still a click
       swallow = true;
       puck.el.classList.add("dragging");
+      // The field wakes on the same threshold, snapshotting the map before
+      // anything has moved — a cancel must know where everyone was.
+      if (!puck.sim) puck.sim = makeSim(puck.id);
       /* Screen px -> canvas units, per axis: the canvas is 1600x780 stretched to
          the view times zoom, and the two stretches differ. One shared ppu here
          would make a puck drift off the pointer vertically. */
@@ -1834,7 +2035,7 @@ function wireMap() {
       puck.node.x = clampPuckX(puck.ox + dx / px);
       puck.node.y = clampPuckY(puck.oy + dy / py);
       positionPuck(puck.node, puck.el);
-      redrawEdgesOf(puck.id);
+      puck.sim.step(true);           // tow the connected, shoulder the rest aside
     } else if (pinch && pts.size >= 2) {
       // The fingers' midpoint is both the zoom focus and the pan handle, which
       // is what a two-finger drag feels like everywhere else.
