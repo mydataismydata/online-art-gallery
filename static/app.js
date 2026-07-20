@@ -1451,14 +1451,16 @@ function clampPuckY(y) { return Math.min(CONN.data.canvas.h - 40, Math.max(40, y
    pixel circle at every zoom. */
 const MAG = {
   gap: 14,        // clear air kept between two portrait rims
-  trail: 26,      // slack before a tow engages: a follower rides this far behind
-  pull: 0.12,     // fraction of the remaining distance a tow closes per step
-  pullMax: 14,    // px per step, so a far follower glides rather than teleports
+  trail: 40,      // slack before a tow engages: a follower rides this far behind
+  follow: 0.25,   // and covers at most this share of the hand's journey — ever
+  pull: 0.05,     // fraction of the remaining distance a tow closes per step
+  pullMax: 6,     // px per step, so a far follower glides rather than teleports
   relax: 0.5,     // fraction of an overlap shrugged off per step
   settleMs: 400,  // the drift after release is brief, then everything parks
 };
 // How firmly each kind of connection tows. The hand-written ties pull
-// hardest; the derived, dashed kinds are looser.
+// hardest; the derived, dashed kinds are looser. Scales the budget as well as
+// the pace, so a style tie tows a quarter as far as a curator's note.
 const MAG_W = { curator: 1, influence: 1, movement: 0.85, style: 0.5, place_time: 0.5 };
 
 /* Lay the viewer's positions over the fresh graph. Runs on every render, so it
@@ -1806,7 +1808,12 @@ function wireMap() {
      where portraits already sit closer than the ring (a phone at the wide
      shot, where sixty screen px is half the canvas) the field preserves the
      local density instead of fighting it — the constellation slides along
-     with the hand rather than detonating to the walls. */
+     with the hand rather than detonating to the walls.
+
+     And one hard limit keeps the attraction weak: a follower may travel only a
+     fraction of the way the hand does (MAG.follow). Dragging is how the viewer
+     UNTANGLES the map, so the hand must always be able to win — the circle
+     comes along as a hint of company, never as a knot arriving with you. */
   const makeSim = (dragId) => {
     const g = CONN.data;
     const byId = new Map(g.nodes.map((n) => [n.id, n]));
@@ -1841,15 +1848,31 @@ function wireMap() {
       // onto it. That target means the field is born in equilibrium — nothing
       // is pre-tensioned, so a nudge shorter than the slack stirs nobody, and
       // every bit of motion in the map traces back to the drag itself.
+      //
+      // Above all it is a WEAK magnet, and the budget below is what makes that
+      // a promise rather than a hope: however far the hand has travelled, a
+      // follower may cover only a quarter of it. So the gap always opens as
+      // you pull — carry a painter clear across the map and their circle has
+      // drifted a few inches after them. Without this the tow closes on its
+      // target within a few pointer moves, which reads as a rigid tether: the
+      // whole clique arrives with you and the map is no tidier than before.
+      const sd = start.get(dragId);
+      const handWent = Math.hypot((D.x - sd[0]) * kx, (D.y - sd[1]) * ky);
       if (towOn) tow.forEach((w, id) => {
         const n = byId.get(id);
         if (!n) return;
         const dx = (n.x - D.x) * kx, dy = (n.y - D.y) * ky;
         const d = Math.hypot(dx, dy) || 1;
-        const sd = start.get(dragId), sn = start.get(id);
+        const sn = start.get(id);
         const d0 = Math.hypot((sn[0] - sd[0]) * kx, (sn[1] - sd[1]) * ky);
         if (d <= d0 + MAG.trail) return;  // near its place in the formation
-        const pull = Math.min(MAG.pullMax, (d - d0 - MAG.trail) * MAG.pull * w);
+        // Spent against how far this painter has ALREADY drifted, whether towed
+        // or shouldered aside — the budget is on the painter, not on the tie.
+        const gone = Math.hypot((n.x - sn[0]) * kx, (n.y - sn[1]) * ky);
+        const budget = handWent * MAG.follow * w - gone;
+        if (budget <= 0) return;
+        const pull = Math.min(MAG.pullMax, budget,
+                              (d - d0 - MAG.trail) * MAG.pull * w);
         shove(id, -dx / d * pull, -dy / d * pull);
       });
       // Same polarity: whatever the disturbance presses into gives way.

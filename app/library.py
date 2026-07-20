@@ -123,7 +123,13 @@ def _work_from_file(path, artist_dir_name):
         "type": meta.get("type") or "painting",
         "source": meta.get("source") or f_source,
         "source_id": str(meta.get("source_id")) if meta.get("source_id") is not None else f_sid,
-        "source_url": meta.get("source_url"),
+        # Where the file came from is workshop paperwork: it belongs to the box
+        # that does the collecting. The public snapshot is a gallery, and a wall
+        # label there doesn't cite the warehouse — so the link is dropped from the
+        # payload rather than hidden in the page, and nothing renders it because
+        # nothing receives it. The sidecar still holds it (a pull writes it), so
+        # this is a matter of what's served, not what's kept.
+        "source_url": None if config.PUBLIC else meta.get("source_url"),
         "mtime": st.st_mtime,
         "size": st.st_size,
     }
