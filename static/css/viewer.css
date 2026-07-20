@@ -186,7 +186,36 @@ a.pl-artist:hover { color: #262019; }
   color: var(--faint); margin: 10px 0 4px;
 }
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
-@media (max-width: 560px) { .row3 { grid-template-columns: 1fr; } }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) {
+  .row3, .row2 { grid-template-columns: 1fr; }
+}
+
+/* ---------- add a painting by hand ---------- */
+.up-lead { margin: -6px 0 20px; max-width: 46em; }
+/* The whole panel is the label, so a click anywhere in it opens the picker and a
+   file dragged from the desktop has a target the size of the gesture. */
+.up-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; min-height: 168px; padding: 20px; cursor: pointer; text-align: center;
+  border: 1px dashed var(--hair-dash); transition: border-color .2s ease, background .2s ease;
+}
+.up-drop:hover, .up-drop.over { border-color: var(--gold-line); background: rgba(194,160,97,.04); }
+.up-drop input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.up-empty {
+  display: flex; flex-direction: column; gap: 6px;
+  font: 400 13px var(--sans); color: var(--dim2);
+}
+.up-prev { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+/* Sized to prove the right file was chosen, not to display the painting — the
+   gallery does that once it's hung. */
+.up-prev img {
+  max-width: 100%; max-height: 220px; display: block;
+  border: 1px solid var(--hair-strong); box-shadow: 0 8px 22px rgba(0,0,0,.45);
+}
+.up-facts { font: 400 11.5px var(--sans); color: var(--faint); word-break: break-all; }
+/* The second road on the Add page: present, but not competing with the download. */
+.addalt { margin: 22px 0 0; font: 400 12.5px var(--sans); color: var(--faint); }
 .fmtbar { display: flex; gap: 6px; align-items: center; margin: 8px 0; }
 .fmtbtn {
   background: none; border: 1px solid var(--hair); color: var(--text);

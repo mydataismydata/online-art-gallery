@@ -1,11 +1,14 @@
 import json
 import os
+import re
+import secrets
 import time
 
 from flask import Blueprint, Response, abort, jsonify, request, send_file
 
 from . import (config, library, thumbs, artistinfo, auth, collections,
                metadata, ai, publish, site, links, threads, bulkmeta)
+from .names import parse_year
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
                                 list_builtin_configs, set_builtin_config, reset_builtin_config)
@@ -18,7 +21,7 @@ bp = Blueprint("api", __name__)
 # not even the owner — can add or mutate art there. On the private box PUBLIC is
 # False, so this never fires. (Publish routes use the @private_only decorator.)
 _PRIVATE_ONLY_ENDPOINTS = {
-    "api.api_rescan", "api.api_artist_rename",
+    "api.api_rescan", "api.api_artist_rename", "api.api_work_upload",
     "api.api_artist_lookup", "api.api_artist_ai_lookup", "api.api_artist_save",
     "api.api_work_find_metadata", "api.api_work_update", "api.api_metadata_bulk",
     "api.api_metadata_export",
@@ -504,6 +507,73 @@ def api_works_delete():
     if config.PUBLIC and pids:
         publish.suppress_pids(pids)
     return jsonify({"deleted": deleted, "errors": errors})
+
+
+# ---------------- hanging one by hand ----------------
+
+# Everything else in the library arrived through a download source. This is the
+# door for a painting the owner already has — a file on their own machine, sent
+# as multipart because the gallery may be running on another box entirely, where
+# a path would mean nothing.
+#
+# It asks only who painted it and what it's called: the placard editor and its
+# Auto fill do the rest of the research, and duplicating those fields here would
+# be a second, worse copy of a form that already exists.
+_MAX_IMAGE = 64 << 20
+
+
+@bp.post("/api/work/upload")
+@auth.require_role("owner")
+def api_work_upload():
+    f = request.files.get("file")
+    if f is None or not (f.filename or "").strip():
+        return jsonify({"error": "Choose an image file."}), 400
+    artist = re.sub(r"\s+", " ", request.form.get("artist") or "").strip()
+    if not artist:
+        return jsonify({"error": "Say who painted it."}), 400
+
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in library.IMAGE_EXTS:
+        return jsonify({"error": "The gallery hangs JPEG, PNG and WebP files — "
+                                 "%s isn't one it can show." % (ext or "that")}), 400
+
+    stem = os.path.basename(os.path.splitext(f.filename)[0])
+    title = (request.form.get("title") or "").strip() or stem.strip() or "Untitled"
+    date = (request.form.get("date") or "").strip()
+
+    # Landed in the scratch dir first: it has to be on disk before it can be
+    # decoded, and a file that turns out not to be an image never reaches the
+    # library at all.
+    tmp = config.TMP_DIR / ("upload-%s%s" % (secrets.token_hex(8), ext))
+    try:
+        f.save(str(tmp))
+        if tmp.stat().st_size > _MAX_IMAGE:
+            return jsonify({"error": "That image is over %d MB."
+                                     % (_MAX_IMAGE >> 20)}), 400
+        if tmp.stat().st_size == 0:
+            return jsonify({"error": "That file is empty."}), 400
+        if library.readable_image(tmp) is None:
+            return jsonify({"error": "That file isn't an image the gallery can "
+                                     "read — it may be damaged, or not really a "
+                                     "%s." % ext.lstrip(".").upper()}), 400
+        meta = {"title": title, "date": date or None, "year": parse_year(date),
+                "type": "painting", "source": "upload"}
+        path = library.save_work(artist, meta, tmp)   # moves the file in
+    finally:
+        # save_work moved it on success; on any failure or refusal it's still
+        # sitting in the scratch dir, and nobody is coming back for it.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+    library.invalidate()
+    w = library.get(library.work_id_for(
+        path.relative_to(config.LIBRARY_DIR).as_posix()))
+    if not w:
+        return jsonify({"error": "The file was saved but the library didn't pick "
+                                 "it up. Try a rescan from Settings."}), 500
+    return jsonify({"work": w})
 
 
 # ---------------- artist metadata ----------------

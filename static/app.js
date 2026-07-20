@@ -916,8 +916,11 @@ async function artistView(name) {
           ? '<button class="disclosure" id="bio-toggle" aria-expanded="false">' +
             'Details<span class="caret">▾</span></button>'
           : "");
+    // Two ways to add to a painter: fetch more from a source, or hang a file you
+    // already have. The download is the usual road, so it keeps the button.
     const addMore = (isOwner() && !isPublic())
-      ? '<a class="cta-btn" href="#/add/' + encodeURIComponent(name) + '">+ Add more from this artist</a>'
+      ? '<a class="cta-btn" href="#/add/' + encodeURIComponent(name) + '">+ Add more from this artist</a>' +
+        '<button type="button" class="linkbtn statlink" id="upload-btn">or upload a file</button>'
       : "";
     const statRow = (k, v, lead) =>
       '<div class="statrow' + (lead ? " lead" : "") + '"><span class="k">' + k +
@@ -959,6 +962,8 @@ async function artistView(name) {
     const cg = document.getElementById("conngrid");
     if (cg) wireXrefs(cg);
     if (isOwner()) { wireRename(name); wireRepoint(name); }
+    const upb = document.getElementById("upload-btn");
+    if (upb) upb.addEventListener("click", () => uploadDialog(name));
     bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
     const g = document.getElementById("grid");
     if (g) g.classList.add("show-dims");   // dimension pills only on the artist page
@@ -2826,6 +2831,8 @@ async function addView(prefill) {
         "<button id=\"f-go\">Start download</button>" +
         '<p class="hint" id="f-hint"></p><p class="warn" id="f-warn"></p>' +
         '<p class="formmsg" id="f-msg"></p>' +
+        '<p class="addalt">Already have the picture? ' +
+        '<button type="button" class="linkbtn" id="up-open">Add a painting from this device</button></p>' +
       "</form>" +
       '<div><div class="sechead" style="margin-bottom:16px"><h2>Downloads</h2></div>' +
       '<div id="jobs"></div></div></div>');
@@ -2853,6 +2860,9 @@ async function addView(prefill) {
     sel.addEventListener("change", syncSource);
     syncSource();
     if (prefill) q.value = prefill;
+    // Carries whatever artist this page was opened for, so arriving from a
+    // painter's page doesn't make you type their name a second time.
+    $("#up-open").addEventListener("click", () => uploadDialog(q.value.trim() || prefill || ""));
 
     $("#dlform").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -4714,7 +4724,136 @@ function syncFilm() {
 /* Owner-only: edit a work's placard details, saved to its sidecar.
    "Auto fill" (Settings → Auto-fill configures the model + key) asks the AI to
    research this painting and populate the fields; the owner reviews and saves. */
-function editWorkDialog(w) {
+/* Take the viewer to an artist, re-rendering if that's already where we stand —
+   assigning the hash we're on fires no hashchange, and a page that just gained a
+   painting has to be told. */
+function showArtist(name) {
+  const target = "#/artist/" + encodeURIComponent(name);
+  if (location.hash === target) artistView(name);
+  else location.hash = target;
+}
+
+/* Hanging a painting by hand: the one thing the download sources can't do.
+   Everything else in the library arrives from a museum's API; this is for the
+   picture the owner already has, sent from wherever they're standing — the
+   gallery may be on another machine, so the bytes travel, not a path.
+
+   It asks two things, who and what, and then hands over to the placard editor,
+   where Auto fill researches the rest. Re-asking for medium, style, genre and
+   school here would be a second, worse copy of a form that already exists. */
+async function uploadDialog(prefill) {
+  const m = modal(
+    "<h2>Add a painting</h2>" +
+    '<p class="tiny up-lead">A file from this device. Once it\'s hung, the placard ' +
+    "opens — where <b>Auto fill</b> can research the details.</p>" +
+    '<form class="authform" id="upform">' +
+    '<label class="up-drop" id="up-drop">' +
+      '<input type="file" id="up-file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp">' +
+      '<span class="up-empty">Choose a file, or drop one here' +
+      '<span class="tiny">JPEG, PNG or WebP</span></span>' +
+      '<span class="up-prev" hidden><img alt=""><span class="up-facts"></span></span>' +
+    "</label>" +
+    '<label>Artist<input id="up-artist" list="up-artists" autocomplete="off" ' +
+    'placeholder="Arthur Streeton"></label><datalist id="up-artists"></datalist>' +
+    '<div class="row2">' +
+    '<label>Title<input id="up-title" autocomplete="off"></label>' +
+    '<label>Date <span class="tiny">optional</span>' +
+    '<input id="up-date" autocomplete="off" placeholder="1888"></label></div>' +
+    '<div class="bf-actions"><button type="submit" class="cta-btn" id="up-go">Hang it</button>' +
+    '<button type="button" class="linkbtn" id="up-cancel">cancel</button>' +
+    '<span class="formmsg err" id="up-msg"></span></div></form>');
+  m.el.querySelector(".modal").classList.add("modal-wide");
+  const q = (s) => m.el.querySelector(s);
+  const drop = q("#up-drop"), input = q("#up-file"), msg = q("#up-msg");
+  const prev = q(".up-prev"), img = prev.querySelector("img");
+  makeModalDraggable(m, m.el.querySelector("h2"));
+  if (prefill) q("#up-artist").value = prefill;
+
+  // The painters already in the museum, so a second Streeton files under the
+  // spelling the first one used instead of founding a rival folder.
+  api("/api/artists").then((d) => {
+    q("#up-artists").innerHTML = (d.artists || []).map((a) =>
+      '<option value="' + esc(a.name) + '"></option>').join("");
+  }).catch(() => {});
+
+  let chosen = null, objUrl = null;
+  const mb = (n) => (n / (1 << 20)).toFixed(1) + " MB";
+
+  const take = (f) => {
+    if (!f) return;
+    chosen = f;
+    msg.textContent = "";
+    if (objUrl) URL.revokeObjectURL(objUrl);
+    objUrl = URL.createObjectURL(f);
+    img.src = objUrl;
+    q(".up-empty").hidden = true;
+    prev.hidden = false;
+    const facts = prev.querySelector(".up-facts");
+    facts.textContent = f.name + " · " + mb(f.size);
+    img.onload = () => {
+      facts.textContent = f.name + " · " + img.naturalWidth + " × " +
+        img.naturalHeight + " · " + mb(f.size);
+    };
+    /* The filename is usually the only label a saved painting carries, and it
+       tends to carry it in the library's own shape — "Title (1888)". Read as a
+       suggestion: it fills the empty fields and never overwrites a typed one. */
+    const stem = f.name.replace(/\.[^.]+$/, "").trim();
+    const yr = /\((\d{4}[^)]*)\)\s*$/.exec(stem);
+    const t = q("#up-title"), d = q("#up-date");
+    if (!t.value.trim()) t.value = (yr ? stem.slice(0, yr.index) : stem).trim();
+    if (!d.value.trim() && yr) d.value = yr[1].trim();
+  };
+
+  input.addEventListener("change", () => take(input.files && input.files[0]));
+  // A file dragged from the desktop lands anywhere on the panel; without the
+  // dragover handler the browser would simply open it in this tab instead.
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault();
+    drop.classList.add("over");
+  }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault();
+    drop.classList.remove("over");
+  }));
+  drop.addEventListener("drop", (e) => {
+    take(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+  });
+
+  const done = () => { if (objUrl) URL.revokeObjectURL(objUrl); m.close(); };
+  q("#up-cancel").addEventListener("click", done);
+
+  q("#upform").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const artist = q("#up-artist").value.trim();
+    if (!chosen) return void (msg.textContent = "Choose a file first.");
+    if (!artist) return void (msg.textContent = "Say who painted it.");
+    const go = q("#up-go"), label = go.textContent;
+    go.disabled = true;
+    go.textContent = "Hanging…";
+    msg.textContent = "";
+    const fd = new FormData();
+    fd.append("file", chosen);
+    fd.append("artist", artist);
+    fd.append("title", q("#up-title").value.trim());
+    fd.append("date", q("#up-date").value.trim());
+    try {
+      // No Content-Type: the browser sets multipart's boundary itself.
+      const r = await api("/api/work/upload", { method: "POST", body: fd });
+      done();
+      toast("Hung “" + r.work.title + "”.");
+      showArtist(r.work.artist);
+      // Straight into the placard — the reason to add a painting is to show it
+      // with its label, and Auto fill is one click from here.
+      editWorkDialog(r.work, (fresh) => showArtist(fresh.artist || r.work.artist));
+    } catch (err) {
+      msg.textContent = err.message;
+      go.disabled = false;
+      go.textContent = label;
+    }
+  });
+}
+
+function editWorkDialog(w, onSaved) {
   const m = modal(
     "<h2>Edit placard</h2>" +
     '<form class="authform" id="ewform">' +
@@ -4816,6 +4955,9 @@ function editWorkDialog(w) {
       } else {
         toast("Placard saved.");   // edited from a tile's "i": no viewer to flash
       }
+      // A caller that put this dialog on screen may have a page behind it
+      // holding the old title — it gets told rather than left stale.
+      if (onSaved && r.work) onSaved(r.work);
     } catch (err) { q("#ew-msg").textContent = err.message; }
   });
 }

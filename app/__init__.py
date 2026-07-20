@@ -33,6 +33,10 @@ def create_app():
         # (via a reverse proxy terminating TLS) if you expose it over HTTPS.
         SESSION_COOKIE_SECURE=False,
         PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+        # A ceiling on any single request body. Sized for the one route that
+        # carries real weight — a painting uploaded by hand — so an oversized
+        # file is refused at the socket instead of being buffered whole.
+        MAX_CONTENT_LENGTH=80 << 20,
     )
 
     from .webapi import bp

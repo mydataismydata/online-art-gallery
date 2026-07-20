@@ -53,6 +53,9 @@
 .statrow .v { font: 400 16px var(--serif); color: var(--text); }
 .statrow.lead .v { font-size: 20px; }
 .statcard .cta-btn { margin-top: 18px; }
+/* The quieter of the two ways to add a work, under the button that is the usual
+   one — centred beneath it rather than beside it, so the card keeps one column. */
+.statcard .statlink { margin-top: 12px; align-self: center; }
 
 /* ---------- connections strip (artist page) ---------- */
 .connstrip { margin-top: 44px; }

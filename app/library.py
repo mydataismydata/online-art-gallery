@@ -32,6 +32,22 @@ _TTL = 2.0
 _dim_cache = {}
 
 
+def readable_image(path):
+    """(width, height) if this file is really an image, else None.
+
+    The scanner trusts the extension, which is fine for files the downloaders
+    wrote. Anything handed in from outside gets asked the decoder instead, so a
+    .jpg that is actually a PDF is turned away at the door rather than filed as
+    art that will never hang."""
+    try:
+        with Image.open(str(path)) as im:
+            im.verify()             # cheap structural check; consumes the file
+        with Image.open(str(path)) as im:
+            return im.size          # verify() leaves the image unusable — reopen
+    except Exception:
+        return None
+
+
 def _image_dims(path, rel, mtime):
     m = int(mtime)
     cached = _dim_cache.get(rel)
