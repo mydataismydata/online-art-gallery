@@ -65,6 +65,19 @@
   background: rgba(23,19,16,.82);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
+/* Reload the artists and connections without leaving the page. Top-right, apart
+   from the zoom cluster below it, since it does something else entirely. */
+.map-refresh {
+  position: absolute; right: 14px; top: 14px; z-index: 8;
+  width: 34px; height: 34px; cursor: pointer; border-radius: 50%;
+  border: 1px solid var(--hair-strong); background: rgba(23,19,16,.82);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  font: 400 17px/1 var(--sans); color: var(--dim2);
+  transition: background .25s ease, color .25s ease;
+}
+.map-refresh:hover { background: var(--gold-tint2); color: var(--display2); }
+.map-refresh.spinning { animation: map-spin .7s linear infinite; }
+@keyframes map-spin { to { transform: rotate(360deg); } }
 .map-zoom button {
   width: 34px; height: 31px; cursor: pointer; background: none; border: none;
   font: 400 16px/1 var(--sans); color: var(--dim2);

@@ -502,11 +502,28 @@ function bindWorks(works, showArtist, rerender, ctx) {
       if (!SEL.on) {
         SEL.ids.clear();
         grid.querySelectorAll(".work.selected").forEach((f) => f.classList.remove("selected"));
+      } else if (ctx.actions.includes("pinhero")) {
+        // Learn which work is on the hero the moment Select opens, so the pin
+        // button can say "Unpin" when that very work is the one chosen. Fetched
+        // fresh each time — an unpin from Settings shouldn't leave a stale label.
+        loadHeroPin(() => renderSelCtl(works, rerender, ctx));
       }
       renderSelCtl(works, rerender, ctx);
     });
     renderSelCtl(works, rerender, ctx);
   }
+}
+
+/* The id of the work currently pinned to the hero, or null for the daily
+   rotation — cached so the Select toolbar can label its button without a fetch
+   on every click. Refreshed whenever Select opens and after any pin/unpin. */
+let HERO_PIN = null;
+async function loadHeroPin(then) {
+  try {
+    const f = await api("/api/featured");
+    HERO_PIN = f && f.pinned && f.work ? f.work.id : null;
+  } catch (e) { HERO_PIN = null; }
+  if (then) then();
 }
 
 function renderSelCtl(works, rerender, ctx) {
@@ -532,9 +549,15 @@ function renderSelCtl(works, rerender, ctx) {
   if (ctx.actions.includes("setcover"))
     html += '<button id="selcover" class="toolbtn"' + (n === 1 ? "" : " disabled") +
       ' title="Pick exactly one work">Set as thumbnail</button>';
-  if (ctx.actions.includes("pinhero"))
+  if (ctx.actions.includes("pinhero")) {
+    // When the one selected work is already the hero, the button takes it back
+    // down rather than pinning it again.
+    const onHero = n === 1 && Array.from(SEL.ids)[0] === HERO_PIN;
     html += '<button id="selpin" class="toolbtn"' + (n === 1 ? "" : " disabled") +
-      ' title="Show this painting on the front page. Pick exactly one work.">Pin to hero</button>';
+      ' title="' + (onHero ? "Stop showing this painting on the front page."
+                           : "Show this painting on the front page. Pick exactly one work.") +
+      '">' + (onHero ? "Unpin from hero" : "Pin to hero") + "</button>";
+  }
   if (ctx.actions.includes("publish"))
     html += '<button id="selpublish" class="toolbtn"' + (n ? "" : " disabled") +
       ' title="Push these works to the public server">Push to public' + tag + "</button>";
@@ -568,7 +591,11 @@ function renderSelCtl(works, rerender, ctx) {
   const cover = $("#selcover");
   if (cover) cover.addEventListener("click", () => setArtistCover(ctx.artist, rerender));
   const pin = $("#selpin");
-  if (pin) pin.addEventListener("click", () => pinHero(rerender));
+  if (pin) pin.addEventListener("click", () => {
+    const one = SEL.ids.size === 1 ? Array.from(SEL.ids)[0] : null;
+    if (one && one === HERO_PIN) unpinHero(rerender);
+    else pinHero(rerender);
+  });
   const pub = $("#selpublish");
   if (pub) pub.addEventListener("click", () => publishSelection(ctx.artist, rerender));
   const exw = $("#selexportw");
@@ -608,7 +635,8 @@ async function setArtistCover(artist, rerender) {
 }
 
 /* "Pin to hero": make the one selected work the painting that greets visitors on
-   the front page, instead of the daily rotation. Unpin from Settings → Display. */
+   the front page, instead of the daily rotation. Also unpinnable right here — the
+   button flips to "Unpin from hero" when the chosen work is already the one up. */
 async function pinHero(rerender) {
   const ids = Array.from(SEL.ids);
   if (ids.length !== 1) return;
@@ -617,8 +645,22 @@ async function pinHero(rerender) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ work_id: ids[0] }),
     });
+    HERO_PIN = ids[0];
     resetSel();
     toast("“" + (r.featured.title || "That work") + "” now greets visitors on the front page.");
+    if (rerender) rerender();
+  } catch (e) { toast(e.message); }
+}
+
+async function unpinHero(rerender) {
+  try {
+    await api("/api/featured", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ work_id: null }),
+    });
+    HERO_PIN = null;
+    resetSel();
+    toast("Unpinned — the hero rotates through the collection again.");
     if (rerender) rerender();
   } catch (e) { toast(e.message); }
 }
@@ -1490,7 +1532,7 @@ async function browseView(facet, value) {
    always true — hand-written links and a shared first movement — rather than the
    denser style/place-time web. A click on their chips brings them in. */
 const CONN = { mode: "map", sel: null, off: new Set(["style", "place_time"]),
-               data: null, threads: [], z: 1, px: 0, py: 0 };
+               data: null, threads: [], z: 1, px: 0, py: 0, fresh: false };
 const CONN_MODES = ["map", "timeline", "threads"];
 const SUBLINE = {
   map: "every painter, and how the collection ties them together",
@@ -1601,7 +1643,9 @@ async function connectionsView(artist, mode) {
     ]);
     CONN.data = g;
     CONN.threads = th.threads || [];
-    CONN.z = 1; CONN.px = 0; CONN.py = 0;   // a fresh graph opens on the wide shot
+    // A fresh graph frames itself in wireMap, once the view has a width to
+    // measure — opened with air between the pucks rather than squeezed to fit.
+    CONN.fresh = true;
     if (artist) {
       const hit = g.nodes.find((n) => n.name.toLowerCase() === artist.toLowerCase());
       CONN.sel = hit ? hit.id : null;
@@ -1609,6 +1653,28 @@ async function connectionsView(artist, mode) {
     if (CONN.sel && !connNode(CONN.sel)) CONN.sel = null;   // artist since removed
     renderConnections();
   } catch (e) { errbox(e); }
+}
+
+/* The refresh button: pull the artists and connections again without a page
+   reload, so a painter or a curator link added in another tab appears here. The
+   viewer's own arrangement and their current zoom/pan are kept — refresh brings
+   in what's new, it doesn't throw away where you're standing. */
+async function refreshMap(btn) {
+  if (btn) btn.classList.add("spinning");
+  try {
+    const [g, th] = await Promise.all([
+      api("/api/connections"),
+      api("/api/threads").catch(() => ({ threads: [] })),
+    ]);
+    CONN.data = g;
+    CONN.threads = th.threads || [];
+    if (CONN.sel && !connNode(CONN.sel)) CONN.sel = null;   // artist since removed
+    renderConnections();       // keeps CONN.z/px/py and overlays the cached pucks
+    toast("Map refreshed.");
+  } catch (e) {
+    toast(e.message);
+    if (btn) btn.classList.remove("spinning");
+  }
 }
 
 function renderConnections() {
@@ -1743,6 +1809,9 @@ function mapHtml() {
     '<svg viewBox="0 0 ' + g.canvas.w + " " + g.canvas.h +
     '" preserveAspectRatio="none" aria-hidden="true"></svg>' +
     clusters + nodes + "</div>" +
+    '<button type="button" class="map-refresh" id="map-refresh"' +
+    ' title="Refresh — pull the latest artists and connections"' +
+    ' aria-label="Refresh the map">⟳</button>' +
     '<div class="map-zoom">' +
     '<button type="button" id="mapin" title="Zoom in" aria-label="Zoom in">+</button>' +
     '<button type="button" id="mapout" title="Zoom out" aria-label="Zoom out">&minus;</button>' +
@@ -1801,6 +1870,22 @@ function zMax(view) {
   return Math.min(8, Math.max(2.5, 2600 / (view.clientWidth || 1000)));
 }
 
+/* How the map opens: the canvas rendered this many screen pixels per design
+   pixel, so the portraits carry real air between them rather than being packed
+   down to fit the viewport. The layout keeps ~92 design px between neighbours,
+   so 1.3 leaves ~120 — clear of even an 84px portrait. The map spills past the
+   frame and pans, which is the trade for the breathing room. */
+const MAP_FIT = 1.3;
+
+function frameMap(view) {
+  const w = view.clientWidth || 1000, h = view.clientHeight || 500;
+  CONN.z = Math.min(zMax(view), Math.max(Z_MIN, CONN.data.canvas.w / w * MAP_FIT));
+  // Centre the overflow instead of pinning the top-left corner. applyZoom clamps
+  // these back inside the pannable range, so the halves are only a starting point.
+  CONN.px = w * (1 - CONN.z) / 2;
+  CONN.py = h * (1 - CONN.z) / 2;
+}
+
 function applyZoom() {
   const view = mapView();
   if (!view) return;
@@ -1842,7 +1927,14 @@ function zoomTo(z, cx, cy) {
 function wireMap() {
   const view = mapView();
   if (!view) return;
+  // A freshly loaded graph frames itself once, here, where the view finally has
+  // a width. Re-renders (a chip toggled, a painter selected) keep the zoom and
+  // pan the viewer had — only connectionsView sets fresh.
+  if (CONN.fresh) { frameMap(view); CONN.fresh = false; }
   applyZoom();
+
+  const rf = $("#map-refresh");
+  if (rf) rf.addEventListener("click", () => refreshMap(rf));
 
   view.addEventListener("wheel", (e) => {
     // Only swallow the page scroll when the wheel actually moved the map, so
