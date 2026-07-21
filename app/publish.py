@@ -162,6 +162,19 @@ def suppress_pids(pids):
         json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def _clean_suppressed(repo_pids):
+    """A tombstone holds a Pull back from re-importing a work deleted on this
+    box. Once the repo itself has dropped the pid there is nothing left to hold
+    back — the stone comes up, or the list grows forever."""
+    cfg = _load_cfg()
+    cur = set(cfg.get("suppressed") or [])
+    keep = sorted(cur & set(repo_pids))
+    if len(keep) != len(cur):
+        cfg["suppressed"] = keep
+        config.PUBLISH_CONFIG_FILE.write_text(
+            json.dumps(cfg, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 # ---------------- git plumbing ----------------
 
 def _git(repo, *args, check=True, timeout=120):
@@ -226,6 +239,10 @@ def repo_status():
     st["link_changes"] = pending_links()
     st["thread_changes"] = pending_threads()
     st["threads_held"] = held_threads()
+    try:
+        st["retire_count"] = len(retired_pids())
+    except Exception:
+        st["retire_count"] = None
     return st
 
 
@@ -288,14 +305,19 @@ def _artist_blobs():
 
     out = {}
     for name in names.values():
-        info = artistinfo.load(name)
-        if not info:
-            continue
+        info = artistinfo.load(name) or {}
         rec = {"name": name}
         for f in _BIO_FIELDS:
             v = info.get(f)
             if v not in (None, "", []):
                 rec[f] = v
+        # The hand-made hang travels as pids, published works only: the private
+        # box's ids mean nothing over there, and an unpublished painting simply
+        # isn't in the public order — its neighbours keep their sequence.
+        order = [pid_by_wid[wid] for wid in info.get("work_order") or []
+                 if wid in pid_by_wid]
+        if order:
+            rec["work_order_pids"] = order
         if len(rec) == 1:                      # name only -- nothing to say
             continue
         cover = info.get("cover")
@@ -362,8 +384,45 @@ def _read_records(repo, subdir):
     return out
 
 
+def _prune(repo, subdir, blobs):
+    """Delete repo records their blob-builder no longer emits: a collection whose
+    last published work was retired, a link whose painter left the walls, a bio
+    with nothing left to say. The repo is wholly this box's export — anything in
+    it we wouldn't write today is yesterday's export, not somebody else's data."""
+    d = repo / subdir
+    if not d.is_dir():
+        return []
+    keep = set(blobs)
+    gone = []
+    for jf in d.glob("*.json"):
+        if jf.stem in keep:
+            continue
+        try:
+            jf.unlink()
+        except OSError:
+            continue
+        gone.append(jf.stem)
+    return gone
+
+
 def pending_bios():
     return _pending(ARTISTS_SUBDIR, _artist_blobs)
+
+
+# ---------------- retiring deleted works ----------------
+
+def retired_pids():
+    """pids still in the content repo whose local work is gone — published once,
+    deleted here since. On the next push their files leave the repo; the public
+    box removes its copies on its next pull."""
+    repo = repo_path()
+    if not _is_git_repo(repo):
+        return []
+    wd = repo / WORKS_SUBDIR
+    if not wd.is_dir():
+        return []
+    have = {w["pid"] for w in library.all_works() if w.get("pid")}
+    return sorted(jf.stem for jf in wd.glob("*.json") if jf.stem not in have)
 
 
 # ---------------- collections ----------------
@@ -544,22 +603,53 @@ def publish_works(ids):
     if published:
         library.invalidate()
 
-    # Always: editing a bio, re-hanging a collection, writing an influence link or a
-    # thread is a publishable change on its own, with no new artwork attached. None
-    # of them write anything when unchanged, so this is free.
-    extra = {}
+    # Reconcile deletions: a work deleted here after being published leaves the
+    # repo now, and the public box drops its copy on the next pull. Guarded
+    # against a library that failed to mount — an empty scan must never read as
+    # "the owner deleted everything" and strip the public gallery bare.
+    retired = []
+    try:
+        orphans = retired_pids()
+        if orphans and not any(w.get("pid") for w in library.all_works()):
+            errors.append({"id": "retire", "error":
+                "Every published work looks missing locally, so nothing was "
+                "retired. If the library really is meant to be empty, clear "
+                "works/ in the content repo by hand."})
+            orphans = []
+        for pid in orphans:
+            pl = _load_sidecar(works_dir / (pid + ".json"))
+            for fname in {pl.get("image") or "", pid + ".webp", pid + ".json"}:
+                if not fname:
+                    continue
+                try:
+                    (works_dir / fname).unlink()
+                except FileNotFoundError:
+                    pass
+            retired.append(pid)
+    except Exception as e:
+        errors.append({"id": "retire", "error": str(e)})
+
+    # Always: editing a bio, re-hanging a collection or an artist's gallery,
+    # writing an influence link or a thread is a publishable change on its own,
+    # with no new artwork attached. None of them write anything when unchanged,
+    # so this is free — and _prune sweeps out records the retirement above just
+    # orphaned (the bio of a painter with nothing left, the emptied collection).
+    extra, pruned = {}, 0
     for name, subdir, blobs_fn in (
             ("bios", ARTISTS_SUBDIR, _artist_blobs),
             ("collections", COLLECTIONS_SUBDIR, _collection_blobs),
             ("links", LINKS_SUBDIR, _link_blobs),
             ("threads", THREADS_SUBDIR, _thread_blobs)):
         try:
-            extra[name] = _sync(repo, subdir, blobs_fn())
+            blobs = blobs_fn()
+            extra[name] = _sync(repo, subdir, blobs)
+            pruned += len(_prune(repo, subdir, blobs))
         except Exception as e:
             extra[name] = []
             errors.append({"id": name, "error": str(e)})
 
     result = {"published": published, "pids": pids, "errors": errors,
+              "retired": len(retired), "pruned": pruned,
               "committed": False, "pushed": False, "commit": None, "message": None}
     result.update({k: len(extra[k]) for k in _EXTRAS})
 
@@ -572,7 +662,7 @@ def publish_works(ids):
     if published:
         _record_export(published)
 
-    _git(repo, "commit", "-m", _commit_message(published, artists, extra))
+    _git(repo, "commit", "-m", _commit_message(published, artists, extra, retired, pruned))
     result["committed"] = True
     _, sha_out, _ = _git(repo, "rev-parse", "--short", "HEAD", check=False)
     result["commit"] = sha_out.strip() or None
@@ -580,7 +670,7 @@ def publish_works(ids):
         _git(repo, "push", timeout=600)
         result["pushed"] = True
         result["message"] = ("Pushed %s to the public server."
-                             % _summary(published, extra))
+                             % _summary(published, extra, len(retired)))
     except Exception as e:
         result["message"] = ("Committed locally but the push failed: %s — the commit "
                               "is saved; retry once git access is sorted." % e)
@@ -603,12 +693,14 @@ _NOUN = {"bios": "bio", "collections": "collection", "links": "link",
          "threads": "thread"}
 
 
-def _summary(works, extra):
+def _summary(works, extra, retired=0):
     bits = [_plural(works, "work")] if works else []
     for k in _EXTRAS:
         n = len(extra.get(k) or [])
         if n:
             bits.append(_plural(n, _NOUN[k]))
+    if retired:
+        bits.append("retired " + _plural(retired, "work"))
     return _and(bits)
 
 
@@ -616,7 +708,7 @@ def _names(items):
     return ", ".join(items[:3]) + (" +%d more" % (len(items) - 3) if len(items) > 3 else "")
 
 
-def _commit_message(published, artists, extra):
+def _commit_message(published, artists, extra, retired=(), pruned=0):
     parts = []
     if published:
         who = _names(artists)
@@ -625,7 +717,11 @@ def _commit_message(published, artists, extra):
         items = extra.get(k) or []
         if items:
             parts.append("%d %s(s): %s" % (len(items), _NOUN[k], _names(items)))
-    return "Publish " + " + ".join(parts)
+    if retired:
+        parts.append("retire %d work(s)" % len(retired))
+    if pruned:
+        parts.append("tidy %d stale record(s)" % pruned)
+    return "Publish " + (" + ".join(parts) or "updates")
 
 
 def publish_new():
@@ -740,9 +836,13 @@ def _import_artists(repo):
         if not name:
             continue
         data = {f: rec[f] for f in _BIO_FIELDS if rec.get(f) not in (None, "", [])}
-        if not data:
-            continue
         cover = wid_by_pid.get(rec.get("cover_pid"))
+        # The hang arrives as pids and hangs as this box's ids. A pid that isn't
+        # here (deleted on this box and tombstoned) just drops out of the line.
+        order = [wid_by_pid[p] for p in rec.get("work_order_pids") or []
+                 if p in wid_by_pid]
+        if not data and not cover and not order:
+            continue
         if cover:
             data["cover"] = cover
         data["source"] = "published"
@@ -750,10 +850,18 @@ def _import_artists(repo):
         cur = artistinfo.load(name)
         same = bool(cur) and all(
             (cur.get(f) or None) == (data.get(f) or None) for f in _BIO_FIELDS)
-        if same and (not cover or cur.get("cover") == cover):
+        same = same and (not cover or (cur or {}).get("cover") == cover)
+        same = same and ((cur or {}).get("work_order") or []) == order
+        if same:
             out["unchanged"] += 1
             continue
         artistinfo.save(name, data)
+        # Set or cleared explicitly: save() deliberately preserves an existing
+        # hang, but here the private box is the author — no order means none.
+        if order:
+            artistinfo.set_order(name, order)
+        elif (artistinfo.load(name) or {}).get("work_order"):
+            artistinfo.set_order(name, None)
         out["updated" if cur else "added"] += 1
     return out
 
@@ -845,6 +953,27 @@ def pull_and_import():
         except Exception as e:
             errors.append({"pid": p.get("pid"), "error": str(e)})
 
+    # Reconcile deletions from the private box: a pid the repo no longer carries
+    # was retired at the source, so its copy leaves this wall too — into the
+    # trash, like any deletion, so a mistake is recoverable by hand. Refused
+    # wholesale when the repo suddenly lists nothing at all: an empty or wrong
+    # clone must not be allowed to empty the museum.
+    removed = 0
+    repo_pids = {p["pid"] for p in placards}
+    gone = [w["id"] for w in existing.values() if w["pid"] not in repo_pids]
+    if gone and not placards:
+        errors.append({"pid": "removals", "error":
+            "The repo lists no works at all; kept the %d local copies in case "
+            "the pull itself failed." % len(gone)})
+    elif gone:
+        removed_ids, del_errs = library.delete_works(gone)
+        removed = len(removed_ids)
+        for e in del_errs:
+            errors.append({"pid": e.get("id"), "error": e.get("error")})
+        touched.update(w.get("artist") or "" for w in existing.values()
+                       if w["id"] in set(removed_ids))
+    _clean_suppressed(repo_pids)
+
     # Unconditionally: the bio import reads the pid->id map off a fresh scan, and
     # bios can change with no work changing at all.
     library.invalidate()
@@ -865,9 +994,22 @@ def pull_and_import():
         except Exception as e:
             got[name] = {"added": 0, "updated": 0, "unchanged": 0}
             errors.append({"pid": name, "error": str(e)})
+    # The other half of reconciliation: imported collections, links and threads
+    # whose repo record has gone were retired at the source. Only records marked
+    # source == "published" are ever touched — what curators made on THIS box is
+    # theirs, whatever happens over there.
+    for name, subdir, prune in (
+            ("collections", COLLECTIONS_SUBDIR, coll.prune_published),
+            ("links", LINKS_SUBDIR, links.prune_published),
+            ("threads", THREADS_SUBDIR, threads.prune_published)):
+        try:
+            got[name]["removed"] = prune(
+                {r.get("id") for r in _read_records(repo, subdir)})
+        except Exception as e:
+            errors.append({"pid": name, "error": str(e)})
     if added or updated:
         _prewarm(touched)
 
     return dict({"added": added, "updated": updated, "unchanged": unchanged,
-                 "skipped": skipped, "errors": errors, "pull": pull_msg,
-                 "total": len(placards), "bios": bios}, **got)
+                 "skipped": skipped, "removed": removed, "errors": errors,
+                 "pull": pull_msg, "total": len(placards), "bios": bios}, **got)

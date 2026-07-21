@@ -878,7 +878,9 @@ function connStripHtml(name, conns, total) {
   );
 }
 
-async function artistView(name) {
+/* `arranging` is a call parameter, never state, exactly as on a collection:
+   route away and the next visit opens on the gallery, not a mode you forgot. */
+async function artistView(name, arranging) {
   setNav("home");
   try {
     const [d, ov] = await Promise.all([
@@ -926,6 +928,21 @@ async function artistView(name) {
       '<div class="statrow' + (lead ? " lead" : "") + '"><span class="k">' + k +
       '</span><span class="v">' + esc(String(v)) + "</span></div>";
 
+    // The owner hangs this wall by hand, on the private box only — the
+    // arrangement rides over to the public site with the works themselves.
+    const mayArrange = isOwner() && !isPublic() && works.length > 1;
+    arranging = !!arranging && mayArrange;
+    const hangCtl = mayArrange
+      ? '<span class="hangctl">' +
+        '<button class="linkbtn' + (arranging ? " on" : "") + '" id="ar-arrange">' +
+        (arranging ? "Done arranging" : "Arrange by hand") + "</button>" +
+        (d.arranged && !arranging
+          ? '<button class="linkbtn" id="ar-reset">reset order</button>' : "") +
+        "</span>"
+      : "";
+    const worksHead = '<div class="titlegroup"><h2>Works <span class="note">' +
+      works.length + (span ? " · " + span : "") + "</span></h2>" + hangCtl + "</div>";
+
     app.innerHTML = page(
       '<a class="back" href="#/">← All artists</a>' +
       '<section class="artist-head"><div>' +
@@ -949,9 +966,9 @@ async function artistView(name) {
       addMore + "</div></section>" +
       connStripHtml(name, ov.connections || [], stats.connections || 0) +
       '<section class="works-sec">' +
-      worksSection(works, false, browseCtx({ artist: name }),
-        "<h2>Works <span class=\"note\">" + works.length +
-        (span ? " · " + span : "") + "</span></h2>") +
+      (arranging
+        ? '<div class="sechead">' + worksHead + "</div>" + arrangeHtml(works)
+        : worksSection(works, false, browseCtx({ artist: name }), worksHead)) +
       "</section>", "tight");
 
     renderBio(name, ov.info);
@@ -964,9 +981,32 @@ async function artistView(name) {
     if (isOwner()) { wireRename(name); wireRepoint(name); }
     const upb = document.getElementById("upload-btn");
     if (upb) upb.addEventListener("click", () => uploadDialog(name));
-    bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
-    const g = document.getElementById("grid");
-    if (g) g.classList.add("show-dims");   // dimension pills only on the artist page
+    const ab = $("#ar-arrange");
+    if (ab) ab.addEventListener("click", () => artistView(name, !arranging));
+    const rb = $("#ar-reset");
+    if (rb) rb.addEventListener("click", async () => {
+      try {
+        await api("/api/artist/" + encodeURIComponent(name) + "/order", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: null }),
+        });
+        toast("Back to the natural order.");
+        artistView(name);
+      } catch (e) { toast(e.message); }
+    });
+    if (arranging) {
+      wireArrange(
+        (ids) => api("/api/artist/" + encodeURIComponent(name) + "/order", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: ids }),
+        }),
+        () => toast("Arrangement saved."),
+        () => artistView(name, true));
+    } else {
+      bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
+      const g = document.getElementById("grid");
+      if (g) g.classList.add("show-dims");  // dimension pills only on the artist page
+    }
   } catch (e) { errbox(e); }
 }
 
@@ -2612,7 +2652,10 @@ function edgeScroll(y) {
     window.scrollBy(0, Math.min(20, (y - innerHeight + pad) / 3 + 4));
 }
 
-function wireArrange(cid, onSaved) {
+/* Generic over what's being hung: `save(ids)` posts the new order wherever it
+   belongs (a collection's reorder, an artist's hang), `onFail` re-renders so a
+   failed save doesn't leave a lie on screen. */
+function wireArrange(save, onSaved, onFail) {
   const box = $("#arrange");
   if (!box) return;
   renumber(box);
@@ -2655,14 +2698,11 @@ function wireArrange(cid, onSaved) {
       const now = arrangeIds(box);
       if (!moved || now.join() === before.join()) return;   // put back where it was
       try {
-        await api("/api/collection/" + encodeURIComponent(cid) + "/reorder", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: now }),
-        });
+        await save(now);
         onSaved();
       } catch (err) {
         toast(err.message);
-        collectionView(cid, true);      // the save failed; don't leave a lie on screen
+        onFail();
       }
     };
     window.addEventListener("pointermove", move);
@@ -2715,12 +2755,18 @@ async function collectionView(cid, arranging) {
           : "Nothing here yet.") + "</div>", "tight");
     } else if (arranging) {
       app.innerHTML = page(head + arrangeHtml(works), "tight");
-      wireArrange(cid, () => {
-        // The hang is now hand-made, whatever it was sorted by a moment ago.
-        const sel = $("#col-sort");
-        if (sel) sel.value = "added";
-        toast("Arrangement saved.");
-      });
+      wireArrange(
+        (ids) => api("/api/collection/" + encodeURIComponent(cid) + "/reorder", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: ids }),
+        }),
+        () => {
+          // The hang is now hand-made, whatever it was sorted by a moment ago.
+          const sel = $("#col-sort");
+          if (sel) sel.value = "added";
+          toast("Arrangement saved.");
+        },
+        () => collectionView(cid, true));
     } else {
       app.innerHTML = page(head + worksSection(works, true, collectionCtx(c)), "tight");
       bindWorks(works, true, () => collectionView(cid), collectionCtx(c));
@@ -3363,6 +3409,7 @@ function publishPanelHtml(st) {
   const colN = st && st.collection_changes != null ? st.collection_changes : null;
   const lnkN = st && st.link_changes != null ? st.link_changes : null;
   const thrN = st && st.thread_changes != null ? st.thread_changes : null;
+  const retN = st && st.retire_count != null ? st.retire_count : null;
   const heldN = (st && st.threads_held) || 0;
   const last = st && st.last_export;
   const lastTxt = last
@@ -3379,6 +3426,9 @@ function publishPanelHtml(st) {
   if (colN) pend.push(n(colN, "changed collection", "changed collections"));
   if (lnkN) pend.push(n(lnkN, "changed link", "changed links"));
   if (thrN) pend.push(n(thrN, "changed thread", "changed threads"));
+  // Works deleted here after being published: the next push retires them from
+  // the repo, and the public box takes them down on its next pull.
+  if (retN) pend.push(n(retN, "deleted work to retire", "deleted works to retire"));
   const known = [newN, plaN, bioN, colN, lnkN, thrN].every((v) => v != null);
   // A thread travels whole or not at all, so one naming an unpublished painter has
   // nothing to push — say so, or its absence over there looks like a fault.
@@ -3479,19 +3529,22 @@ function wirePullPanel() {
       const r = await api("/api/pull", { method: "POST" });
       const KINDS = [["bios", "bio", "bios"], ["collections", "collection", "collections"],
                      ["links", "link", "links"], ["threads", "thread", "threads"]];
-      const lines = ["Works: added " + r.added + ", updated " + r.updated + ", " +
+      const lines = ["Works: added " + r.added + ", updated " + r.updated +
+                     (r.removed ? ", removed " + r.removed : "") + ", " +
                      r.unchanged + " unchanged."];
       const touched = [];
       KINDS.forEach(([k, one, many]) => {
         const v = r[k] || { added: 0, updated: 0 };
         const n = (v.added || 0) + (v.updated || 0);
         lines.push(many[0].toUpperCase() + many.slice(1) + ": added " + (v.added || 0) +
-                   ", updated " + (v.updated || 0) + ".");
+                   ", updated " + (v.updated || 0) +
+                   (v.removed ? ", removed " + v.removed : "") + ".");
         if (n) touched.push(n + " " + (n === 1 ? one : many));
       });
       msg.className = "formmsg ok";
       msg.textContent = lines.join(" ");
       toast("Pull complete: +" + r.added + " new, " + r.updated + " updated" +
+            (r.removed ? ", " + r.removed + " removed" : "") +
             (touched.length ? ", " + touched.join(", ") : "") + ".");
     } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
     finally { btn.disabled = false; btn.textContent = orig; }

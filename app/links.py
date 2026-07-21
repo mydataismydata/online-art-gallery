@@ -229,6 +229,19 @@ def import_published(recs):
     return stats
 
 
+def prune_published(keep_ids):
+    """Delete imported links the content repo no longer carries — retired at the
+    source. Links written on THIS box (no source marker) are left alone. Returns
+    how many were removed."""
+    keep = set(keep_ids or ())
+    cur = _load()
+    out = [l for l in cur
+           if l.get("source") != "published" or l.get("id") in keep]
+    if len(out) != len(cur):
+        _save(out)
+    return len(cur) - len(out)
+
+
 def rename(old, new):
     """Keep hand-written links attached when an artist is renamed or merged into
     another. Called from the rename route — without it a repoint would silently

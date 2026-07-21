@@ -26,7 +26,8 @@ _ARTIST_OCCUPATIONS = {
 }
 
 FIELDS = ("name", "born", "died", "birthplace", "nationality", "movements",
-          "description", "wikidata_id", "wikipedia_url", "source", "updated", "cover")
+          "description", "wikidata_id", "wikipedia_url", "source", "updated",
+          "cover", "work_order")
 
 
 def _path(name):
@@ -45,12 +46,16 @@ def load(name):
 
 def save(name, data):
     clean = {k: data.get(k) for k in FIELDS if data.get(k) not in (None, "", [])}
-    # 'cover' is managed separately (set_cover); a bio/Wikidata save carries no
-    # cover, so keep any existing one rather than dropping the chosen thumbnail.
-    if not clean.get("cover"):
-        existing = load(name)
-        if existing and existing.get("cover"):
-            clean["cover"] = existing["cover"]
+    # 'cover' and 'work_order' are managed separately (set_cover / set_order); a
+    # bio or Wikidata save carries neither, so keep what's there rather than
+    # dropping the chosen thumbnail or the hand-made hang with it.
+    existing = None
+    for kept in ("cover", "work_order"):
+        if not clean.get(kept):
+            if existing is None:
+                existing = load(name) or {}
+            if existing.get(kept):
+                clean[kept] = existing[kept]
     clean["name"] = name
     clean["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
     _path(name).write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -68,6 +73,44 @@ def set_cover(name, work_id):
     data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
     _path(name).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     return data
+
+
+def set_order(name, work_ids):
+    """Set (or clear, when falsy) the artist's hand-made hang: the work ids of
+    their gallery in the order the owner arranged them. Written directly, like
+    the cover, so bio fields are never disturbed."""
+    data = load(name) or {"name": name}
+    ids = [w for w in (work_ids or []) if isinstance(w, str) and w]
+    if ids:
+        data["work_order"] = ids
+    else:
+        data.pop("work_order", None)
+    data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    _path(name).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return data
+
+
+def apply_order(name, works):
+    """The artist's works in the curator's hand order. Ordered ones come first,
+    in their arranged sequence; anything the order doesn't name — a new download,
+    a fresh upload — follows in the order it arrived. Ids that no longer resolve
+    are simply skipped, so a deleted painting can't jam the hang.
+
+    Returns (works, arranged): `arranged` says an order actually applied, which
+    is what tells the artist page to offer its reset."""
+    info = load(name) or {}
+    order = info.get("work_order") or []
+    if not order:
+        return works, False
+    pos = {}
+    for i, wid in enumerate(order):
+        if isinstance(wid, str) and wid not in pos:
+            pos[wid] = i
+    named = [w for w in works if w["id"] in pos]
+    if not named:
+        return works, False
+    named.sort(key=lambda w: pos[w["id"]])
+    return named + [w for w in works if w["id"] not in pos], True
 
 
 def normalize_manual(payload):

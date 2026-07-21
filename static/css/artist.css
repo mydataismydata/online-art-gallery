@@ -80,6 +80,8 @@
 .works-sec { margin-top: 52px; }
 .works-sec .sechead { margin-bottom: 24px; }
 .works-sec .worktools { margin-bottom: 0; }
+/* The owner's hanging controls, beside the Works heading. */
+.hangctl { display: inline-flex; align-items: baseline; gap: 14px; }
 .sechead h2 .note { font: 400 14px var(--sans); color: var(--faint); margin-left: 8px; }
 .conncard .ctype { display: flex; align-items: center; gap: 8px; }
 .conncard .cdot { width: 7px; height: 7px; border-radius: 50%; }

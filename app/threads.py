@@ -176,6 +176,19 @@ def import_published(recs):
     return stats
 
 
+def prune_published(keep_ids):
+    """Delete imported threads the content repo no longer carries — retired at
+    the source. Threads written on THIS box are left alone. Returns how many
+    were removed."""
+    keep = set(keep_ids or ())
+    cur = _load()
+    out = [t for t in cur
+           if t.get("source") != "published" or t.get("id") in keep]
+    if len(out) != len(cur):
+        _save(out)
+    return len(cur) - len(out)
+
+
 def rename(old, new):
     """Follow an artist rename/merge, so a thread keeps its path."""
     old_k = fold((old or "").strip())

@@ -252,6 +252,24 @@ def import_published(rec):
         return "updated" if cur else "added"
 
 
+def prune_published(keep_ids):
+    """Delete imported collections the content repo no longer carries — retired
+    at the source. Only ever touches records marked source == "published"; a
+    curator's own collections on this box are theirs, whatever the repo does.
+    Returns how many were removed."""
+    keep = set(keep_ids or ())
+    n = 0
+    with _lock:
+        for rec in _all():
+            if rec.get("source") != "published" or rec.get("id") in keep:
+                continue
+            p = _path(rec["id"])
+            if p and p.exists():
+                p.unlink()
+                n += 1
+    return n
+
+
 def create_collection(title, description, user):
     title = _clean_title(title)
     description = _clean_desc(description)

@@ -22,6 +22,7 @@ bp = Blueprint("api", __name__)
 # False, so this never fires. (Publish routes use the @private_only decorator.)
 _PRIVATE_ONLY_ENDPOINTS = {
     "api.api_rescan", "api.api_artist_rename", "api.api_work_upload",
+    "api.api_artist_order",
     "api.api_artist_lookup", "api.api_artist_ai_lookup", "api.api_artist_save",
     "api.api_work_find_metadata", "api.api_work_update", "api.api_metadata_bulk",
     "api.api_metadata_export",
@@ -345,8 +346,9 @@ def api_artists():
 @bp.get("/api/works")
 @auth.require_view
 def api_works():
+    artist = request.args.get("artist")
     works = library.query_works(
-        artist=request.args.get("artist"),
+        artist=artist,
         era=request.args.get("era"),
         medium=request.args.get("medium"),
         style=request.args.get("style"),
@@ -354,7 +356,12 @@ def api_works():
         school=request.args.get("school"),
         q=request.args.get("q"),
     )
-    return jsonify({"works": works})
+    out = {"works": works}
+    # An artist's gallery hangs in the owner's hand order when there is one —
+    # for everyone, on both boxes; the arrangement is curation, not preference.
+    if artist is not None:
+        out["works"], out["arranged"] = artistinfo.apply_order(artist, works)
+    return jsonify(out)
 
 
 @bp.get("/api/facets")
@@ -461,7 +468,24 @@ def api_artist_rename():
         for f in frm:
             info = artistinfo.load(f)
             if info:
+                info = dict(info)
+                # The hang is a list of work ids and every id just changed; it
+                # can't ride the bio copy verbatim — it's carried below, mapped.
+                info.pop("work_order", None)
                 artistinfo.save(to, info)
+                break
+    # Follow the hand-made hang through the rename. The target's own arrangement
+    # wins on a merge (its ids are remapped in place, in case the rename was a
+    # case fix that re-identified them too); otherwise the first source that had
+    # one lends theirs, translated to the works' new ids.
+    tgt = artistinfo.load(to) or {}
+    if tgt.get("work_order"):
+        artistinfo.set_order(to, [id_map.get(i, i) for i in tgt["work_order"]])
+    else:
+        for f in frm:
+            src = artistinfo.load(f) or {}
+            if src.get("work_order"):
+                artistinfo.set_order(to, [id_map.get(i, i) for i in src["work_order"]])
                 break
     # Curator notes and threads are written about a painter, not a folder — keep
     # them attached through a rename or a merge.
@@ -574,6 +598,44 @@ def api_work_upload():
         return jsonify({"error": "The file was saved but the library didn't pick "
                                  "it up. Try a rescan from Settings."}), 500
     return jsonify({"work": w})
+
+
+# ---------------- the artist's own hang ----------------
+
+@bp.post("/api/artist/<name>/order")
+@auth.require_role("owner")
+def api_artist_order(name):
+    """Hang an artist's gallery in exactly this order — or take the order away.
+
+    Mirrors a collection's reorder: only ever a rearrangement of what the artist
+    actually holds. Ids from someone else's wall are ignored, and a work the
+    owner's screen didn't know about (added from another tab mid-drag) keeps its
+    place after the arranged ones rather than vanishing. `ids: null` clears the
+    arrangement and the gallery returns to its natural order.
+
+    Authored here, shown everywhere: the order travels to the public box inside
+    the artist's record, as pids."""
+    works = library.query_works(artist=name)
+    if not works:
+        return jsonify({"error": "No works by %r here." % name}), 404
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids")
+    if ids is None:
+        artistinfo.set_order(works[0]["artist"], None)
+        return jsonify({"arranged": False, "count": len(works)})
+    if not isinstance(ids, list):
+        return jsonify({"error": "ids must be a list, or null to reset."}), 400
+    held = {w["id"] for w in works}
+    seen, order = set(), []
+    for wid in ids:
+        if isinstance(wid, str) and wid in held and wid not in seen:
+            seen.add(wid)
+            order.append(wid)
+    if not order:
+        return jsonify({"error": "None of those works hang under %s." % name}), 400
+    # Store under the display spelling so the sidecar slug matches the bio's.
+    artistinfo.set_order(works[0]["artist"], order)
+    return jsonify({"arranged": True, "count": len(order)})
 
 
 # ---------------- artist metadata ----------------
