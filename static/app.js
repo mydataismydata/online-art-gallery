@@ -429,9 +429,54 @@ function worksSection(works, showArtist, ctx, head) {
   );
 }
 
+/* Deal the works across the columns so the grid reads like text — 1 top-left,
+   2 top-centre, 3 top-right, 4 under 1 — rather than filling each column top to
+   bottom the way CSS multi-columns (and every layout before this) did. The count
+   comes from --mcol-min in the CSS, so the breakpoints stay there; heights still
+   stagger within a column, which is the masonry look — only the order changes.
+
+   The works are re-read in reading order by data-i before every deal: after a
+   previous pass the DOM order is column-by-column, so a plain querySelectorAll
+   would scramble the order on the next reflow. Cheap and idempotent — it bails
+   the moment the column count hasn't changed, which is most resizes. */
+function layoutMasonry(grid) {
+  if (!grid) return;
+  const cs = getComputedStyle(grid);
+  const gap = parseFloat(cs.columnGap || cs.gap) || 0;
+  const min = parseFloat(cs.getPropertyValue("--mcol-min")) || 300;
+  const cols = Math.max(1, Math.floor((grid.clientWidth + gap) / (min + gap)));
+  const dealt = grid.firstElementChild &&
+    grid.firstElementChild.classList.contains("mcol");
+  if (dealt && grid.dataset.cols === String(cols)) return;   // nothing moved
+  const figs = [...grid.querySelectorAll(".work")]
+    .sort((a, b) => (+a.dataset.i) - (+b.dataset.i));
+  const columns = [];
+  for (let c = 0; c < cols; c++) {
+    const col = document.createElement("div");
+    col.className = "mcol";
+    columns.push(col);
+  }
+  figs.forEach((fig, k) => columns[k % cols].appendChild(fig));
+  grid.replaceChildren.apply(grid, columns);
+  grid.dataset.cols = String(cols);
+}
+
+/* One listener for the life of the page: a width change can cross a column
+   breakpoint, and the deal has to follow. Debounced, and a no-op whenever the
+   count is unchanged, so dragging a window edge is cheap. */
+let _masonryTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(_masonryTimer);
+  _masonryTimer = setTimeout(() => layoutMasonry($("#grid")), 120);
+});
+
 function bindWorks(works, showArtist, rerender, ctx) {
   ctx = ctx || { actions: [] };
   const grid = $("#grid");
+  // Deal the figures into reading-order columns before anything's shown. The
+  // click handler below lives on #grid, so it still catches them once they're
+  // nested a level down in a .mcol.
+  layoutMasonry(grid);
   grid.addEventListener("click", (e) => {
     const fig = e.target.closest(".work");
     if (!fig) return;
@@ -2597,11 +2642,11 @@ const COL_SORTS = [
 
 /* ---------- arranging a collection by hand ---------- */
 
-/* The masonry is a column flow: read it top to bottom and you get column one, not
-   the hang. Fine to look at, hopeless to drag in — so arranging swaps in a plain
-   list, where the order on screen is the order in the collection and a painting
-   lands where you dropped it. A list also suits what's being decided: a hang is a
-   sequence, not a shape. */
+/* The masonry reads in order but staggers by height, so a work's place in the
+   sequence isn't where your eye lands next — fine to look at, hopeless to drag
+   in. So arranging swaps in a plain list, where the order on screen is the order
+   in the collection and a painting lands where you dropped it. A list also suits
+   what's being decided: a hang is a sequence, not a shape. */
 function arrangeRow(w) {
   const meta = [w.artist, w.date || w.year].filter(Boolean).join(" · ");
   return (

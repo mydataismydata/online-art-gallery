@@ -75,7 +75,9 @@
 
   .searchbox { width: 100%; }
   .pagehead .headact { width: 100%; }
-  .masonry { columns: 1; }
+  /* One column on a phone: a minimum wider than the screen means the deal only
+     ever fills a single column (layoutMasonry reads this). */
+  .masonry { --mcol-min: 2000px; }
 
   /* Arranging on a phone: the handle grows into a real target and the date goes,
      but the thumbnail stays — you're moving a painting, and you have to see which. */

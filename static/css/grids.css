@@ -88,8 +88,15 @@
 .add-card:hover .cover span { color: var(--gold); }
 
 /* ---------- works grid ---------- */
-.masonry { columns: 300px; column-gap: 26px; }
-.work { break-inside: avoid; margin: 0 0 38px; cursor: pointer; display: block; }
+/* A masonry that reads like text — item 1 top-left, 2 top-centre, 3 top-right,
+   4 under 1 — so a one-column phone shows the very same order straight down.
+   CSS multi-columns fill each column top-to-bottom before the next, which is the
+   wrong order; so the grid is a flex row of equal columns and the works are dealt
+   across them round-robin in JS (layoutMasonry). --mcol-min is the only knob the
+   count is figured from, kept here so the breakpoints live in the CSS. */
+.masonry { display: flex; align-items: flex-start; gap: 26px; --mcol-min: 300px; }
+.mcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.work { margin: 0 0 38px; cursor: pointer; display: block; }
 .wimg {
   position: relative; display: block; line-height: 0;
   border: 1px solid var(--mat); overflow: hidden; background: var(--raised3);
