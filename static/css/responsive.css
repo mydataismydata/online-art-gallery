@@ -17,7 +17,20 @@
   .artist-title h1 { font-size: 38px; }
   .pagehead h1 { font-size: 32px; }
   .vnav { width: 54px; font-size: 34px; }
-  #placard { left: 16px; bottom: 16px; width: calc(100vw - 32px); }
+  /* The placard used to sit as a card over the lower painting, which on a phone
+     meant it hid most of the work. Full screen instead, but on frosted glass —
+     the painting stays visible as a soft wash behind readable ink. */
+  /* Scoped to #placard, the viewer's own label — the tile "i" opens the same
+     card in a centred modal, which shouldn't go full screen. */
+  #placard { left: 0; right: 0; top: 0; bottom: 0; width: auto; max-width: none; }
+  #placard .pl-card {
+    height: 100%; max-height: none;
+    background: rgba(241, 234, 219, .84);
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+    padding: calc(26px + env(safe-area-inset-top, 0px)) 22px
+             calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+  #placard .pl-close { top: calc(12px + env(safe-area-inset-top, 0px)); }
   #plpill { left: 16px; bottom: 16px; }
   #vfilm { display: none; }
 }
@@ -103,4 +116,27 @@
   }
   #plpill .i { font: italic 400 16px var(--serif); }
   #viewer.pl-avail #vcap { padding-left: 64px; }
+}
+
+/* ---------- connections on a stacked layout ---------- */
+/* At this width the details panel drops below the view rather than sitting
+   beside it, so: the map's legend ("Reading the map") is just noise up top and
+   goes; a selected painter gets a corner chip to jump down to their panel. */
+@media (max-width: 1000px) {
+  .conn-aside.noselection { display: none; }
+  .conn-selchip { display: flex; }
+}
+
+/* ---------- threads on a phone ---------- */
+/* Upright: the path runs down the screen, each step full width, the arrows
+   turned to point the way. The → in the markup becomes a ↓ with a quarter turn. */
+@media (max-width: 720px) and (orientation: portrait) {
+  .th-chain { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+  .th-step { width: auto; }
+  .th-arrow { align-self: center; transform: rotate(90deg); padding: 10px 0; }
+}
+/* On its side, where height is scarce: the path runs off to the right and scrolls. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .th-chain { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 10px; }
+  .th-step { flex: 0 0 auto; }
 }

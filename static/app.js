@@ -1532,7 +1532,19 @@ async function browseView(facet, value) {
    always true — hand-written links and a shared first movement — rather than the
    denser style/place-time web. A click on their chips brings them in. */
 const CONN = { mode: "map", sel: null, off: new Set(["style", "place_time"]),
-               data: null, threads: [], z: 1, px: 0, py: 0, fresh: false };
+               data: null, threads: [], z: 1, px: 0, py: 0, fresh: false,
+               expanded: false };
+
+/* Diagonal double-arrows: out to fill the screen, in to shrink back. Drawn
+   rather than set as a glyph so the two read as a clear pair at any size. */
+const ICON_EXPAND =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M15 3h6v6M21 3l-7 7M9 21H3v-6M3 21l7-7"/></svg>';
+const ICON_REDUCE =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+  'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M20 10h-6V4M14 10l7-7M4 14h6v6M10 14l-7 7"/></svg>';
 const CONN_MODES = ["map", "timeline", "threads"];
 const SUBLINE = {
   map: "every painter, and how the collection ties them together",
@@ -1706,13 +1718,27 @@ function renderConnections() {
              : CONN.mode === "timeline" ? timelineHtml()
              : threadsHtml();
 
+  // On a phone the aside sits far below the view you're looking at, so a selected
+  // painter announces itself with a chip in the corner — tap it to drop down to
+  // their details. Rendered in every mode; the CSS shows it only where the aside
+  // isn't already beside you.
+  const selNode = CONN.sel && connNode(CONN.sel);
+  const chip = selNode
+    ? '<button type="button" class="conn-selchip" id="conn-selchip" aria-label="See ' +
+      esc(selNode.name) + "’s connections\">" +
+      '<img src="/thumb/' + selNode.cover + '" alt="">' +
+      '<span class="cs-nm">' + esc(selNode.name) + "</span>" +
+      '<span class="cs-go" aria-hidden="true">↓</span></button>'
+    : "";
+
   app.innerHTML =
     '<div class="conn-sub"><div class="titlegroup"><h1>Connections</h1>' +
     '<span class="conn-subline">' + esc(SUBLINE[CONN.mode]) + "</span></div>" +
     '<div class="conn-ctl"><div class="segmented">' + seg + "</div>" +
     '<div class="typechips">' + chips + "</div></div></div>" +
     '<div class="conn-body"><div class="conn-main">' + body + "</div>" +
-    '<aside class="conn-aside">' + asideHtml() + "</aside></div>";
+    '<aside class="conn-aside' + (selNode ? "" : " noselection") + '">' +
+    asideHtml() + "</aside></div>" + chip;
 
   app.querySelectorAll(".segmented button").forEach((b) =>
     b.addEventListener("click", () => {
@@ -1726,6 +1752,14 @@ function renderConnections() {
     }));
   app.querySelectorAll("[data-select]").forEach((el) =>
     el.addEventListener("click", (e) => { e.preventDefault(); connSelect(el.dataset.select); }));
+  const chipEl = $("#conn-selchip");
+  if (chipEl) chipEl.addEventListener("click", () => {
+    // Drop the reader down to the panel with the details. If they were in the
+    // full-screen map, come out of it first — the panel is behind it otherwise.
+    if (CONN.expanded) setMapExpanded(false);
+    const aside = document.querySelector(".conn-aside");
+    if (aside) aside.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   wireAside();
   wireMap();
 }
@@ -1809,6 +1843,9 @@ function mapHtml() {
     '<svg viewBox="0 0 ' + g.canvas.w + " " + g.canvas.h +
     '" preserveAspectRatio="none" aria-hidden="true"></svg>' +
     clusters + nodes + "</div>" +
+    '<button type="button" class="map-expand" id="map-expand"' +
+    ' title="Expand the map to full screen" aria-label="Expand the map">' +
+    ICON_EXPAND + "</button>" +
     '<button type="button" class="map-refresh" id="map-refresh"' +
     ' title="Refresh — pull the latest artists and connections"' +
     ' aria-label="Refresh the map">⟳</button>' +
@@ -1924,15 +1961,46 @@ function zoomTo(z, cx, cy) {
   return true;
 }
 
+// Full screen is a plain class toggle rather than the Fullscreen API: it keeps
+// the map's own controls (and the selection chip) exactly where they are, and
+// survives the re-render a selection triggers. Reframes to the new box each way,
+// so the portraits carry the same air whether the map is a strip or the screen.
+function setMapExpanded(on) {
+  const view = mapView();
+  if (!view) return;
+  CONN.expanded = on;
+  view.classList.toggle("expanded", on);
+  document.body.classList.toggle("map-full", on);
+  const b = $("#map-expand");
+  if (b) {
+    b.innerHTML = on ? ICON_REDUCE : ICON_EXPAND;
+    b.title = on ? "Reduce the map" : "Expand the map to full screen";
+    b.setAttribute("aria-label", b.title);
+  }
+  frameMap(view);       // the box just changed size — measure it and re-fit
+  applyZoom();
+}
+
 function wireMap() {
   const view = mapView();
   if (!view) return;
+  // An expansion survives the re-render a selection triggers: re-dress the DOM
+  // before measuring, since the frame depends on the view's real size.
+  if (CONN.expanded) {
+    view.classList.add("expanded");
+    document.body.classList.add("map-full");
+    const b = $("#map-expand");
+    if (b) { b.innerHTML = ICON_REDUCE; b.title = "Reduce the map";
+             b.setAttribute("aria-label", "Reduce the map"); }
+  }
   // A freshly loaded graph frames itself once, here, where the view finally has
   // a width. Re-renders (a chip toggled, a painter selected) keep the zoom and
   // pan the viewer had — only connectionsView sets fresh.
   if (CONN.fresh) { frameMap(view); CONN.fresh = false; }
   applyZoom();
 
+  const ex = $("#map-expand");
+  if (ex) ex.addEventListener("click", () => setMapExpanded(!CONN.expanded));
   const rf = $("#map-refresh");
   if (rf) rf.addEventListener("click", () => refreshMap(rf));
 
@@ -2278,7 +2346,13 @@ function wireMap() {
 
   // A drag that happens to end on a painter shouldn't also open them.
   view.addEventListener("click", (e) => {
-    if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; }
+    if (swallow) { e.stopPropagation(); e.preventDefault(); swallow = false; return; }
+    // A plain tap on the bare canvas — not a puck, not a control, not the tail
+    // of a drag — lets the current selection go, the way tapping away from a
+    // thing usually does. The capture phase above has already bailed on a drag.
+    if (CONN.sel && !e.target.closest(".map-node, .map-zoom, .map-refresh, .map-expand")) {
+      connSelect(null);
+    }
   }, true);
 
   wireMapReset();
@@ -2288,6 +2362,11 @@ function wireMap() {
    resize has to redraw them. Registered once — the map's own DOM is replaced on
    every render, and a listener per render would pile up. */
 window.addEventListener("resize", () => { if (mapView()) applyZoom(); });
+
+// Escape leaves the full-screen map, the same key that leaves anything full.
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && CONN.expanded && mapView()) setMapExpanded(false);
+});
 
 /* ---------- timeline ---------- */
 

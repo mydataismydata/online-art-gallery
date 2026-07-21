@@ -65,19 +65,55 @@
   background: rgba(23,19,16,.82);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
-/* Reload the artists and connections without leaving the page. Top-right, apart
-   from the zoom cluster below it, since it does something else entirely. */
-.map-refresh {
-  position: absolute; right: 14px; top: 14px; z-index: 8;
-  width: 34px; height: 34px; cursor: pointer; border-radius: 50%;
-  border: 1px solid var(--hair-strong); background: rgba(23,19,16,.82);
+/* A round control shared by refresh and expand: a blurred coin over the map. */
+.map-refresh, .map-expand {
+  position: absolute; z-index: 8; width: 34px; height: 34px; cursor: pointer;
+  border-radius: 50%; border: 1px solid var(--hair-strong);
+  background: rgba(23,19,16,.82); color: var(--dim2);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-  font: 400 17px/1 var(--sans); color: var(--dim2);
   transition: background .25s ease, color .25s ease;
 }
-.map-refresh:hover { background: var(--gold-tint2); color: var(--display2); }
+.map-refresh:hover, .map-expand:hover { background: var(--gold-tint2); color: var(--display2); }
+/* Refresh joins the zoom cluster on the right edge, just above it, leaving the
+   top-right corner clear for the selected-painter chip. */
+.map-refresh { right: 14px; bottom: 90px; font: 400 17px/1 var(--sans); }
 .map-refresh.spinning { animation: map-spin .7s linear infinite; }
 @keyframes map-spin { to { transform: rotate(360deg); } }
+/* Full-screen toggle, top-left, out of the way of everything else. */
+.map-expand { left: 14px; top: 14px; display: flex; align-items: center; justify-content: center; }
+.map-expand svg { width: 17px; height: 17px; display: block; }
+
+/* Full screen: the map leaves the grid and fills the window. Its own controls
+   are absolute inside it, so they come along; the offsets clear a phone's notch. */
+.map-view.expanded {
+  position: fixed; inset: 0; z-index: 200;
+  width: 100vw; height: 100vh; aspect-ratio: auto; border: none;
+}
+.map-view.expanded .map-expand { top: calc(14px + env(safe-area-inset-top, 0px)); }
+.map-view.expanded .map-zoom { bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+.map-view.expanded .map-refresh { bottom: calc(90px + env(safe-area-inset-bottom, 0px)); }
+body.map-full { overflow: hidden; }
+
+/* The selected painter, announced in the corner when the details panel is out of
+   sight below. Above the full-screen map so it rides over it too. Shown only on
+   the narrow layout (see responsive.css) — the wide layout has the panel beside
+   the map already. */
+.conn-selchip {
+  display: none; position: fixed; top: 64px; right: 12px; z-index: 210;
+  align-items: center; gap: 9px; padding: 5px 13px 5px 5px; border-radius: 30px;
+  cursor: pointer; border: 1px solid var(--gold-line); background: rgba(23,19,16,.93);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  box-shadow: 0 8px 26px rgba(0,0,0,.55);
+}
+.conn-selchip img {
+  width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  border: 1px solid var(--gold-line2);
+}
+.conn-selchip .cs-nm {
+  font: 400 13px var(--sans); color: var(--display2);
+  max-width: 44vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.conn-selchip .cs-go { font: 400 15px/1 var(--sans); color: var(--gold); }
 .map-zoom button {
   width: 34px; height: 31px; cursor: pointer; background: none; border: none;
   font: 400 16px/1 var(--sans); color: var(--dim2);
