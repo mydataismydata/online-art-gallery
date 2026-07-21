@@ -27,7 +27,7 @@ _ARTIST_OCCUPATIONS = {
 
 FIELDS = ("name", "born", "died", "birthplace", "nationality", "movements",
           "description", "wikidata_id", "wikipedia_url", "source", "updated",
-          "cover", "work_order")
+          "cover", "work_order", "work_order_pids")
 
 
 def _path(name):
@@ -76,9 +76,10 @@ def set_cover(name, work_id):
 
 
 def set_order(name, work_ids):
-    """Set (or clear, when falsy) the artist's hand-made hang: the work ids of
-    their gallery in the order the owner arranged them. Written directly, like
-    the cover, so bio fields are never disturbed."""
+    """Set (or clear, when falsy) the artist's hand-made hang on the box that
+    AUTHORS it: the local work ids, in the arranged order. Written directly, like
+    the cover, so bio fields are never disturbed. The public box doesn't author —
+    it receives pids, see set_order_pids."""
     data = load(name) or {"name": name}
     ids = [w for w in (work_ids or []) if isinstance(w, str) and w]
     if ids:
@@ -90,27 +91,55 @@ def set_order(name, work_ids):
     return data
 
 
+def set_order_pids(name, pids):
+    """The order as it ARRIVES on the public box: persistent publish ids, stored
+    verbatim and resolved to this box's work ids only when the gallery is viewed
+    (see apply_order). Storing pids rather than resolving them here is what makes
+    a pull robust — the works don't have to be scannable at import time, only
+    present by the time someone looks, which they always are."""
+    data = load(name) or {"name": name}
+    clean = [p for p in (pids or []) if isinstance(p, str) and p]
+    if clean:
+        data["work_order_pids"] = clean
+    else:
+        data.pop("work_order_pids", None)
+    data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    _path(name).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    return data
+
+
 def apply_order(name, works):
     """The artist's works in the curator's hand order. Ordered ones come first,
     in their arranged sequence; anything the order doesn't name — a new download,
-    a fresh upload — follows in the order it arrived. Ids that no longer resolve
-    are simply skipped, so a deleted painting can't jam the hang.
+    a fresh upload — follows in the order it arrived. Entries that no longer
+    resolve are simply skipped, so a deleted painting can't jam the hang.
+
+    Two arrangements can be stored, and they key on different things: the private
+    box holds `work_order` (its own work ids, since an unpublished work has no
+    pid yet); the public box holds `work_order_pids` (the published ids, matched
+    against each work's own pid at serve time). Pids win when both are present —
+    a work is always present by the time it's viewed, so a pid never fails to
+    resolve the way an import-time id could.
 
     Returns (works, arranged): `arranged` says an order actually applied, which
     is what tells the artist page to offer its reset."""
     info = load(name) or {}
-    order = info.get("work_order") or []
-    if not order:
-        return works, False
+    pid_order = info.get("work_order_pids") or []
+    if pid_order:
+        return _by_key(works, pid_order, lambda w: w.get("pid"))
+    return _by_key(works, info.get("work_order") or [], lambda w: w["id"])
+
+
+def _by_key(works, order, key_of):
     pos = {}
-    for i, wid in enumerate(order):
-        if isinstance(wid, str) and wid not in pos:
-            pos[wid] = i
-    named = [w for w in works if w["id"] in pos]
+    for i, k in enumerate(order):
+        if isinstance(k, str) and k not in pos:
+            pos[k] = i
+    named = [w for w in works if key_of(w) in pos]
     if not named:
         return works, False
-    named.sort(key=lambda w: pos[w["id"]])
-    return named + [w for w in works if w["id"] not in pos], True
+    named.sort(key=lambda w: pos[key_of(w)])
+    return named + [w for w in works if key_of(w) not in pos], True
 
 
 def normalize_manual(payload):

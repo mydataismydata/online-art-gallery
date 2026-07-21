@@ -837,11 +837,13 @@ def _import_artists(repo):
             continue
         data = {f: rec[f] for f in _BIO_FIELDS if rec.get(f) not in (None, "", [])}
         cover = wid_by_pid.get(rec.get("cover_pid"))
-        # The hang arrives as pids and hangs as this box's ids. A pid that isn't
-        # here (deleted on this box and tombstoned) just drops out of the line.
-        order = [wid_by_pid[p] for p in rec.get("work_order_pids") or []
-                 if p in wid_by_pid]
-        if not data and not cover and not order:
+        # The hang is stored as the PUBLISHED ids, verbatim — not resolved to this
+        # box's work ids here. Resolving at import time meant the order silently
+        # dropped any work not yet scannable (e.g. added in this very pull), which
+        # is why an order used to need a second pull to appear. apply_order maps
+        # the pids to works at serve time instead, when they're all present.
+        order_pids = [p for p in rec.get("work_order_pids") or [] if isinstance(p, str)]
+        if not data and not cover and not order_pids:
             continue
         if cover:
             data["cover"] = cover
@@ -851,17 +853,17 @@ def _import_artists(repo):
         same = bool(cur) and all(
             (cur.get(f) or None) == (data.get(f) or None) for f in _BIO_FIELDS)
         same = same and (not cover or (cur or {}).get("cover") == cover)
-        same = same and ((cur or {}).get("work_order") or []) == order
+        same = same and ((cur or {}).get("work_order_pids") or []) == order_pids
         if same:
             out["unchanged"] += 1
             continue
         artistinfo.save(name, data)
-        # Set or cleared explicitly: save() deliberately preserves an existing
-        # hang, but here the private box is the author — no order means none.
-        if order:
-            artistinfo.set_order(name, order)
-        elif (artistinfo.load(name) or {}).get("work_order"):
-            artistinfo.set_order(name, None)
+        # Set or cleared explicitly: save() preserves an existing hang, but here
+        # the private box is the author — no order in the record means none here.
+        if order_pids:
+            artistinfo.set_order_pids(name, order_pids)
+        elif (artistinfo.load(name) or {}).get("work_order_pids"):
+            artistinfo.set_order_pids(name, None)
         out["updated" if cur else "added"] += 1
     return out
 
