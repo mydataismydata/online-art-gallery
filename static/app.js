@@ -3452,6 +3452,9 @@ function muArtEl(item, x, y, z, rotY, ri) {
   // The border IS the frame — the gilded border-image in museum.css rides on
   // it; without this line the picture stretches over the moulding.
   el.style.borderWidth = MU_FRAME + "px";
+  // Which frame a work wears is its own to keep: hashed from the id, so a
+  // wall mixes frames but every painting keeps its frame visit after visit.
+  if (parseInt(item.work.id.slice(0, 6), 16) % 2) el.classList.add("mu-f2");
   const img = new Image();
   img.src = thumbSrc(item.work);
   img.alt = item.work.title || "";

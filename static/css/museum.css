@@ -40,12 +40,13 @@ body.mu-open { overflow: hidden; }
 .mu-door { background: #575044; }               /* doorway casing */
 
 /* A painting: the div is the frame — a real gilded frame, photographed with a
-   transparent window (img/frame1.png), worn as a border-image: the corner
+   transparent window (img/frame*.png), worn as a border-image: the corner
    carving stays at the corners, the rails stretch to fit any canvas. The
    border width (the frame's width) is set inline and must stay in step with
-   MU_FRAME in app.js (9 cm). The slice numbers are that frame's measured
+   MU_FRAME in app.js (9 cm). The slice numbers are each frame's measured
    moulding, in source pixels: top right bottom left. Shadow is drop-shadow,
-   not box-shadow, so it hugs the carving's silhouette instead of boxing it. */
+   not box-shadow, so it hugs the carving's silhouette instead of boxing it.
+   Which work wears which frame is hashed from its id in muArtEl. */
 .mu-art {
   border: solid transparent;
   border-image: url("../img/frame1.png") 62 64 62 66 stretch;
@@ -54,6 +55,7 @@ body.mu-open { overflow: hidden; }
   backface-visibility: hidden;
   cursor: pointer;
 }
+.mu-art.mu-f2 { border-image: url("../img/frame2.png") 114 111 110 113 stretch; }
 .mu-art img {
   width: 100%; height: 100%; object-fit: fill; display: block;
   background: #2a2622;
