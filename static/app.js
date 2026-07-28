@@ -3112,6 +3112,8 @@ function muRow(w, wall) {
       opts + "</select>" +
       '<button class="arow-btn aup" type="button" title="Move up">↑</button>' +
       '<button class="arow-btn adown" type="button" title="Move down">↓</button>' +
+      '<button class="arow-btn aupr" type="button" title="Up a room — joins the end of the room above">⇈</button>' +
+      '<button class="arow-btn adownr" type="button" title="Down a room — joins the top of the room below">⇊</button>' +
       '<button class="arow-btn asplit" type="button" title="Cut here: this painting starts a new room">✂</button>' +
       '<button class="arow-btn aunhang" type="button" title="Take off the wall (stays in the library)">✕</button>' +
       "</span></li>"
@@ -3255,6 +3257,17 @@ function wireMuseumArrange(container) {
       const nl = ns.querySelector(".marrange");
       rows.slice(idx).forEach((r) => nl.appendChild(r));
       muSaveArrangement(true);
+    } else if (btn.classList.contains("aupr") || btn.classList.contains("adownr")) {
+      // The whole-room stride: same landings as walking the single arrow off
+      // a room's edge — the end of the room above, the top of the room below.
+      const row = btn.closest(".arow");
+      const near = btn.classList.contains("aupr")
+        ? sec.previousElementSibling : sec.nextElementSibling;
+      if (!near || !near.classList.contains("mroom")) return;
+      const list = near.querySelector(".marrange");
+      if (btn.classList.contains("aupr")) list.appendChild(row);
+      else list.insertBefore(row, list.firstChild);
+      muSaveArrangement(true);
     } else if (btn.classList.contains("aup") || btn.classList.contains("adown")) {
       // The drag's sober cousin: one step up or down, and past the top or
       // bottom of a room the painting crosses the cut into the neighbour.
@@ -3302,7 +3315,8 @@ async function museumArrangeView(keepScroll) {
     " · " + rooms.length + (rooms.length === 1 ? " room" : " rooms") +
     " · every change saves as you make it</p></div></div>" +
     '<p class="arrange-hint">Drag a painting by its handle, or nudge it with ' +
-    "↑ ↓ — past a room's edge it crosses into the neighbour. The wall picker " +
+    "↑ ↓ — past a room's edge it crosses into the neighbour — and ⇈ ⇊ " +
+    "stride a whole room at a time. The wall picker " +
     "pins a painting to a compass wall (<b>N</b> is the far wall as you walk " +
     "in, <b>S</b> at your back, <b>W</b> left, <b>E</b> right; auto lets the " +
     "room decide). ✂ cuts a room in two at that painting; <b>Tight</b> hangs " +
