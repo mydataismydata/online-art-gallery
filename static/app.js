@@ -3417,9 +3417,12 @@ function muT(x, y, z, rot) {
          z.toFixed(1) + "px)" + (rot || "");
 }
 
-function muArtEl(item, x, y, z, rotY) {
+function muArtEl(item, x, y, z, rotY, ri) {
   const fw = item.l + 2 * MU_FRAME, fh = item.h + 2 * MU_FRAME;
   const el = muEl("mu-art", fw, fh, muT(x, y, z, " rotateY(" + rotY + "deg)"));
+  // The padding IS the frame: the element is canvas + moulding, and without
+  // this line the picture stretches over the moulding and wears the liner.
+  el.style.padding = MU_FRAME + "px";
   const img = new Image();
   img.src = thumbSrc(item.work);
   img.alt = item.work.title || "";
@@ -3427,7 +3430,7 @@ function muArtEl(item, x, y, z, rotY) {
   el.appendChild(img);
   el.dataset.id = item.work.id;
   const rad = rotY * Math.PI / 180;
-  MU.arts.push({ el: el, img: img, work: item.work, est: item.est,
+  MU.arts.push({ el: el, img: img, work: item.work, est: item.est, ri: ri,
                  x: x, z: z, w: fw, h: fh,
                  nx: Math.sin(rad), nz: Math.cos(rad), hi: false });
   return el;
@@ -3508,7 +3511,7 @@ function muBuildRoom(g, i, geoms, world) {
 /* Hang one room: segments in walk order, each group of slots centred on its
    wall, every canvas centred on the hang line. `off` lifts the art a shade off
    the wall so the frame never fights the plane it hangs on. */
-function muHangRoom(g, roomEl) {
+function muHangRoom(g, roomEl, ri) {
   const W = g.W, D = g.D, z0 = g.z0, zf = g.z0 - D, zc = z0 - D / 2;
   const segs = [];
   const far = W - (g.hasExit ? MU_DOOR_W : 0);
@@ -3545,7 +3548,7 @@ function muHangRoom(g, roomEl) {
       };
       if (slot.items.length === 1) {
         const it = slot.items[0];
-        roomEl.appendChild(muArtEl(it, x, -MU_HANG, z, seg.rot));
+        roomEl.appendChild(muArtEl(it, x, -MU_HANG, z, seg.rot, ri));
         label(it.work, -MU_HANG);
       } else {
         // Two high: the pair shares the hang line, first work on top.
@@ -3553,8 +3556,8 @@ function muHangRoom(g, roomEl) {
         const ha = a.h + 2 * MU_FRAME, hb = b.h + 2 * MU_FRAME;
         const S = ha + hb + MU_STACK_GAP;
         const ya = -(MU_HANG + S / 2 - ha / 2), yb = -(MU_HANG - S / 2 + hb / 2);
-        roomEl.appendChild(muArtEl(a, x, ya, z, seg.rot));
-        roomEl.appendChild(muArtEl(b, x, yb, z, seg.rot));
+        roomEl.appendChild(muArtEl(a, x, ya, z, seg.rot, ri));
+        roomEl.appendChild(muArtEl(b, x, yb, z, seg.rot, ri));
         label(a.work, ya);
         label(b.work, yb);
       }
@@ -3568,6 +3571,9 @@ function muBuild(museum) {
   MU.rooms = [];
   MU.arts = [];
   const rooms = museum.rooms.filter((r) => r.works.length);
+  // Each room's works, in hang order — the walk a room hands the viewer when a
+  // painting is opened: the room browses like a collection.
+  MU.roomWorks = rooms.map((r) => r.works);
   const geoms = [];
   rooms.forEach((room, i) => {
     const slots = muSlots(room.works, room.layout);
@@ -3582,7 +3588,7 @@ function muBuild(museum) {
     g.z0 = z0;
     z0 -= g.D;
     const el = muBuildRoom(g, i, geoms, MU.world);
-    muHangRoom(g, el);
+    muHangRoom(g, el, i);
     MU.rooms.push({ W: g.W, D: g.D, z0: g.z0, zf: g.z0 - g.D,
                     layout: g.layout, el: el });
   });
@@ -3671,28 +3677,53 @@ function muNearest(ts) {
     best.hi = true;                    // walk up close and the full image loads
     best.img.src = viewSrc(best.work);
   }
-  if (best === MU.near) return;
-  MU.near = best;
   const el = document.getElementById("mu-placard");
   if (!el) return;
-  if (!best) { el.classList.remove("show"); return; }
-  const w = best.work;
-  const size = cmDims(w) || (best.est ? "size not recorded" : "");
-  el.innerHTML =
-    '<span class="mu-pl-t">' + esc(w.title || "Untitled") + "</span>" +
-    '<span class="mu-pl-m">' +
-    esc([w.artist, w.date || w.year, w.medium, size].filter(Boolean).join(" · ")) +
-    "</span>";
-  el.classList.add("show");
+  if (best !== MU.near) {
+    MU.near = best;
+    if (!best) { el.classList.remove("show"); }
+    else {
+      const w = best.work;
+      const size = cmDims(w) || (best.est ? "size not recorded" : "");
+      el.innerHTML =
+        '<span class="mu-pl-t">' + esc(w.title || "Untitled") + "</span>" +
+        '<span class="mu-pl-m">' +
+        esc([w.artist, w.date || w.year, w.medium, size].filter(Boolean).join(" · ")) +
+        "</span>" +
+        '<span class="mu-pl-open">' +
+        (MU.touch ? "tap the painting to open it" : "click the painting to open it") +
+        "</span>";
+      el.classList.add("show");
+    }
+  }
+  // The cue only shows once you're actually standing before the piece — the
+  // same test the click uses, so the chip never promises what a click won't do.
+  const cue = el.querySelector(".mu-pl-open");
+  if (cue) cue.classList.toggle("on", !!(best && muStandingBefore(best)));
 }
 
-/* Click a painting and the camera strolls over to meet it square-on, at a
-   distance where it fills the view comfortably. Any arrow key hands the walk
-   straight back. */
-function muGlideTo(art) {
+/* Where the camera stands to look at a painting properly: square-on, at a
+   distance where it fills the view comfortably. */
+function muGlideTarget(art) {
   const d = Math.max(150, Math.min(520, 1.25 * Math.max(art.w, art.h * 1.4)));
-  const to = { x: art.x + art.nx * d, z: art.z + art.nz * d,
-               yaw: Math.atan2(-art.nx, art.nz) };
+  return { x: art.x + art.nx * d, z: art.z + art.nz * d,
+           yaw: Math.atan2(-art.nx, art.nz) };
+}
+
+/* Already stood before it? Then a click means "open it", not "approach it". */
+function muStandingBefore(art) {
+  const to = muGlideTarget(art);
+  if (Math.hypot(MU.cam.x - to.x, MU.cam.z - to.z) > 80) return false;
+  let dy = to.yaw - MU.cam.yaw;
+  while (dy > Math.PI) dy -= 2 * Math.PI;
+  while (dy < -Math.PI) dy += 2 * Math.PI;
+  return Math.abs(dy) < 0.35;
+}
+
+/* Click a painting and the camera strolls over to meet it square-on. Any
+   arrow key hands the walk straight back. */
+function muGlideTo(art) {
+  const to = muGlideTarget(art);
   const from = { x: MU.cam.x, z: MU.cam.z, yaw: MU.cam.yaw };
   let dy = to.yaw - from.yaw;
   while (dy > Math.PI) dy -= 2 * Math.PI;
@@ -3740,6 +3771,10 @@ function muFrame(ts) {
 function muKeyDown(e) {
   if (!MU.active) return;
   if (document.querySelector(".modal-backdrop")) return;
+  // A painting is open over the museum: the viewer owns every key (this runs
+  // in the capture phase, so the gate is checked while the viewer is still
+  // open — its own handler then walks or closes as usual).
+  if (viewer.classList.contains("open")) return;
   if (e.key === "Escape") { location.hash = "#/"; return; }
   if (MU_KEYSET[e.key]) {
     e.preventDefault();              // the page behind must not scroll
@@ -3793,8 +3828,8 @@ function muTeardown() {
   if (!MU.active) return;
   MU.active = false;
   cancelAnimationFrame(MU.raf);
-  document.removeEventListener("keydown", muKeyDown);
-  document.removeEventListener("keyup", muKeyUp);
+  document.removeEventListener("keydown", muKeyDown, true);
+  document.removeEventListener("keyup", muKeyUp, true);
   window.removeEventListener("blur", muBlur);
   window.removeEventListener("resize", muResize);
   document.body.classList.remove("mu-open");
@@ -3848,21 +3883,24 @@ async function museumView() {
           '<button class="dp dp-r" data-k="ArrowRight" aria-label="Turn right">▶</button>' +
           '<button class="dp dp-d" data-k="ArrowDown" aria-label="Walk back">▼</button>' +
         "</div>" +
-        '<div class="mu-hint">↑ ↓ walk · ← → turn · scroll to zoom · click a painting to approach</div>' +
+        '<div class="mu-hint">↑ ↓ walk · ← → turn · scroll to zoom · click a painting to approach, again to open</div>' +
       "</div>" +
       '<div class="mu-rotate">⟳&nbsp; Turn your phone sideways — the museum is a landscape.</div>' +
     "</div>";
 
   MU.vp = $("#mu-vp");
   MU.world = $("#mu-world");
+  MU.touch = touch;
   MU.active = true;
   document.body.classList.add("mu-open");
   muResize();
   muBuild(museum);
   muApply();
 
-  document.addEventListener("keydown", muKeyDown);
-  document.addEventListener("keyup", muKeyUp);
+  // Capture phase, so the viewer-open gate above reads the viewer's state
+  // before the viewer's own (bubble) handler acts on the same key.
+  document.addEventListener("keydown", muKeyDown, true);
+  document.addEventListener("keyup", muKeyUp, true);
   window.addEventListener("blur", muBlur);
   window.addEventListener("resize", muResize);
   const el = $("#museum");
@@ -3875,7 +3913,17 @@ async function museumView() {
     const hit = e.target.closest(".mu-art");
     if (!hit || MU.pinch) return;
     const art = MU.arts.find((a) => a.el === hit);
-    if (art) muGlideTo(art);
+    if (!art) return;
+    // First click strolls you over; a click once you're standing there opens
+    // the piece properly — the same viewer a gallery or collection opens, with
+    // this room as the walk, so ← → browse the room's other pieces.
+    if (muStandingBefore(art)) {
+      const works = MU.roomWorks[art.ri] || [art.work];
+      const i = works.findIndex((w) => w.id === art.work.id);
+      openViewer(works, Math.max(0, i));
+    } else {
+      muGlideTo(art);
+    }
   });
 
   // The D-pad presses the same keys the keyboard does.
