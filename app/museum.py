@@ -23,6 +23,11 @@ _lock = threading.RLock()
 LAYOUTS = ("tight", "spacious")
 DEFAULT_LAYOUT = "spacious"
 
+# Compass walls, as the walk reads them: you enter heading north, so "n" is the
+# far wall, "s" the wall at your back, "w" left and "e" right. A work absent
+# from a room's walls map hangs wherever the layout finds space.
+WALLS = ("n", "s", "e", "w")
+
 # Walls for runaway payloads, far above any hang a person would build by hand.
 MAX_ROOMS = 60
 MAX_WORKS = 3000
@@ -55,7 +60,10 @@ def _rooms(rec):
         if not isinstance(r, dict):
             continue
         ids = [w for w in r.get("work_ids") or [] if isinstance(w, str) and w]
-        out.append({"work_ids": ids, "layout": clean_layout(r.get("layout"))})
+        walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
+        walls = {k: v for k, v in walls.items() if k in ids and v in WALLS}
+        out.append({"work_ids": ids, "walls": walls,
+                    "layout": clean_layout(r.get("layout"))})
     return out
 
 
@@ -69,20 +77,22 @@ def detail():
     rooms, hung = [], 0
     for r in _rooms(rec):
         works = [w for w in (library.get(wid) for wid in r["work_ids"]) if w]
-        rooms.append({"works": works, "layout": r["layout"]})
+        rooms.append({"works": works, "walls": r["walls"], "layout": r["layout"]})
         hung += len(works)
     return {"rooms": rooms, "count": hung,
             "updated": (rec or {}).get("updated")}
 
 
 def save(rooms_in):
-    """Replace the whole hang: [{work_ids: [...], layout: "tight"|"spacious"}].
+    """Replace the whole hang:
+    [{work_ids: [...], walls: {id: "n"|"s"|"e"|"w"}, layout: "tight"|"spacious"}].
 
     Ids are validated against the library and a work hangs once — a duplicate
     keeps its first placement. Unknown ids are dropped rather than stored:
     nothing else does the museum's bookkeeping, so a stale id would sit in the
-    file forever. Empty rooms are kept; pruning them is the arrange screen's
-    decision, not a side effect of saving."""
+    file forever. The walls map is sparse — only pinned works appear; anything
+    else hangs where the layout finds space. Empty rooms are kept; pruning them
+    is the arrange screen's decision, not a side effect of saving."""
     if not isinstance(rooms_in, list):
         raise ValueError("rooms must be a list.")
     if len(rooms_in) > MAX_ROOMS:
@@ -102,7 +112,11 @@ def save(rooms_in):
         total += len(ids)
         if total > MAX_WORKS:
             raise ValueError("That's over %d works — hang fewer." % MAX_WORKS)
-        rooms.append({"work_ids": ids, "layout": clean_layout(r.get("layout"))})
+        walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
+        walls = {str(k): v for k, v in walls.items()
+                 if str(k) in ids and v in WALLS}
+        rooms.append({"work_ids": ids, "walls": walls,
+                      "layout": clean_layout(r.get("layout"))})
     with _lock:
         rec = _read() or {}
         rec["rooms"] = rooms
@@ -146,6 +160,7 @@ def unhang(ids):
             keep = [w for w in r["work_ids"] if w not in drop]
             n += len(r["work_ids"]) - len(keep)
             r["work_ids"] = keep
+            r["walls"] = {k: v for k, v in r["walls"].items() if k not in drop}
         if n:
             rec["rooms"] = rooms
             _write(rec)
@@ -177,6 +192,7 @@ def remap_works(id_map):
             moved = [id_map.get(w, w) for w in r["work_ids"]]
             if moved != r["work_ids"]:
                 r["work_ids"] = moved
+                r["walls"] = {id_map.get(k, k): v for k, v in r["walls"].items()}
                 changed = True
         if changed:
             rec["rooms"] = rooms

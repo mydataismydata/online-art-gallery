@@ -210,8 +210,19 @@ body.mu-open { overflow: hidden; }
 
 .mroom-merge { font-size: 12px; }
 
-/* Row extras the collections list doesn't have: cut here, and take down. */
-.arow-btns { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+/* Row extras the collections list doesn't have: the wall picker, a step up or
+   down, cut here, and take down. */
+.arow-btns { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+.awall {
+  height: 34px; padding: 0 8px; cursor: pointer;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--hair-mid); border-radius: 0;
+  font: 600 10px var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  -webkit-appearance: none; appearance: none;
+}
+.awall:hover, .awall:focus { color: var(--text); border-color: var(--hair-strong); }
+/* A pinned wall is a decision — keep it visible without the hover. */
+.awall.pinned { color: var(--gold-hi); border-color: var(--gold-line); }
 .arow-btn {
   width: 34px; height: 34px; cursor: pointer;
   background: none; border: 1px solid transparent;

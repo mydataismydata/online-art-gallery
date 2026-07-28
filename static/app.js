@@ -3088,12 +3088,17 @@ async function saveMuseum(rooms) {
 
 /* ---------- arranging the museum ---------- */
 
-function muRow(w) {
+const MU_WALLS = [["", "auto"], ["n", "N"], ["s", "S"], ["e", "E"], ["w", "W"]];
+
+function muRow(w, wall) {
   const meta = [w.artist, w.date || w.year, cmDims(w)].filter(Boolean).join(" · ");
   // A work with no recorded size still hangs — at an assumed size — but the
   // owner arranging rooms is exactly the person who can fix it, so say so.
   const est = cmDims(w) ? "" :
     '<span class="mu-est" title="No recorded size — hangs at an assumed size until height and length are set on its placard">est. size</span>';
+  const opts = MU_WALLS.map(([v, label]) =>
+    '<option value="' + v + '"' + ((wall || "") === v ? " selected" : "") + ">" +
+    label + "</option>").join("");
   return (
     '<li class="arow" data-id="' + esc(w.id) + '">' +
       '<span class="agrip" aria-hidden="true" title="Drag to move"></span>' +
@@ -3102,6 +3107,11 @@ function muRow(w) {
       '<span class="atext"><span class="at">' + esc(w.title) + est + "</span>" +
       (meta ? '<span class="am">' + esc(meta) + "</span>" : "") + "</span>" +
       '<span class="arow-btns">' +
+      '<select class="awall' + (wall ? " pinned" : "") +
+      '" title="Which wall this painting hangs on — N is the far wall as you walk in, S the one at your back, W left, E right; auto lets the room decide">' +
+      opts + "</select>" +
+      '<button class="arow-btn aup" type="button" title="Move up">↑</button>' +
+      '<button class="arow-btn adown" type="button" title="Move down">↓</button>' +
       '<button class="arow-btn asplit" type="button" title="Cut here: this painting starts a new room">✂</button>' +
       '<button class="arow-btn aunhang" type="button" title="Take off the wall (stays in the library)">✕</button>' +
       "</span></li>"
@@ -3126,17 +3136,26 @@ function muRoomSection(room, i, nrooms) {
       '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
       '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" + drop +
       "</header>" +
-      '<ol class="arrange marrange">' + room.works.map(muRow).join("") + "</ol>" +
+      '<ol class="arrange marrange">' +
+      room.works.map((w) => muRow(w, (room.walls || {})[w.id])).join("") + "</ol>" +
       (n ? "" : '<p class="mroom-empty tiny">Empty — drag paintings in.</p>') +
     "</section>"
   );
 }
 
 function muSerialize() {
-  return [...document.querySelectorAll("#mrooms .mroom")].map((sec) => ({
-    work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
-    layout: sec.dataset.layout,
-  }));
+  return [...document.querySelectorAll("#mrooms .mroom")].map((sec) => {
+    const walls = {};
+    sec.querySelectorAll(".arow").forEach((r) => {
+      const sel = r.querySelector(".awall");
+      if (sel && sel.value) walls[r.dataset.id] = sel.value;
+    });
+    return {
+      work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
+      walls: walls,
+      layout: sec.dataset.layout,
+    };
+  });
 }
 
 /* Save what's on screen; on failure re-render from the server so the screen
@@ -3236,11 +3255,34 @@ function wireMuseumArrange(container) {
       const nl = ns.querySelector(".marrange");
       rows.slice(idx).forEach((r) => nl.appendChild(r));
       muSaveArrangement(true);
+    } else if (btn.classList.contains("aup") || btn.classList.contains("adown")) {
+      // The drag's sober cousin: one step up or down, and past the top or
+      // bottom of a room the painting crosses the cut into the neighbour.
+      const row = btn.closest(".arow");
+      const up = btn.classList.contains("aup");
+      const sib = up ? row.previousElementSibling : row.nextElementSibling;
+      if (sib && sib.classList.contains("arow")) {
+        row.parentElement.insertBefore(row, up ? sib : sib.nextSibling);
+      } else {
+        const near = up ? sec.previousElementSibling : sec.nextElementSibling;
+        if (!near || !near.classList.contains("mroom")) return;
+        const list = near.querySelector(".marrange");
+        if (up) list.appendChild(row);
+        else list.insertBefore(row, list.firstChild);
+      }
+      muSaveArrangement(true);
     } else if (btn.classList.contains("aunhang")) {
       const row = btn.closest(".arow");
       if (row) row.remove();
       muSaveArrangement(true);
     }
+  });
+
+  // Pinning a wall moves nothing on this screen — just save the choice.
+  container.addEventListener("change", (e) => {
+    if (!e.target.classList.contains("awall")) return;
+    e.target.classList.toggle("pinned", !!e.target.value);
+    muSaveArrangement(false);
   });
 }
 
@@ -3259,11 +3301,14 @@ async function museumArrangeView(keepScroll) {
     '<p class="sub">' + museum.count + (museum.count === 1 ? " work" : " works") +
     " · " + rooms.length + (rooms.length === 1 ? " room" : " rooms") +
     " · every change saves as you make it</p></div></div>" +
-    '<p class="arrange-hint">Drag a painting by its handle — within a room or into ' +
-    "another. ✂ cuts a room in two at that painting; <b>Tight</b> hangs close " +
-    "(small pieces pair up, two high) and sizes the room snug; <b>Spacious</b> " +
-    "hangs one generous line. Add works by pressing <b>H</b> on any painting in " +
-    "the fullscreen viewer.</p>";
+    '<p class="arrange-hint">Drag a painting by its handle, or nudge it with ' +
+    "↑ ↓ — past a room's edge it crosses into the neighbour. The wall picker " +
+    "pins a painting to a compass wall (<b>N</b> is the far wall as you walk " +
+    "in, <b>S</b> at your back, <b>W</b> left, <b>E</b> right; auto lets the " +
+    "room decide). ✂ cuts a room in two at that painting; <b>Tight</b> hangs " +
+    "close (small pieces pair up, two high) and sizes the room snug; " +
+    "<b>Spacious</b> hangs one generous line. Add works by pressing <b>H</b> " +
+    "on any painting in the fullscreen viewer.</p>";
   app.innerHTML = page(
     head +
     '<div id="mrooms">' +
@@ -3332,22 +3377,26 @@ function muArtSize(w) {
 
 /* A slot is what occupies one width of wall: one framed work, or — in a tight
    room — two small consecutive works stacked, never more than two. */
-function muSlots(works, layout) {
+function muSlots(works, layout, walls) {
   const F2 = MU_FRAME * 2;
-  const sized = works.map((w) => Object.assign({ work: w }, muArtSize(w)));
+  const sized = works.map((w) =>
+    Object.assign({ work: w, pin: (walls || {})[w.id] || null }, muArtSize(w)));
   const slots = [];
   // Only a piece we KNOW is small may stack: an unmeasured work hangs at an
   // assumed size, and guessing a painting small enough to pile up is exactly
-  // the guess a museum doesn't make.
+  // the guess a museum doesn't make. And a pair stacks only bound for the
+  // same wall — pinned alike, or both left to the room.
   const small = (s) => !s.est && s.h <= 66 && s.l <= 110;
   for (let i = 0; i < sized.length; i++) {
     const a = sized[i], b = sized[i + 1];
-    if (layout === "tight" && b && small(a) && small(b)) {
-      slots.push({ items: [a, b], w: Math.max(a.l, b.l) + F2,
+    if (layout === "tight" && b && small(a) && small(b) && a.pin === b.pin) {
+      slots.push({ items: [a, b], pin: a.pin, idx: slots.length,
+                   w: Math.max(a.l, b.l) + F2,
                    h: a.h + b.h + 2 * F2 + MU_STACK_GAP });
       i++;
     } else {
-      slots.push({ items: [a], w: a.l + F2, h: a.h + F2 });
+      slots.push({ items: [a], pin: a.pin, idx: slots.length,
+                   w: a.l + F2, h: a.h + F2 });
     }
   }
   return slots;
@@ -3377,57 +3426,71 @@ function muRoomGeom(slots, layout, hasExit, hasEntryDoor) {
 function muRoomSegs(g) {
   const W = g.W, D = g.D, z0 = g.z0 || 0, zf = z0 - D, zc = z0 - D / 2;
   const segs = [];
-  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: 90,  cx: -W / 2, cz: zc });
+  segs.push({ wall: "w", len: D, cap: D - 2 * MU_MARGIN, rot: 90,  cx: -W / 2, cz: zc });
   if (g.hasExit) {
     const sl = (W - MU_DOOR_W) / 2;
-    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: -(MU_DOOR_W + sl) / 2, cz: zf });
-    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: (MU_DOOR_W + sl) / 2, cz: zf });
+    segs.push({ wall: "n", len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: -(MU_DOOR_W + sl) / 2, cz: zf });
+    segs.push({ wall: "n", len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: (MU_DOOR_W + sl) / 2, cz: zf });
   } else {
-    segs.push({ len: W, cap: W - 2 * MU_MARGIN, rot: 0, cx: 0, cz: zf });
+    segs.push({ wall: "n", len: W, cap: W - 2 * MU_MARGIN, rot: 0, cx: 0, cz: zf });
   }
-  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: -90, cx: W / 2, cz: zc });
+  segs.push({ wall: "e", len: D, cap: D - 2 * MU_MARGIN, rot: -90, cx: W / 2, cz: zc });
   if (g.hasEntry) {
     const sl = (W - MU_DOOR_W) / 2;
-    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: (MU_DOOR_W + sl) / 2, cz: z0 });
-    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: -(MU_DOOR_W + sl) / 2, cz: z0 });
+    segs.push({ wall: "s", len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: (MU_DOOR_W + sl) / 2, cz: z0 });
+    segs.push({ wall: "s", len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: -(MU_DOOR_W + sl) / 2, cz: z0 });
   } else {
-    segs.push({ len: W, cap: W - 2 * MU_MARGIN, rot: 180, cx: 0, cz: z0 });
+    segs.push({ wall: "s", len: W, cap: W - 2 * MU_MARGIN, rot: 180, cx: 0, cz: z0 });
   }
   return segs;
 }
 
-/* Hand the slots to the walls in walk order — left wall, far-left, far-right,
-   right wall — each taking its proportional share of the run but never more
-   than it can hold. The room was sized so the widest slot fits a side wall;
-   anything a narrow far segment must decline falls through to the next wall. */
+/* Hand the slots to the walls. Pinned slots claim their compass wall first —
+   its segments in walk order, the emptier one when neither has room (the fit
+   loop grows the room until everything holds). The rest divide the remaining
+   wall proportionally, in walk order, never more than a wall can hold;
+   anything a narrow segment must decline falls through to the next wall.
+   Each wall then reads in room order, pins and drifters interleaved. */
 function muDistribute(slots, segs, gap) {
-  const total = slots.reduce((t, s) => t + s.w + gap, 0);
-  const capSum = segs.reduce((t, s) => t + s.cap, 0) || 1;
+  segs.forEach((seg) => { seg.slots = []; seg.used = 0; });
+  const width = (seg, s) => s.w + (seg.slots.length ? gap : 0);
+  slots.filter((s) => s.pin).forEach((s) => {
+    const wall = segs.filter((g) => g.wall === s.pin);
+    const seg = wall.find((g) => g.used + width(g, s) <= g.cap) ||
+                wall.reduce((a, b) => (a.used <= b.used ? a : b));
+    seg.used += width(seg, s);
+    seg.slots.push(s);
+  });
+  const auto = slots.filter((s) => !s.pin);
+  const total = auto.reduce((t, s) => t + s.w + gap, 0);
+  const capSum = segs.reduce((t, g) => t + Math.max(0, g.cap - g.used), 0) || 1;
   let i = 0;
   segs.forEach((seg, si) => {
-    seg.slots = [];
-    seg.used = 0;
-    const share = si === segs.length - 1 ? Infinity : total * seg.cap / capSum;
-    while (i < slots.length) {
-      const w = slots[i].w + (seg.slots.length ? gap : 0);
+    const share = si === segs.length - 1 ? Infinity
+      : total * Math.max(0, seg.cap - seg.used) / capSum;
+    let taken = 0;
+    while (i < auto.length) {
+      const w = width(seg, auto[i]);
       if (seg.used + w > seg.cap && seg.slots.length) break;
       if (seg.used + w > seg.cap && !seg.slots.length) {
         if (si === segs.length - 1) { /* last wall takes it regardless */ }
         else break;
       }
-      if (seg.used + slots[i].w > share && seg.slots.length) break;
+      if (taken + auto[i].w > share && seg.slots.length) break;
       seg.used += w;
-      seg.slots.push(slots[i]);
+      taken += auto[i].w;
+      seg.slots.push(auto[i]);
       i++;
     }
   });
   // Nothing may be left over: the last wall stretches before a painting drops.
-  while (i < slots.length) {
+  while (i < auto.length) {
     const seg = segs[segs.length - 1];
-    seg.used += slots[i].w + gap;
-    seg.slots.push(slots[i]);
+    seg.used += auto[i].w + gap;
+    seg.slots.push(auto[i]);
     i++;
   }
+  segs.forEach((seg) => seg.slots.sort((a, b) => a.idx - b.idx));
 }
 
 function muEl(cls, wpx, hpx, transform) {
@@ -3599,7 +3662,7 @@ function muBuild(museum) {
   MU.roomWorks = rooms.map((r) => r.works);
   const geoms = [];
   rooms.forEach((room, i) => {
-    const slots = muSlots(room.works, room.layout);
+    const slots = muSlots(room.works, room.layout, room.walls);
     const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, i > 0);
     g.slots = slots;
     g.layout = room.layout;
