@@ -3449,9 +3449,9 @@ function muT(x, y, z, rot) {
 function muArtEl(item, x, y, z, rotY, ri) {
   const fw = item.l + 2 * MU_FRAME, fh = item.h + 2 * MU_FRAME;
   const el = muEl("mu-art", fw, fh, muT(x, y, z, " rotateY(" + rotY + "deg)"));
-  // The padding IS the frame: the element is canvas + moulding, and without
-  // this line the picture stretches over the moulding and wears the liner.
-  el.style.padding = MU_FRAME + "px";
+  // The border IS the frame — the gilded border-image in museum.css rides on
+  // it; without this line the picture stretches over the moulding.
+  el.style.borderWidth = MU_FRAME + "px";
   const img = new Image();
   img.src = thumbSrc(item.work);
   img.alt = item.work.title || "";

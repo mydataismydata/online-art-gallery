@@ -39,32 +39,20 @@ body.mu-open { overflow: hidden; }
 .mu-wall.mu-w-ew { background: #c9c2b4; }       /* side walls, a shade deeper */
 .mu-door { background: #575044; }               /* doorway casing */
 
-/* A painting: the div is the frame — a neutral moulded profile, a hair off the
-   wall. The padding (the frame's width) is set inline and must stay in step
-   with MU_FRAME in app.js (9 cm), which the ::after inset below assumes. The
-   moulding is nothing but light: a vertical grade across the wood, bright
-   arrises where the profile catches the ceiling light, dark where it turns
-   away, and a liner ring where moulding meets canvas. */
+/* A painting: the div is the frame — a real gilded frame, photographed with a
+   transparent window (img/frame1.png), worn as a border-image: the corner
+   carving stays at the corners, the rails stretch to fit any canvas. The
+   border width (the frame's width) is set inline and must stay in step with
+   MU_FRAME in app.js (9 cm). The slice numbers are that frame's measured
+   moulding, in source pixels: top right bottom left. Shadow is drop-shadow,
+   not box-shadow, so it hugs the carving's silhouette instead of boxing it. */
 .mu-art {
-  background: linear-gradient(180deg, #6b6151 0%, #4e463a 30%, #433b31 72%, #5b523f 100%);
-  box-shadow:
-    inset 0 1.8px 0 rgba(246, 238, 220, .32),   /* top arris in the light */
-    inset 1.8px 0 0 rgba(246, 238, 220, .10),
-    inset -1.8px 0 0 rgba(22, 16, 9, .30),
-    inset 0 -1.8px 0 rgba(22, 16, 9, .40),      /* bottom edge in shadow */
-    0 14px 30px rgba(20, 15, 8, .30),
-    0 4px 10px rgba(20, 15, 8, .22);
+  border: solid transparent;
+  border-image: url("../img/frame1.png") 62 64 62 66 stretch;
+  filter: drop-shadow(0 10px 20px rgba(20, 15, 8, .38))
+          drop-shadow(0 3px 7px rgba(20, 15, 8, .25));
   backface-visibility: hidden;
   cursor: pointer;
-}
-/* The liner and the canvas's own recess, drawn over the padding edge: a thin
-   pale ring around the picture, and the canvas set a touch into the frame. */
-.mu-art::after {
-  content: ""; position: absolute; inset: 9px;  /* = MU_FRAME */
-  outline: 1.7px solid rgba(214, 198, 162, .85);
-  outline-offset: 0;
-  box-shadow: inset 0 3px 7px rgba(12, 9, 5, .38), inset 0 -1px 3px rgba(12, 9, 5, .18);
-  pointer-events: none;
 }
 .mu-art img {
   width: 100%; height: 100%; object-fit: fill; display: block;
