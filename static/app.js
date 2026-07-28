@@ -3355,19 +3355,45 @@ function muSlots(works, layout) {
 
 /* Size the room around its works: enough wall for the whole run at this
    layout's spacing — tight sits snug, spacious breathes — and never smaller
-   than a cabinet nor narrower than its own widest painting. */
-function muRoomGeom(slots, layout, hasExit) {
+   than a cabinet nor narrower than its own widest painting. Every wall hangs,
+   the entry wall included, so the run divides across the whole perimeter. */
+const MU_RATIO = 1.25;               // rooms hang a little wider than deep
+function muRoomGeom(slots, layout, hasExit, hasEntryDoor) {
   const gap = layout === "tight" ? 34 : 100;
   const run = slots.reduce((t, s) => t + s.w, 0) +
               gap * Math.max(0, slots.length - 1);
   const widest = slots.reduce((t, s) => Math.max(t, s.w), 0);
-  const ratio = 1.25;                // rooms hang a little wider than deep
-  const margins = (hasExit ? 8 : 6) * MU_MARGIN;
-  const doorW = hasExit ? MU_DOOR_W : 0;
-  let D = (run + doorW + margins) / (2 + ratio);
+  const margins = (4 + (hasExit ? 4 : 2) + (hasEntryDoor ? 4 : 2)) * MU_MARGIN;
+  const doors = ((hasExit ? 1 : 0) + (hasEntryDoor ? 1 : 0)) * MU_DOOR_W;
+  let D = (run + doors + margins) / (2 + 2 * MU_RATIO);
   D = Math.max(520, widest + 2 * MU_MARGIN, D);
-  const W = Math.max(600, MU_DOOR_W + 280, Math.round(ratio * D));
+  const W = Math.max(600, MU_DOOR_W + 280, Math.round(MU_RATIO * D));
   return { W: W, D: Math.round(D), gap: gap };
+}
+
+/* The room's hangable walls, in walk order: left wall, the far wall's two
+   shoulders (or its whole width when the museum ends here), right wall, then
+   the entry wall — passed on the way in, read on the way back out. */
+function muRoomSegs(g) {
+  const W = g.W, D = g.D, z0 = g.z0 || 0, zf = z0 - D, zc = z0 - D / 2;
+  const segs = [];
+  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: 90,  cx: -W / 2, cz: zc });
+  if (g.hasExit) {
+    const sl = (W - MU_DOOR_W) / 2;
+    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: -(MU_DOOR_W + sl) / 2, cz: zf });
+    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: (MU_DOOR_W + sl) / 2, cz: zf });
+  } else {
+    segs.push({ len: W, cap: W - 2 * MU_MARGIN, rot: 0, cx: 0, cz: zf });
+  }
+  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: -90, cx: W / 2, cz: zc });
+  if (g.hasEntry) {
+    const sl = (W - MU_DOOR_W) / 2;
+    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: (MU_DOOR_W + sl) / 2, cz: z0 });
+    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: -(MU_DOOR_W + sl) / 2, cz: z0 });
+  } else {
+    segs.push({ len: W, cap: W - 2 * MU_MARGIN, rot: 180, cx: 0, cz: z0 });
+  }
+  return segs;
 }
 
 /* Hand the slots to the walls in walk order — left wall, far-left, far-right,
@@ -3515,18 +3541,7 @@ function muBuildRoom(g, i, geoms, world) {
    wall, every canvas centred on the hang line. `off` lifts the art a shade off
    the wall so the frame never fights the plane it hangs on. */
 function muHangRoom(g, roomEl, ri) {
-  const W = g.W, D = g.D, z0 = g.z0, zf = g.z0 - D, zc = z0 - D / 2;
-  const segs = [];
-  const far = W - (g.hasExit ? MU_DOOR_W : 0);
-  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: 90,  cx: -W / 2, cz: zc });
-  if (g.hasExit) {
-    const sl = (W - MU_DOOR_W) / 2;
-    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: -(MU_DOOR_W + sl) / 2, cz: zf });
-    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: (MU_DOOR_W + sl) / 2, cz: zf });
-  } else {
-    segs.push({ len: far, cap: far - 2 * MU_MARGIN, rot: 0, cx: 0, cz: zf });
-  }
-  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: -90, cx: W / 2, cz: zc });
+  const segs = muRoomSegs(g);
   muDistribute(g.slots, segs, g.gap);
 
   const off = 2.4;                       // cm off the wall — see the casing note
@@ -3582,10 +3597,22 @@ function muBuild(museum) {
   const geoms = [];
   rooms.forEach((room, i) => {
     const slots = muSlots(room.works, room.layout);
-    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1);
+    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, i > 0);
     g.slots = slots;
     g.layout = room.layout;
     g.hasExit = i < rooms.length - 1;
+    g.hasEntry = i > 0;
+    // Corners are sacred: if any wall's group would poke past one — the
+    // proportional shares can fragment awkwardly — the room grows until
+    // every wall holds its whole group inside its own margins.
+    for (let t = 0; t < 8; t++) {
+      const segs = muRoomSegs(g);
+      muDistribute(g.slots, segs, g.gap);
+      const over = segs.reduce((m, s) => Math.max(m, s.used - s.cap), 0);
+      if (over <= 0) break;
+      g.D += Math.ceil(over);
+      g.W = Math.max(g.W, Math.round(MU_RATIO * g.D));
+    }
     geoms.push(g);
   });
   let z0 = 0;
