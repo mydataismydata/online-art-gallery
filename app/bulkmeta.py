@@ -32,7 +32,11 @@ from .names import fold
 
 ARTIST_FIELDS = ("born", "died", "birthplace", "nationality", "movements",
                  "description", "wikidata_id", "wikipedia_url")
-WORK_FIELDS = ("date", "medium", "style", "genre", "school", "description")
+WORK_FIELDS = ("date", "medium", "height_cm", "length_cm", "style", "genre",
+               "school", "description")
+# The two measurements travel as numbers (cm), not prose: they're compared and
+# stored numerically, and the 3-D museum scales the canvas by them.
+NUMERIC_WORK_FIELDS = ("height_cm", "length_cm")
 
 MAX_RECORDS = 5000
 _DETAIL_CAP = 60          # rows the preview lists before "…and n more"
@@ -78,6 +82,9 @@ def _display(field, old, new):
     sizes — a 300-word placard in a diff row would drown the rows around it."""
     if field == "description":
         fmt = lambda s: ("%d chars" % len(s)) if s else "—"
+        return [fmt(old), fmt(new)]
+    if field in NUMERIC_WORK_FIELDS:
+        fmt = lambda v: ("%s cm" % v) if v is not None else "—"
         return [fmt(old), fmt(new)]
     return [_snip(old), _snip(new)]
 
@@ -201,6 +208,11 @@ def _diff_works(records):
         for w in copies:
             changes = {}
             for f in WORK_FIELDS:
+                if f in NUMERIC_WORK_FIELDS:
+                    new = library.parse_cm(rec.get(f))
+                    if new is not None and new != w.get(f):
+                        changes[f] = new
+                    continue
                 new = _scalar(f, rec.get(f))
                 old = (w.get(f) or "").strip()
                 if new is not None and new != old:
@@ -210,7 +222,9 @@ def _diff_works(records):
                 out["fields"].update(changes.keys())
                 touched_here += 1
                 if rec_changes is None:
-                    rec_changes = {f: _display(f, (w.get(f) or "").strip(), v)
+                    old_of = lambda f: (w.get(f) if f in NUMERIC_WORK_FIELDS
+                                        else (w.get(f) or "").strip())
+                    rec_changes = {f: _display(f, old_of(f), v)
                                    for f, v in changes.items()}
         if touched_here:
             out["changed"] += 1
@@ -268,7 +282,12 @@ def export_works(ids=None):
     for w in rows:
         rec = {"artist": w["artist"], "title": w["title"]}
         for f in WORK_FIELDS:
-            rec[f] = (w.get(f) or "").strip()
+            if f in NUMERIC_WORK_FIELDS:
+                # A number when recorded, "" when not — the blank against the
+                # field's name is what shows a human what can be filled in.
+                rec[f] = w.get(f) if w.get(f) is not None else ""
+            else:
+                rec[f] = (w.get(f) or "").strip()
         out.append(rec)
     return out
 

@@ -52,6 +52,8 @@ AI_CONFIG_FILE = DATA_DIR / "ai_config.json"
 # Site branding (the owner-set title shown in the tab + header). Per-instance, so
 # the public snapshot can carry a different name from the local box.
 SITE_FILE = DATA_DIR / "site.json"
+# The museum: the owner's walkable 3-D hang (rooms of work ids + layouts).
+MUSEUM_FILE = DATA_DIR / "museum.json"
 # Pending Curator invites (owner-issued one-time links). Kept out of the library.
 INVITES_FILE = DATA_DIR / "invites.json"
 # Connections: hand-written artist links (influence + curator notes) and the

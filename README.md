@@ -68,6 +68,34 @@ from the **Collections** page, then add works by turning on **Select** on any gr
 Every collection is **visible to everyone** who can sign in; only its creating Curator
 (and any Owner) may edit or delete it.
 
+## The Museum — a walkable 3-D gallery
+
+**Museum** in the top bar opens a first-person walk through rooms of your art:
+flat neutral walls, floor and ceiling, framed canvases hung to scale on the walls,
+and doorways leading room to room. No plugins or WebGL — it's plain CSS 3-D.
+
+- **Walking:** the arrow keys are the whole interface — ↑ ↓ walk, ← → turn. The
+  mouse wheel zooms in and out; clicking a painting strolls up to it, and the
+  placard of whatever you stop in front of appears at the foot of the screen.
+  `Esc` leaves.
+- **On a phone** the museum opens full screen, landscape only (portrait politely
+  asks for the turn), with a half-transparent 4-way pad to move and pinch to zoom.
+- **Hanging (owner):** press **H** on any painting in the fullscreen viewer to
+  hang it — it joins the museum's last room, the same gesture as **C** for
+  collections. Then **Arrange** (or `#/museum/arrange`) is where the curation
+  happens: drag paintings into order and between rooms, cut a room in two at any
+  painting (✂), merge rooms back, and give every room its fit —
+  **Tight** hangs close together, pairs small pieces two high, and sizes the room
+  snug around the count; **Spacious** hangs everything in one generous line.
+  Every change saves as you make it.
+- **Scale:** rooms are sized from each work's real dimensions — the
+  `height_cm` / `length_cm` placard fields. A work with no recorded size hangs at
+  an assumed size (marked *est. size* while arranging) until you fill them in,
+  by hand in the placard editor or in bulk through **Settings → Import / export**.
+
+The hang is per-box (the public snapshot's owner curates their own museum there);
+anyone who can browse can walk it.
+
 ## The library is just folders
 
 ```
@@ -85,6 +113,7 @@ library/
   ```json
   { "title": "The Fog Warning", "artist": "Winslow Homer", "date": "1885",
     "year": 1885, "medium": "Oil on canvas", "style": "Realism",
+    "height_cm": 76.8, "length_cm": 123.2,
     "type": "painting", "source_url": "https://..." }
   ```
 

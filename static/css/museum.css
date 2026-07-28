@@ -1,0 +1,195 @@
+/* MUSEUM
+   The walkable 3-D hang: the walk itself (#/museum) and the owner's arrange
+   screen (#/museum/arrange). The walk is CSS 3-D — a perspective viewport, a
+   world div carrying the camera transform, and every wall, floor and painting
+   a flat rectangle. One CSS pixel is one centimetre of museum. */
+
+/* ---------- the walk ---------- */
+
+.museum {
+  position: fixed; inset: 0; z-index: 90;        /* over the chrome, under the viewer */
+  background: var(--bg-viewer);
+  overflow: hidden; user-select: none; touch-action: none;
+}
+body.mu-open { overflow: hidden; }
+
+.mu-clip { position: absolute; inset: 0; overflow: hidden; }
+.mu-vp {
+  position: absolute; inset: 0;
+  perspective: 900px;                            /* rewritten per frame by zoom */
+  perspective-origin: 50% 50%;
+}
+.mu-world {
+  position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.mu-roomg { position: absolute; transform-style: preserve-3d; }
+.mu-roomg.mu-hidden { display: none; }
+
+/* Every plane: centred on its own origin (negative margins), placed by
+   translate3d + rotate. Flat neutral surfaces; each orientation carries its
+   own brightness, which is all the "lighting" a flat museum needs. */
+.mu-floor, .mu-ceil, .mu-wall, .mu-door, .mu-art {
+  position: absolute; left: 0; top: 0;
+}
+.mu-floor { background: #8d8172; }
+.mu-ceil { background: #efeae0; }
+.mu-wall { background: #d6cfc2; }               /* facing walls (north/south) */
+.mu-wall.mu-w-ew { background: #c9c2b4; }       /* side walls, a shade deeper */
+.mu-door { background: #575044; }               /* doorway casing */
+
+/* A painting: the div is the frame — simple, neutral, and a hair off the wall.
+   The padding (the frame's width) is set inline, in cm like everything else. */
+.mu-art {
+  background: #4a443a;
+  box-shadow:
+    inset 0 0 0 1px rgba(240, 234, 222, .16),   /* the frame's inner lip */
+    0 14px 30px rgba(20, 15, 8, .30),
+    0 4px 10px rgba(20, 15, 8, .22);
+  backface-visibility: hidden;
+  cursor: pointer;
+}
+.mu-art img {
+  width: 100%; height: 100%; object-fit: fill; display: block;
+  background: #2a2622;
+  -webkit-user-drag: none; user-select: none;
+  pointer-events: none;
+}
+
+/* ---------- the walk's chrome ---------- */
+
+.mu-hud { position: absolute; inset: 0; pointer-events: none; }
+.mu-top {
+  position: absolute; left: 0; right: 0; top: 0;
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 18px 26px 22px;
+  background: linear-gradient(to bottom, rgba(13, 11, 8, .62), transparent);
+  pointer-events: none;
+}
+.mu-top > * { pointer-events: auto; }
+.mu-room { font: 400 12px var(--sans); color: var(--dim); letter-spacing: .04em; }
+.mu-sp { flex: 1; pointer-events: none; }
+.mu-arrange { font-size: 13px; }
+.mu-x {
+  width: 38px; height: 38px; line-height: 36px; text-align: center;
+  color: rgba(236, 227, 210, .6); font: 400 26px var(--serif);
+}
+.mu-x:hover { color: var(--display); }
+
+/* The wall label for whatever you've stopped in front of. */
+.mu-placard {
+  position: absolute; left: 50%; bottom: 34px; transform: translate(-50%, 14px);
+  max-width: min(560px, 80vw);
+  padding: 12px 22px 13px;
+  background: rgba(23, 19, 16, .82); border: 1px solid var(--hair);
+  text-align: center;
+  opacity: 0; transition: opacity .3s ease, transform .3s ease;
+  pointer-events: none;
+}
+.mu-placard.show { opacity: 1; transform: translate(-50%, 0); }
+.mu-placard .mu-pl-t {
+  display: block; font: italic 400 17px/1.35 var(--serif); color: var(--display);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mu-placard .mu-pl-m {
+  display: block; margin-top: 3px;
+  font: 400 11.5px var(--sans); color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.mu-hint {
+  position: absolute; right: 18px; bottom: 16px;
+  font: 400 11.5px var(--sans); color: var(--off);
+  pointer-events: none;
+}
+
+/* ---------- phones: the D-pad, and landscape only ---------- */
+
+/* The 4-way nav toggle: half-seen until touched, exactly the arrow keys. */
+.mu-dpad {
+  display: none;
+  position: absolute; left: 20px; bottom: 20px;
+  width: 168px; height: 168px;
+  opacity: .5; transition: opacity .25s;
+  pointer-events: auto;
+}
+.museum.touch .mu-dpad { display: block; }
+.museum.touch .mu-hint { display: none; }
+.mu-dpad:active { opacity: .85; }
+.mu-dpad .dp {
+  position: absolute; width: 52px; height: 52px;
+  background: rgba(23, 19, 16, .78); border: 1px solid var(--hair-strong);
+  color: var(--display2); font: 400 16px var(--sans);
+  touch-action: none; cursor: pointer; padding: 0;
+}
+.mu-dpad .dp:active { background: rgba(194, 160, 97, .38); }
+.mu-dpad .dp-u { left: 58px; top: 0; }
+.mu-dpad .dp-l { left: 0; top: 58px; }
+.mu-dpad .dp-r { left: 116px; top: 58px; }
+.mu-dpad .dp-d { left: 58px; top: 116px; }
+
+/* Portrait is a corridor wall, not a museum: ask for the turn, stop rendering. */
+.mu-rotate {
+  display: none; position: absolute; inset: 0; z-index: 5;
+  align-items: center; justify-content: center; text-align: center;
+  padding: 40px; background: var(--bg-viewer);
+  font: italic 400 17px/1.6 var(--serif); color: var(--dim);
+}
+@media (orientation: portrait) {
+  .museum.touch .mu-rotate { display: flex; }
+  .museum.touch .mu-clip, .museum.touch .mu-hud { visibility: hidden; }
+}
+
+/* ---------- arranging the museum ---------- */
+
+.mroom {
+  margin: 26px 0 0; padding: 14px 16px 16px;
+  background: var(--raised); border: 1px solid var(--hair-soft);
+}
+.mroom-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.mroom-head h2 { margin: 0; font: 400 19px var(--serif); color: var(--display2); }
+.mroom-n { white-space: nowrap; }
+.mroom-empty { margin: 12px 2px 2px; font-style: italic; }
+.mroom .arrange { margin-top: 12px; max-width: none; }
+.mroom .marrange { min-height: 14px; }          /* an empty room still catches a drop */
+
+/* Tight | Spacious. A pill pair — the one rounded thing, as the system allows. */
+.seg { display: inline-flex; margin-left: 6px; }
+.seg-btn {
+  padding: 4px 14px; cursor: pointer;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--hair-mid); border-left-width: 0;
+  font: 600 10px var(--sans); letter-spacing: .18em; text-transform: uppercase;
+}
+.seg-btn:first-child { border-left-width: 1px; border-radius: 20px 0 0 20px; }
+.seg-btn:last-child { border-radius: 0 20px 20px 0; }
+.seg-btn.on { background: var(--gold-tint2); color: var(--gold-hi); border-color: var(--gold-line); }
+.seg-btn.on + .seg-btn { border-left-color: var(--gold-line); }
+
+.mroom-merge { font-size: 12px; }
+
+/* Row extras the collections list doesn't have: cut here, and take down. */
+.arow-btns { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+.arow-btn {
+  width: 34px; height: 34px; cursor: pointer;
+  background: none; border: 1px solid transparent;
+  color: var(--faint); font: 400 14px var(--sans);
+  opacity: 0; transition: opacity .15s;
+}
+.arow:hover .arow-btn { opacity: 1; }
+.arow-btn:hover { border-color: var(--hair-mid); color: var(--text); }
+.arow-btn.aunhang:hover { color: var(--warn); border-color: var(--warn); }
+.arow:first-child .asplit { visibility: hidden; }   /* the wall above is already a cut */
+
+.mu-est {
+  margin-left: 10px; padding: 1px 7px 2px; vertical-align: 2px;
+  font: 600 9px var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--warn); border: 1px solid rgba(191, 126, 99, .45);
+  white-space: nowrap;
+}
+
+/* Touch screens can't hover a row's buttons into view. */
+@media (pointer: coarse) {
+  .arow-btn { opacity: .75; }
+}

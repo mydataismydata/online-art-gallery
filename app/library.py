@@ -62,6 +62,29 @@ def _image_dims(path, rel, mtime):
     _dim_cache[rel] = (m, dims)
     return dims
 
+def parse_cm(v):
+    """A physical dimension in centimetres as a positive number, or None for 'not
+    recorded'. Accepts a number or a numeric string ('73', '73.5', '73,5' — a
+    hand-typed decimal comma shouldn't lose the measurement). Junk, zero and the
+    absurd read as unrecorded rather than raising: a sidecar edited by hand must
+    never crash the scanner."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        n = float(v)
+    elif isinstance(v, str):
+        try:
+            n = float(v.strip().replace(",", "."))
+        except ValueError:
+            return None
+    else:
+        return None
+    if not 0 < n < 100000:
+        return None
+    n = round(n, 1)
+    return int(n) if n == int(n) else n
+
+
 _MARKER_RE = re.compile(r"\s*\[([a-z]+)-([^\]\s]+)\]\s*$")
 
 
@@ -123,6 +146,11 @@ def _work_from_file(path, artist_dir_name):
         "pid": meta.get("pid"),
         "width": dims[0] if dims else None,
         "height": dims[1] if dims else None,
+        # The canvas itself, in cm — height × length, the way museums record a
+        # work. Distinct from width/height above, which are the image file's
+        # pixels; these are what the 3-D museum hangs to scale.
+        "height_cm": parse_cm(meta.get("height_cm")),
+        "length_cm": parse_cm(meta.get("length_cm")),
         "artist": meta.get("artist") or artist_dir_name,
         "title": title,
         "date": date_text,
@@ -529,6 +557,9 @@ def update_work(wid, fields):
     for k in ("style", "genre", "school"):
         if k in fields:
             data[k] = _clean(fields.get(k)) or None
+    for k in ("height_cm", "length_cm"):
+        if k in fields:
+            data[k] = parse_cm(fields.get(k))
     if "description" in fields:
         desc = fields.get("description")
         data["description"] = desc.strip() if isinstance(desc, str) and desc.strip() else None
@@ -598,6 +629,8 @@ def update_works_meta(updates):
             elif k in ("medium", "style", "genre", "school", "title"):
                 cv = re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v
                 data[k] = cv or None
+            elif k in ("height_cm", "length_cm"):
+                data[k] = parse_cm(v)
             elif k == "description":
                 data["description"] = v.strip() if isinstance(v, str) and v.strip() else None
             else:

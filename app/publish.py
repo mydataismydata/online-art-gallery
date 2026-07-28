@@ -33,7 +33,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import config, library, thumbs, artistinfo, links, threads
+from . import config, library, thumbs, artistinfo, links, threads, museum
 from . import collections as coll
 from .names import safe_name, parse_year, slugify, fold
 
@@ -52,8 +52,11 @@ _EXTRAS = ("bios", "collections", "links", "threads")
 # Placard fields carried to the public site: everything the viewer shows plus
 # provenance. Width/height are intentionally omitted -- the public work's real
 # dimensions come from the (reduced) image file itself when it's scanned.
+# height_cm/length_cm are different: the physical canvas, authored metadata no
+# image file can answer for, so they travel like any placard field.
 _PLACARD_FIELDS = ("artist", "title", "date", "year", "medium", "style", "genre",
-                   "school", "description", "type", "source", "source_url")
+                   "school", "description", "type", "source", "source_url",
+                   "height_cm", "length_cm")
 
 # Artist bio fields carried across. `updated` is deliberately not among them (it
 # would churn the repo on every export) and neither is `cover` -- that's a local
@@ -773,8 +776,11 @@ def _import_new(repo, p):
     _save_sidecar(Path(str(dest) + ".json"), _sidecar_from_placard(p))
 
 
-def _import_update(repo, p, cur):
-    """Update an already-imported work in place. Returns True if anything changed."""
+def _import_update(repo, p, cur, id_map=None):
+    """Update an already-imported work in place. Returns True if anything changed.
+    A corrected artist moves the file, which re-ids the work; the move is noted
+    in `id_map` (old id -> new id) so the caller can point the museum's walls —
+    the one holder of local ids a pull can't recompute from pids — at it."""
     cur_path = config.LIBRARY_DIR / cur["rel"]
     cur_sc = Path(str(cur_path) + ".json")
     old = _load_sidecar(cur_sc)
@@ -800,6 +806,9 @@ def _import_update(repo, p, cur):
         shutil.move(str(cur_path), str(dest))
         if cur_sc.exists():
             shutil.move(str(cur_sc), str(dest) + ".json")
+        if id_map is not None:
+            id_map[cur["id"]] = library.work_id_for(
+                dest.relative_to(config.LIBRARY_DIR).as_posix())
         try:
             if old_parent != folder and old_parent.exists() and not any(old_parent.iterdir()):
                 old_parent.rmdir()
@@ -936,7 +945,7 @@ def pull_and_import():
     existing = {w["pid"]: w for w in library.all_works() if w.get("pid")}
     suppressed = suppressed_pids()
     added = updated = unchanged = skipped = 0
-    errors, touched = [], set()
+    errors, touched, id_map = [], set(), {}
     for p in placards:
         try:
             if p["pid"] in suppressed:   # owner deleted it here; don't bring it back
@@ -947,13 +956,16 @@ def pull_and_import():
                 _import_new(repo, p)
                 added += 1
                 touched.add(p.get("artist") or "Unknown Artist")
-            elif _import_update(repo, p, cur):
+            elif _import_update(repo, p, cur, id_map):
                 updated += 1
                 touched.add(p.get("artist") or cur.get("artist"))
             else:
                 unchanged += 1
         except Exception as e:
             errors.append({"pid": p.get("pid"), "error": str(e)})
+    # Collections and the hero pin re-find moved works from their pids; the
+    # museum's walls hold local ids only, so they're pointed at the moves here.
+    museum.remap_works(id_map)
 
     # Reconcile deletions from the private box: a pid the repo no longer carries
     # was retired at the source, so its copy leaves this wall too — into the

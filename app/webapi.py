@@ -7,7 +7,7 @@ import time
 from flask import Blueprint, Response, abort, jsonify, request, send_file
 
 from . import (config, library, thumbs, artistinfo, auth, collections,
-               metadata, ai, publish, site, links, threads, bulkmeta)
+               metadata, ai, publish, site, links, threads, bulkmeta, museum)
 from .names import parse_year
 from .downloads import manager
 from .downloads.sources import (get_source, list_sources, custom,
@@ -331,6 +331,50 @@ def api_collection_remove_works(cid):
     return jsonify({"collection": collections.detail(rec, auth.current_user())})
 
 
+# ==================== museum (the walkable 3-D hang) ====================
+
+# Editing is owner-only but NOT private-only: like the hero pin, which paintings
+# hang in the museum is curation, so the public box's owner curates their own.
+
+@bp.get("/api/museum")
+@auth.require_view
+def api_museum():
+    return jsonify({"museum": museum.detail()})
+
+
+@bp.post("/api/museum")
+@auth.require_role("owner")
+def api_museum_save():
+    data = request.get_json(silent=True) or {}
+    try:
+        out = museum.save(data.get("rooms"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"museum": out})
+
+
+@bp.post("/api/museum/hang")
+@auth.require_role("owner")
+def api_museum_hang():
+    """Hang works (the viewer's "h") — appended to the last room."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "No works given."}), 400
+    added, room = museum.hang([str(i) for i in ids])
+    return jsonify({"added": added, "room": room})
+
+
+@bp.post("/api/museum/unhang")
+@auth.require_role("owner")
+def api_museum_unhang():
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        return jsonify({"error": "No works given."}), 400
+    return jsonify({"removed": museum.unhang([str(i) for i in ids])})
+
+
 # ==================== library (browse — any signed-in user) ====================
 
 @bp.get("/api/artists")
@@ -459,10 +503,11 @@ def api_artist_rename():
         moved, errors, id_map = library.rename_artist(frm, to)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    # The works just moved, so their ids changed; follow the hero pin and every
-    # collection holding one over to where they went.
+    # The works just moved, so their ids changed; follow the hero pin, every
+    # collection holding one, and the museum walls over to where they went.
     site.remap_featured(id_map)
     collections.remap_works(id_map)
+    museum.remap_works(id_map)
     # carry the artist's saved bio (if any) over to the new name
     if to.strip().casefold() not in [f.strip().casefold() for f in frm]:
         for f in frm:
@@ -856,17 +901,19 @@ def api_work_find_metadata(wid):
 def api_work_update(wid):
     data = request.get_json(silent=True) or {}
     fields = {k: data[k] for k in ("title", "artist", "date", "medium", "style",
-                                   "genre", "school", "description") if k in data}
+                                   "genre", "school", "description",
+                                   "height_cm", "length_cm") if k in data}
     try:
         w = library.update_work(wid, fields)
     except KeyError:
         abort(404)
     if not w:
         return jsonify({"error": "update failed"}), 500
-    # Editing the artist relocates the file, which re-ids the work; keep the pin and
-    # any collection it hangs in on it.
+    # Editing the artist relocates the file, which re-ids the work; keep the pin,
+    # any collection it hangs in, and its museum wall on it.
     site.remap_featured({wid: w["id"]})
     collections.remap_works({wid: w["id"]})
+    museum.remap_works({wid: w["id"]})
     return jsonify({"work": w})
 
 

@@ -157,6 +157,7 @@ function renderNav() {
     ["#/browse/era", "browse", "Browse"],
     ["#/connections", "connections", "Connections"],
     ["#/collections", "collections", "Collections"],
+    ["#/museum", "museum", "Museum"],
   ];
   if (isOwner()) links.push(["#/settings", "settings", "Settings"]);
   // No "Add artist" on the public snapshot — even for the owner. It's a nav link
@@ -206,6 +207,7 @@ function goHome() {
 
 function route() {
   closeViewer();
+  muTeardown();               // leaving #/museum stops its loop and listeners
   stopPolling();
   resetSel();
   setNavOpen(false);          // a nav tap navigates AND closes the menu behind it
@@ -231,6 +233,8 @@ function route() {
     return connectionsView(query.get("artist"), query.get("mode"));
   if (segs[0] === "collections") return collectionsView();
   if (segs[0] === "collection" && segs[1]) return collectionView(segs[1]);
+  if (segs[0] === "museum")
+    return (segs[1] === "arrange" && isOwner()) ? museumArrangeView() : museumView();
   // Adding art doesn't exist on the public box, even for the owner.
   if (segs[0] === "add") return (isOwner() && !isPublic()) ? addView(segs[1] || "") : void goHome();
   if (segs[0] === "settings") return isOwner() ? settingsView(segs[1] || "") : void goHome();
@@ -3064,6 +3068,807 @@ function editCollectionDialog(c, onDone) {
   setTimeout(() => $("#ec-title").focus(), 30);
 }
 
+/* ============================== museum (walkable 3-D hang) ============================== */
+
+/* The museum is the owner's one walkable hang: rooms of works in a fixed order,
+   walked room by room. Two screens share the data: the walk (#/museum), built
+   out of CSS 3-D planes and driven with the arrow keys, and the arrange screen
+   (#/museum/arrange), where the owner drags the order, cuts rooms, and picks
+   each room's fit. Works arrive via "h" in the fullscreen viewer. */
+
+const MU_LAYOUTS = [["tight", "Tight"], ["spacious", "Spacious"]];
+
+async function saveMuseum(rooms) {
+  const r = await api("/api/museum", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rooms: rooms }),
+  });
+  return r.museum;
+}
+
+/* ---------- arranging the museum ---------- */
+
+function muRow(w) {
+  const meta = [w.artist, w.date || w.year, cmDims(w)].filter(Boolean).join(" · ");
+  // A work with no recorded size still hangs — at an assumed size — but the
+  // owner arranging rooms is exactly the person who can fix it, so say so.
+  const est = cmDims(w) ? "" :
+    '<span class="mu-est" title="No recorded size — hangs at an assumed size until height and length are set on its placard">est. size</span>';
+  return (
+    '<li class="arow" data-id="' + esc(w.id) + '">' +
+      '<span class="agrip" aria-hidden="true" title="Drag to move"></span>' +
+      '<span class="anum"></span>' +
+      '<span class="athumb"><img src="' + thumbSrc(w) + '" loading="lazy" alt="" draggable="false"></span>' +
+      '<span class="atext"><span class="at">' + esc(w.title) + est + "</span>" +
+      (meta ? '<span class="am">' + esc(meta) + "</span>" : "") + "</span>" +
+      '<span class="arow-btns">' +
+      '<button class="arow-btn asplit" type="button" title="Cut here: this painting starts a new room">✂</button>' +
+      '<button class="arow-btn aunhang" type="button" title="Take off the wall (stays in the library)">✕</button>' +
+      "</span></li>"
+  );
+}
+
+function muRoomSection(room, i, nrooms) {
+  const seg = MU_LAYOUTS.map(([v, label]) =>
+    '<button class="seg-btn' + (room.layout === v ? " on" : "") +
+    '" type="button" data-layout="' + v + '">' + label + "</button>").join("");
+  const n = room.works.length;
+  // Any room but the first can give its works back to the room above; an empty
+  // first room (with rooms below) can simply go.
+  const drop = i > 0
+    ? '<button class="linkbtn mroom-merge" type="button" title="Remove this cutoff — the works join the room above">merge up</button>'
+    : (n === 0 && nrooms > 1
+        ? '<button class="linkbtn mroom-merge" type="button">remove room</button>' : "");
+  return (
+    '<section class="mroom" data-layout="' + esc(room.layout) + '">' +
+      '<header class="mroom-head">' +
+      "<h2>Room " + (i + 1) + "</h2>" +
+      '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
+      '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" + drop +
+      "</header>" +
+      '<ol class="arrange marrange">' + room.works.map(muRow).join("") + "</ol>" +
+      (n ? "" : '<p class="mroom-empty tiny">Empty — drag paintings in.</p>') +
+    "</section>"
+  );
+}
+
+function muSerialize() {
+  return [...document.querySelectorAll("#mrooms .mroom")].map((sec) => ({
+    work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
+    layout: sec.dataset.layout,
+  }));
+}
+
+/* Save what's on screen; on failure re-render from the server so the screen
+   can't keep showing an arrangement the museum refused. */
+async function muSaveArrangement(rerender) {
+  try {
+    await saveMuseum(muSerialize());
+    if (rerender) museumArrangeView(true);
+  } catch (e) {
+    toast(e.message);
+    museumArrangeView(true);
+  }
+}
+
+/* The collections arrange, taught about several lists: a painting dragged by its
+   handle moves within its room, into another room, or into an empty one. */
+function wireMuseumArrange(container) {
+  container.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest(".agrip")) return;
+    const row = e.target.closest(".arow");
+    if (!row) return;
+    e.preventDefault();
+    const before = JSON.stringify(muSerialize());
+    let moved = false;
+    row.classList.add("dragging");
+    container.classList.add("arranging");
+    const renumberAll = () =>
+      container.querySelectorAll(".marrange").forEach((b) => renumber(b));
+
+    const move = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      ev.preventDefault();
+      moved = true;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const over = el && el.closest ? el.closest(".arow") : null;
+      if (over && over !== row && container.contains(over)) {
+        const r = over.getBoundingClientRect();
+        over.parentElement.insertBefore(
+          row, ev.clientY > r.top + r.height / 2 ? over.nextSibling : over);
+        renumberAll();
+      } else {
+        // Not over a row: over a room's header, empty list, or padding — the
+        // painting joins that room's end (how anything enters an empty room).
+        const sec = el && el.closest ? el.closest(".mroom") : null;
+        if (sec && container.contains(sec)) {
+          const list = sec.querySelector(".marrange");
+          if (list && list.lastElementChild !== row) {
+            list.appendChild(row);
+            renumberAll();
+          }
+        }
+      }
+      edgeScroll(ev.clientY);
+    };
+    const drop = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", drop);
+      window.removeEventListener("pointercancel", drop);
+      row.classList.remove("dragging");
+      container.classList.remove("arranging");
+      if (!moved || JSON.stringify(muSerialize()) === before) return;
+      muSaveArrangement(true);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", drop);
+    window.addEventListener("pointercancel", drop);
+  });
+
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    const sec = btn.closest(".mroom");
+    if (btn.classList.contains("seg-btn") && sec) {
+      if (sec.dataset.layout === btn.dataset.layout) return;
+      sec.dataset.layout = btn.dataset.layout;
+      sec.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("on", b === btn));
+      muSaveArrangement(false);        // nothing structural moved; no re-render flicker
+    } else if (btn.classList.contains("mroom-merge") && sec) {
+      const prev = sec.previousElementSibling;
+      if (prev && prev.classList.contains("mroom")) {
+        const list = prev.querySelector(".marrange");
+        sec.querySelectorAll(".arow").forEach((r) => list.appendChild(r));
+      }
+      sec.remove();
+      muSaveArrangement(true);
+    } else if (btn.classList.contains("asplit") && sec) {
+      const row = btn.closest(".arow");
+      const rows = [...sec.querySelectorAll(".arow")];
+      const idx = rows.indexOf(row);
+      if (idx <= 0) return;            // a cut before the first painting is the wall we have
+      const ns = document.createElement("section");
+      ns.className = "mroom";
+      ns.dataset.layout = sec.dataset.layout;
+      ns.innerHTML = '<ol class="arrange marrange"></ol>';
+      sec.after(ns);
+      const nl = ns.querySelector(".marrange");
+      rows.slice(idx).forEach((r) => nl.appendChild(r));
+      muSaveArrangement(true);
+    } else if (btn.classList.contains("aunhang")) {
+      const row = btn.closest(".arow");
+      if (row) row.remove();
+      muSaveArrangement(true);
+    }
+  });
+}
+
+async function museumArrangeView(keepScroll) {
+  setNav("museum");
+  const y = keepScroll ? window.scrollY : 0;
+  let museum;
+  try { museum = (await api("/api/museum")).museum; }
+  catch (e) { app.innerHTML = page(errbox(e)); return; }
+  const rooms = museum.rooms.length
+    ? museum.rooms
+    : [{ works: [], layout: "spacious" }];
+  const head =
+    '<a class="back" href="#/museum">← Walk the museum</a>' +
+    '<div class="pagehead" style="margin-top:26px"><div><h1>Arrange the museum</h1>' +
+    '<p class="sub">' + museum.count + (museum.count === 1 ? " work" : " works") +
+    " · " + rooms.length + (rooms.length === 1 ? " room" : " rooms") +
+    " · every change saves as you make it</p></div></div>" +
+    '<p class="arrange-hint">Drag a painting by its handle — within a room or into ' +
+    "another. ✂ cuts a room in two at that painting; <b>Tight</b> hangs close " +
+    "(small pieces pair up, two high) and sizes the room snug; <b>Spacious</b> " +
+    "hangs one generous line. Add works by pressing <b>H</b> on any painting in " +
+    "the fullscreen viewer.</p>";
+  app.innerHTML = page(
+    head +
+    '<div id="mrooms">' +
+    rooms.map((r, i) => muRoomSection(r, i, rooms.length)).join("") +
+    "</div>" +
+    '<button class="linkbtn" id="mroom-add" type="button">+ New room at the end</button>',
+    "tight");
+  document.querySelectorAll("#mrooms .marrange").forEach((b) => renumber(b));
+  wireMuseumArrange($("#mrooms"));
+  $("#mroom-add").addEventListener("click", () => {
+    const ns = document.createElement("section");
+    ns.className = "mroom";
+    ns.dataset.layout = "spacious";
+    ns.innerHTML = '<ol class="arrange marrange"></ol>';
+    $("#mrooms").appendChild(ns);
+    muSaveArrangement(true);
+  });
+  if (y) window.scrollTo(0, y);
+}
+
+/* ---------- the walk ---------- */
+
+/* Built from CSS 3-D planes: a viewport with perspective, a world container
+   carrying the camera transform, and every wall, floor and painting a flat
+   rectangle placed with translate3d + rotate. One unit is one centimetre.
+
+   World axes follow CSS: x right, y DOWN (the floor is y=0, the ceiling
+   negative), z toward the viewer — the museum recedes along -z, room after
+   room. The camera yaw's forward is (sin yaw, 0, -cos yaw): yaw 0 walks into
+   the museum, arrow-right turns clockwise. The world transform is
+   rotateY(yaw) translate3d(-cam), which lands the camera at the origin looking
+   down -z — exactly where the viewport's perspective projects from. */
+
+const MU_EYE = 158;                  // eye height off the floor, cm
+const MU_HANG = 150;                 // centre line the art hangs on, cm
+const MU_FRAME = 7;                  // frame width around the canvas, cm
+const MU_WALL_H = 380;               // ceiling height
+const MU_DOOR_W = 170, MU_DOOR_H = 260;
+const MU_MARGIN = 70;                // bare wall kept at the ends of each run
+const MU_STACK_GAP = 18;             // air between two stacked pieces
+const MU_SPEED = 310;                // walk, cm/s
+const MU_TURN = 1.75;                // turn, rad/s
+const MU_KEYSET = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
+
+const MU = {
+  active: false, raf: 0, rooms: [], arts: [], ri: 0,
+  cam: { x: 0, z: 0, yaw: 0, zoom: 1 },
+  vel: { f: 0, t: 0 }, keys: {}, glide: null,
+  vp: null, world: null, baseP: 900, last: 0, nearTs: 0, near: null,
+  pinch: null, points: new Map(),
+};
+
+/* The canvas in cm. A work with no recorded size hangs at an assumed one that
+   keeps the picture's own pixel proportions, so nothing sits blank-walled just
+   because nobody has measured it yet. */
+function muArtSize(w) {
+  let h = w.height_cm, l = w.length_cm;
+  if (h > 0 && l > 0) return { h: h, l: l, est: false };
+  const pw = w.width || 4, ph = w.height || 3;
+  if (pw >= ph) { l = 90; h = Math.max(24, Math.round(90 * ph / pw)); }
+  else { h = 90; l = Math.max(24, Math.round(90 * pw / ph)); }
+  return { h: h, l: l, est: true };
+}
+
+/* A slot is what occupies one width of wall: one framed work, or — in a tight
+   room — two small consecutive works stacked, never more than two. */
+function muSlots(works, layout) {
+  const F2 = MU_FRAME * 2;
+  const sized = works.map((w) => Object.assign({ work: w }, muArtSize(w)));
+  const slots = [];
+  const small = (s) => s.h <= 66 && s.l <= 110;
+  for (let i = 0; i < sized.length; i++) {
+    const a = sized[i], b = sized[i + 1];
+    if (layout === "tight" && b && small(a) && small(b)) {
+      slots.push({ items: [a, b], w: Math.max(a.l, b.l) + F2,
+                   h: a.h + b.h + 2 * F2 + MU_STACK_GAP });
+      i++;
+    } else {
+      slots.push({ items: [a], w: a.l + F2, h: a.h + F2 });
+    }
+  }
+  return slots;
+}
+
+/* Size the room around its works: enough wall for the whole run at this
+   layout's spacing — tight sits snug, spacious breathes — and never smaller
+   than a cabinet nor narrower than its own widest painting. */
+function muRoomGeom(slots, layout, hasExit) {
+  const gap = layout === "tight" ? 34 : 100;
+  const run = slots.reduce((t, s) => t + s.w, 0) +
+              gap * Math.max(0, slots.length - 1);
+  const widest = slots.reduce((t, s) => Math.max(t, s.w), 0);
+  const ratio = 1.25;                // rooms hang a little wider than deep
+  const margins = (hasExit ? 8 : 6) * MU_MARGIN;
+  const doorW = hasExit ? MU_DOOR_W : 0;
+  let D = (run + doorW + margins) / (2 + ratio);
+  D = Math.max(520, widest + 2 * MU_MARGIN, D);
+  const W = Math.max(600, MU_DOOR_W + 280, Math.round(ratio * D));
+  return { W: W, D: Math.round(D), gap: gap };
+}
+
+/* Hand the slots to the walls in walk order — left wall, far-left, far-right,
+   right wall — each taking its proportional share of the run but never more
+   than it can hold. The room was sized so the widest slot fits a side wall;
+   anything a narrow far segment must decline falls through to the next wall. */
+function muDistribute(slots, segs, gap) {
+  const total = slots.reduce((t, s) => t + s.w + gap, 0);
+  const capSum = segs.reduce((t, s) => t + s.cap, 0) || 1;
+  let i = 0;
+  segs.forEach((seg, si) => {
+    seg.slots = [];
+    seg.used = 0;
+    const share = si === segs.length - 1 ? Infinity : total * seg.cap / capSum;
+    while (i < slots.length) {
+      const w = slots[i].w + (seg.slots.length ? gap : 0);
+      if (seg.used + w > seg.cap && seg.slots.length) break;
+      if (seg.used + w > seg.cap && !seg.slots.length) {
+        if (si === segs.length - 1) { /* last wall takes it regardless */ }
+        else break;
+      }
+      if (seg.used + slots[i].w > share && seg.slots.length) break;
+      seg.used += w;
+      seg.slots.push(slots[i]);
+      i++;
+    }
+  });
+  // Nothing may be left over: the last wall stretches before a painting drops.
+  while (i < slots.length) {
+    const seg = segs[segs.length - 1];
+    seg.used += slots[i].w + gap;
+    seg.slots.push(slots[i]);
+    i++;
+  }
+}
+
+function muEl(cls, wpx, hpx, transform) {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.style.width = wpx + "px";
+  d.style.height = hpx + "px";
+  d.style.marginLeft = (-wpx / 2) + "px";
+  d.style.marginTop = (-hpx / 2) + "px";
+  d.style.transform = transform;
+  return d;
+}
+
+function muT(x, y, z, rot) {
+  return "translate3d(" + x.toFixed(1) + "px," + y.toFixed(1) + "px," +
+         z.toFixed(1) + "px)" + (rot || "");
+}
+
+function muArtEl(item, x, y, z, rotY) {
+  const fw = item.l + 2 * MU_FRAME, fh = item.h + 2 * MU_FRAME;
+  const el = muEl("mu-art", fw, fh, muT(x, y, z, " rotateY(" + rotY + "deg)"));
+  const img = new Image();
+  img.src = thumbSrc(item.work);
+  img.alt = item.work.title || "";
+  img.draggable = false;
+  el.appendChild(img);
+  el.dataset.id = item.work.id;
+  const rad = rotY * Math.PI / 180;
+  MU.arts.push({ el: el, img: img, work: item.work, est: item.est,
+                 x: x, z: z, w: fw, h: fh,
+                 nx: Math.sin(rad), nz: Math.cos(rad), hi: false });
+  return el;
+}
+
+/* One room's planes: floor, ceiling, side walls, and the far wall — split
+   around the doorway when another room follows. The far wall is shared: its
+   planes are double-sided, so the next room's entry side is the same wall seen
+   from behind, and a doorway is simply the gap both rooms agree on. */
+function muBuildRoom(g, i, geoms, world) {
+  const room = document.createElement("div");
+  room.className = "mu-roomg";
+  const W = g.W, D = g.D, z0 = g.z0, zf = g.z0 - D, zc = z0 - D / 2;
+  const H = MU_WALL_H;
+
+  room.appendChild(muEl("mu-floor", W, D, muT(0, 0, zc, " rotateX(90deg)")));
+  room.appendChild(muEl("mu-ceil", W, D, muT(0, -H, zc, " rotateX(-90deg)")));
+  room.appendChild(muEl("mu-wall mu-w-ew", D, H, muT(-W / 2, -H / 2, zc, " rotateY(90deg)")));
+  room.appendChild(muEl("mu-wall mu-w-ew", D, H, muT(W / 2, -H / 2, zc, " rotateY(-90deg)")));
+
+  // Entry wall: room 1 walls the visitor in behind the spawn; later rooms get
+  // theirs free — it's the previous room's far wall, seen from its other side.
+  if (i === 0) {
+    room.appendChild(muEl("mu-wall mu-w-ns", W, H, muT(0, -H / 2, z0, " rotateY(180deg)")));
+  }
+
+  const hasExit = i < geoms.length - 1;
+  if (hasExit) {
+    // The doorway wall spans the wider of the two rooms it separates.
+    const WB = Math.max(W, geoms[i + 1].W);
+    const side = (WB - MU_DOOR_W) / 2;
+    const scx = MU_DOOR_W / 2 + side / 2;
+    room.appendChild(muEl("mu-wall mu-w-ns", side, H, muT(-scx, -H / 2, zf, "")));
+    room.appendChild(muEl("mu-wall mu-w-ns", side, H, muT(scx, -H / 2, zf, "")));
+    room.appendChild(muEl("mu-wall mu-w-ns", MU_DOOR_W, H - MU_DOOR_H,
+      muT(0, -(MU_DOOR_H + (H - MU_DOOR_H) / 2), zf, "")));
+    // The casing that makes an opening read as a doorway rather than a same-
+    // coloured wall seen through a gap: jambs and a lintel, faced both ways.
+    // Kept a good 2.6 cm proud of the wall — closer than that and the
+    // compositor starts treating trim and wall as coplanar, and the wall wins.
+    const JW = 13, JX = MU_DOOR_W / 2 + JW / 2, JY = -MU_DOOR_H / 2;
+    [2.6, -2.6].forEach((dz) => {
+      room.appendChild(muEl("mu-door", JW, MU_DOOR_H, muT(-JX, JY, zf + dz, "")));
+      room.appendChild(muEl("mu-door", JW, MU_DOOR_H, muT(JX, JY, zf + dz, "")));
+      room.appendChild(muEl("mu-door", MU_DOOR_W + 2 * JW, 15,
+        muT(0, -(MU_DOOR_H + 7.5), zf + dz, "")));
+    });
+  } else {
+    room.appendChild(muEl("mu-wall mu-w-ns", W, H, muT(0, -H / 2, zf, "")));
+  }
+  world.appendChild(room);
+  return room;
+}
+
+/* Hang one room: segments in walk order, each group of slots centred on its
+   wall, every canvas centred on the hang line. `off` lifts the art a shade off
+   the wall so the frame never fights the plane it hangs on. */
+function muHangRoom(g, roomEl) {
+  const W = g.W, D = g.D, z0 = g.z0, zf = g.z0 - D, zc = z0 - D / 2;
+  const segs = [];
+  const far = W - (g.hasExit ? MU_DOOR_W : 0);
+  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: 90,  cx: -W / 2, cz: zc });
+  if (g.hasExit) {
+    const sl = (W - MU_DOOR_W) / 2;
+    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: -(MU_DOOR_W + sl) / 2, cz: zf });
+    segs.push({ len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: (MU_DOOR_W + sl) / 2, cz: zf });
+  } else {
+    segs.push({ len: far, cap: far - 2 * MU_MARGIN, rot: 0, cx: 0, cz: zf });
+  }
+  segs.push({ len: D, cap: D - 2 * MU_MARGIN, rot: -90, cx: W / 2, cz: zc });
+  muDistribute(g.slots, segs, g.gap);
+
+  const off = 2.4;                       // cm off the wall — see the casing note
+  segs.forEach((seg) => {
+    if (!seg.slots.length) return;
+    const groupW = seg.slots.reduce((t, s) => t + s.w, 0) +
+                   g.gap * (seg.slots.length - 1);
+    let t = (seg.len - groupW) / 2;      // from the segment's walk-order start
+    const rad = seg.rot * Math.PI / 180;
+    const ax = Math.cos(rad), az = -Math.sin(rad);   // local +x in world
+    const nx = Math.sin(rad), nz = Math.cos(rad);    // wall's inward normal
+    seg.slots.forEach((slot) => {
+      const c = t + slot.w / 2 - seg.len / 2;        // centred local offset
+      const x = seg.cx + ax * c + nx * off;
+      const z = seg.cz + az * c + nz * off;
+      if (slot.items.length === 1) {
+        const it = slot.items[0];
+        roomEl.appendChild(muArtEl(it, x, -MU_HANG, z, seg.rot));
+      } else {
+        // Two high: the pair shares the hang line, first work on top.
+        const a = slot.items[0], b = slot.items[1];
+        const ha = a.h + 2 * MU_FRAME, hb = b.h + 2 * MU_FRAME;
+        const S = ha + hb + MU_STACK_GAP;
+        roomEl.appendChild(muArtEl(a, x, -(MU_HANG + S / 2 - ha / 2), z, seg.rot));
+        roomEl.appendChild(muArtEl(b, x, -(MU_HANG - S / 2 + hb / 2), z, seg.rot));
+      }
+      t += slot.w + g.gap;
+    });
+  });
+}
+
+function muBuild(museum) {
+  MU.world.innerHTML = "";
+  MU.rooms = [];
+  MU.arts = [];
+  const rooms = museum.rooms.filter((r) => r.works.length);
+  const geoms = [];
+  rooms.forEach((room, i) => {
+    const slots = muSlots(room.works, room.layout);
+    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1);
+    g.slots = slots;
+    g.layout = room.layout;
+    g.hasExit = i < rooms.length - 1;
+    geoms.push(g);
+  });
+  let z0 = 0;
+  geoms.forEach((g, i) => {
+    g.z0 = z0;
+    z0 -= g.D;
+    const el = muBuildRoom(g, i, geoms, MU.world);
+    muHangRoom(g, el);
+    MU.rooms.push({ W: g.W, D: g.D, z0: g.z0, zf: g.z0 - g.D,
+                    layout: g.layout, el: el });
+  });
+  MU.cam.x = 0;
+  MU.cam.z = -Math.min(110, (MU.rooms[0] ? MU.rooms[0].D : 400) / 4);
+  MU.cam.yaw = 0;
+  MU.cam.zoom = 1;
+  MU.ri = 0;
+  muRoomLabel();
+  muCull();
+}
+
+/* Only the room you're in and its neighbours render; a museum of twenty rooms
+   is still only ever three rooms of planes for the compositor. */
+function muCull() {
+  MU.rooms.forEach((r, i) =>
+    r.el.classList.toggle("mu-hidden", Math.abs(i - MU.ri) > 1));
+}
+
+function muRoomLabel() {
+  const el = document.getElementById("mu-room");
+  if (!el || !MU.rooms.length) return;
+  const r = MU.rooms[MU.ri];
+  el.textContent = "Room " + (MU.ri + 1) + " of " + MU.rooms.length +
+                   " · " + (r.layout === "tight" ? "tight" : "spacious") + " hang";
+}
+
+/* Walls stop you, doorways don't: crossing the far or entry plane is allowed
+   only through the door's width, and while you're in the doorway you stay in
+   it, so there's no slipping sideways into the wall's edge. */
+function muMove(dx, dz) {
+  const cam = MU.cam, rooms = MU.rooms;
+  if (!rooms.length) return;
+  const pad = 45, dpad = 24;
+  let nx = cam.x + dx, nz = cam.z + dz;
+  let r = rooms[MU.ri];
+  const doorX = MU_DOOR_W / 2 - dpad;
+  if (nz < r.zf + pad &&
+      !(MU.ri < rooms.length - 1 && Math.abs(nx) < doorX)) nz = r.zf + pad;
+  if (nz > r.z0 - pad &&
+      !(MU.ri > 0 && Math.abs(nx) < doorX)) nz = r.z0 - pad;
+  let ri = MU.ri;
+  while (ri < rooms.length - 1 && nz < rooms[ri].zf) ri++;
+  while (ri > 0 && nz > rooms[ri].z0) ri--;
+  if (ri !== MU.ri) { MU.ri = ri; muRoomLabel(); muCull(); }
+  r = rooms[ri];
+  const nearDoor = (ri < rooms.length - 1 && nz < r.zf + pad + 26) ||
+                   (ri > 0 && nz > r.z0 - pad - 26);
+  const xmax = nearDoor ? doorX : r.W / 2 - pad;
+  cam.x = Math.max(-xmax, Math.min(xmax, nx));
+  cam.z = Math.max(rooms[rooms.length - 1].zf + pad, Math.min(-10, nz));
+}
+
+function muApply() {
+  const cam = MU.cam;
+  const P = Math.round(MU.baseP * cam.zoom);
+  MU.vp.style.perspective = P + "px";
+  // The CSS eye sits at z = +P, so the world is pushed P forward first: the
+  // camera position then lands exactly at the eye, and a painting d cm away
+  // renders at size·P/d — a true pinhole.
+  MU.world.style.transform =
+    "translateZ(" + P + "px) rotateY(" + cam.yaw.toFixed(4) + "rad) " +
+    "translate3d(" + (-cam.x).toFixed(1) + "px," + MU_EYE + "px," + (-cam.z).toFixed(1) + "px)";
+}
+
+/* The wall label for wherever you've stopped: the nearest painting you're
+   actually facing, from its front. Checked a few times a second, not per
+   frame — reading pace, not physics pace. */
+function muNearest(ts) {
+  if (ts - MU.nearTs < 160) return;
+  MU.nearTs = ts;
+  const cam = MU.cam;
+  const fx = Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
+  let best = null, bestScore = 0;
+  for (const a of MU.arts) {
+    const dx = a.x - cam.x, dz = a.z - cam.z;
+    const dist = Math.hypot(dx, dz) || 1;
+    if (dist > 470) continue;
+    const facing = (dx * fx + dz * fz) / dist;
+    if (facing < 0.7) continue;                    // outside a ~45° look
+    if (dx * a.nx + dz * a.nz > -5) continue;      // behind its wall
+    const score = facing / (70 + dist);
+    if (score > bestScore) { bestScore = score; best = a; }
+  }
+  if (best && !best.hi && Math.hypot(best.x - cam.x, best.z - cam.z) < 480) {
+    best.hi = true;                    // walk up close and the full image loads
+    best.img.src = viewSrc(best.work);
+  }
+  if (best === MU.near) return;
+  MU.near = best;
+  const el = document.getElementById("mu-placard");
+  if (!el) return;
+  if (!best) { el.classList.remove("show"); return; }
+  const w = best.work;
+  const size = cmDims(w) || (best.est ? "size not recorded" : "");
+  el.innerHTML =
+    '<span class="mu-pl-t">' + esc(w.title || "Untitled") + "</span>" +
+    '<span class="mu-pl-m">' +
+    esc([w.artist, w.date || w.year, w.medium, size].filter(Boolean).join(" · ")) +
+    "</span>";
+  el.classList.add("show");
+}
+
+/* Click a painting and the camera strolls over to meet it square-on, at a
+   distance where it fills the view comfortably. Any arrow key hands the walk
+   straight back. */
+function muGlideTo(art) {
+  const d = Math.max(150, Math.min(520, 1.25 * Math.max(art.w, art.h * 1.4)));
+  const to = { x: art.x + art.nx * d, z: art.z + art.nz * d,
+               yaw: Math.atan2(-art.nx, art.nz) };
+  const from = { x: MU.cam.x, z: MU.cam.z, yaw: MU.cam.yaw };
+  let dy = to.yaw - from.yaw;
+  while (dy > Math.PI) dy -= 2 * Math.PI;
+  while (dy < -Math.PI) dy += 2 * Math.PI;
+  to.yaw = from.yaw + dy;
+  // t0 is stamped by the first glide frame, not here: the click and the frame
+  // loop read different clocks, and an easing fed a negative time runs away.
+  MU.glide = { from: from, to: to, t0: null,
+               dur: Math.max(500, Math.min(1400, Math.hypot(to.x - from.x, to.z - from.z) * 2.2)) };
+}
+
+function muFrame(ts) {
+  if (!MU.active) return;
+  MU.raf = requestAnimationFrame(muFrame);
+  const dt = Math.min(0.05, (ts - MU.last) / 1000 || 0.016);
+  MU.last = ts;
+  const k = MU.keys;
+  if (MU.glide) {
+    const gl = MU.glide;
+    if (gl.t0 == null) gl.t0 = ts;
+    const p = Math.max(0, Math.min(1, (ts - gl.t0) / gl.dur));
+    const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+    MU.cam.x = gl.from.x + (gl.to.x - gl.from.x) * e;
+    MU.cam.z = gl.from.z + (gl.to.z - gl.from.z) * e;
+    MU.cam.yaw = gl.from.yaw + (gl.to.yaw - gl.from.yaw) * e;
+    // Keep the room index honest while flying (label, culling, collisions after).
+    muMove(0, 0);
+    if (p >= 1) MU.glide = null;
+  } else {
+    const f = (k.ArrowUp ? 1 : 0) - (k.ArrowDown ? 1 : 0);
+    const t = (k.ArrowRight ? 1 : 0) - (k.ArrowLeft ? 1 : 0);
+    const s = Math.min(1, dt * 7.5);
+    MU.vel.f += (f * MU_SPEED - MU.vel.f) * s;
+    MU.vel.t += (t * MU_TURN - MU.vel.t) * s;
+    MU.cam.yaw += MU.vel.t * dt;
+    if (Math.abs(MU.vel.f) > 0.4) {
+      muMove(Math.sin(MU.cam.yaw) * MU.vel.f * dt,
+             -Math.cos(MU.cam.yaw) * MU.vel.f * dt);
+    }
+  }
+  muApply();
+  muNearest(ts);
+}
+
+function muKeyDown(e) {
+  if (!MU.active) return;
+  if (document.querySelector(".modal-backdrop")) return;
+  if (e.key === "Escape") { location.hash = "#/"; return; }
+  if (MU_KEYSET[e.key]) {
+    e.preventDefault();              // the page behind must not scroll
+    MU.keys[e.key] = true;
+    MU.glide = null;
+  }
+}
+function muKeyUp(e) { if (MU_KEYSET[e.key]) MU.keys[e.key] = false; }
+function muBlur() { MU.keys = {}; }  // a key released outside the window stays released
+
+function muResize() {
+  if (!MU.vp) return;
+  MU.baseP = Math.max(420, MU.vp.clientHeight * 1.02);
+  muApply();
+}
+
+function muWheel(e) {
+  e.preventDefault();
+  MU.cam.zoom = Math.max(0.55, Math.min(3.2, MU.cam.zoom * Math.exp(-e.deltaY * 0.0012)));
+  muApply();
+}
+
+/* Touch: the D-pad drives the same four keys the keyboard does, and a pinch is
+   the scroll wheel. Nothing else — a museum is walked, not flung. */
+function muPointerDown(e) {
+  if (e.pointerType === "mouse") return;
+  MU.points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (MU.points.size === 2) {
+    const [a, b] = [...MU.points.values()];
+    MU.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: MU.cam.zoom };
+  }
+}
+function muPointerMove(e) {
+  if (!MU.points.has(e.pointerId)) return;
+  MU.points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (MU.pinch && MU.points.size >= 2) {
+    const [a, b] = [...MU.points.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (MU.pinch.d > 0) {
+      MU.cam.zoom = Math.max(0.55, Math.min(3.2, MU.pinch.zoom * (d / MU.pinch.d)));
+      muApply();
+    }
+  }
+}
+function muPointerUp(e) {
+  MU.points.delete(e.pointerId);
+  if (MU.points.size < 2) MU.pinch = null;
+}
+
+function muTeardown() {
+  if (!MU.active) return;
+  MU.active = false;
+  cancelAnimationFrame(MU.raf);
+  document.removeEventListener("keydown", muKeyDown);
+  document.removeEventListener("keyup", muKeyUp);
+  window.removeEventListener("blur", muBlur);
+  window.removeEventListener("resize", muResize);
+  document.body.classList.remove("mu-open");
+  MU.vp = MU.world = MU.near = MU.glide = null;
+  MU.keys = {};
+  MU.rooms = [];
+  MU.arts = [];
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (screen.orientation && screen.orientation.unlock) {
+    try { screen.orientation.unlock(); } catch (err) { /* not locked */ }
+  }
+}
+
+async function museumView() {
+  setNav("museum");
+  let museum;
+  try { museum = (await api("/api/museum")).museum; }
+  catch (e) { app.innerHTML = page(errbox(e)); return; }
+  const hasArt = museum.rooms.some((r) => r.works.length);
+  const arrange = isOwner()
+    ? '<a class="mu-arrange linkbtn" href="#/museum/arrange">Arrange</a>' : "";
+
+  if (!hasArt) {
+    app.innerHTML = page(
+      '<div class="pagehead"><div><h1>The museum</h1></div></div>' +
+      '<div class="emptybox">Nothing hangs here yet.' +
+      (isOwner()
+        ? " Open any painting in the fullscreen viewer and press <b>H</b> to hang " +
+          'it — then <a href="#/museum/arrange">arrange the rooms</a>.'
+        : " The owner hasn’t hung the museum yet — come back soon.") +
+      "</div>");
+    return;
+  }
+
+  const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  app.innerHTML =
+    '<div id="museum" class="museum' + (touch ? " touch" : "") + '">' +
+      '<div class="mu-clip"><div class="mu-vp" id="mu-vp">' +
+      '<div class="mu-world" id="mu-world"></div></div></div>' +
+      '<div class="mu-hud">' +
+        '<div class="mu-top">' +
+          '<span class="eyebrow">' + esc(siteShort() || siteTitle()) + "</span>" +
+          '<span class="mu-room" id="mu-room"></span>' +
+          '<span class="mu-sp"></span>' + arrange +
+          '<a class="mu-x" href="#/" aria-label="Leave the museum">✕</a>' +
+        "</div>" +
+        '<div class="mu-placard" id="mu-placard"></div>' +
+        '<div class="mu-dpad" id="mu-dpad" aria-hidden="' + (touch ? "false" : "true") + '">' +
+          '<button class="dp dp-u" data-k="ArrowUp" aria-label="Walk forward">▲</button>' +
+          '<button class="dp dp-l" data-k="ArrowLeft" aria-label="Turn left">◀</button>' +
+          '<button class="dp dp-r" data-k="ArrowRight" aria-label="Turn right">▶</button>' +
+          '<button class="dp dp-d" data-k="ArrowDown" aria-label="Walk back">▼</button>' +
+        "</div>" +
+        '<div class="mu-hint">↑ ↓ walk · ← → turn · scroll to zoom · click a painting to approach</div>' +
+      "</div>" +
+      '<div class="mu-rotate">⟳&nbsp; Turn your phone sideways — the museum is a landscape.</div>' +
+    "</div>";
+
+  MU.vp = $("#mu-vp");
+  MU.world = $("#mu-world");
+  MU.active = true;
+  document.body.classList.add("mu-open");
+  muResize();
+  muBuild(museum);
+  muApply();
+
+  document.addEventListener("keydown", muKeyDown);
+  document.addEventListener("keyup", muKeyUp);
+  window.addEventListener("blur", muBlur);
+  window.addEventListener("resize", muResize);
+  const el = $("#museum");
+  el.addEventListener("wheel", muWheel, { passive: false });
+  el.addEventListener("pointerdown", muPointerDown);
+  el.addEventListener("pointermove", muPointerMove);
+  el.addEventListener("pointerup", muPointerUp);
+  el.addEventListener("pointercancel", muPointerUp);
+  MU.vp.addEventListener("click", (e) => {
+    const hit = e.target.closest(".mu-art");
+    if (!hit || MU.pinch) return;
+    const art = MU.arts.find((a) => a.el === hit);
+    if (art) muGlideTo(art);
+  });
+
+  // The D-pad presses the same keys the keyboard does.
+  const dpad = $("#mu-dpad");
+  dpad.querySelectorAll(".dp").forEach((b) => {
+    const k = b.dataset.k;
+    const on = (ev) => { ev.preventDefault(); MU.keys[k] = true; MU.glide = null; };
+    const off = () => { MU.keys[k] = false; };
+    b.addEventListener("pointerdown", on);
+    b.addEventListener("pointerup", off);
+    b.addEventListener("pointercancel", off);
+    b.addEventListener("pointerleave", off);
+    b.addEventListener("contextmenu", (ev) => ev.preventDefault());
+  });
+
+  // Phones: take the whole screen and ask to lie down. Where fullscreen or the
+  // lock isn't offered (iPhones), the fixed panel and the rotate veil stand in.
+  if (touch && el.requestFullscreen) {
+    el.requestFullscreen().then(() => {
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock("landscape").catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
+  MU.last = 0;
+  MU.raf = requestAnimationFrame(muFrame);
+}
+
 /* ============================== add / downloads ============================== */
 
 let sourcesCache = null;
@@ -3261,8 +4066,8 @@ function settingsHeadHtml(s) {
 const BULK_TPL = {
   artists: [{ name: "", born: "", died: "", birthplace: "", nationality: "",
               movements: [], description: "", wikidata_id: "", wikipedia_url: "" }],
-  works: [{ artist: "", title: "", date: "", medium: "", style: "", genre: "",
-            school: "", description: "" }],
+  works: [{ artist: "", title: "", date: "", medium: "", height_cm: "",
+            length_cm: "", style: "", genre: "", school: "", description: "" }],
 };
 
 async function copyText(t) {
@@ -4605,8 +5410,14 @@ function wake() {
   idleTimer = setTimeout(() => viewer.classList.add("idle"), 2600);
 }
 
+/* "73.5 × 92 cm" — height first, the way a catalogue lists a canvas. Blank until
+   both measurements are recorded: half a size would read as a mistake. */
+function cmDims(w) {
+  return (w.height_cm && w.length_cm) ? w.height_cm + " × " + w.length_cm + " cm" : "";
+}
+
 function caption(w) {
-  const bits = [w.artist, w.date || w.year, w.medium].filter(Boolean).join(" · ");
+  const bits = [w.artist, w.date || w.year, w.medium, cmDims(w)].filter(Boolean).join(" · ");
   const src = w.source_url
     ? ' &nbsp;<a href="' + esc(w.source_url) + '" target="_blank" rel="noopener">source ↗</a>'
     : "";
@@ -4879,7 +5690,7 @@ function italicizeTitle(html, title) {
    italic, then the facts, a rule, and the reading. */
 function placardHtml(w) {
   const date = w.date || (w.year ? String(w.year) : "");
-  const meta = [date, w.medium].filter(Boolean).join(" · ");
+  const meta = [date, w.medium, cmDims(w)].filter(Boolean).join(" · ");
   const desc = w.description
     ? '<div class="pl-desc">' +
       linkXrefs(italicizeTitle(richDescHtml(w.description), w.title), w.xref) + "</div>"
@@ -5140,6 +5951,12 @@ function editWorkDialog(w, onSaved) {
     "<label>Artist<input id=\"ew-artist\" autocomplete=\"off\"></label>" +
     "<label>Date <span class=\"tiny\">optional</span><input id=\"ew-date\" autocomplete=\"off\"></label>" +
     "<label>Medium <span class=\"tiny\">optional</span><input id=\"ew-medium\" autocomplete=\"off\"></label>" +
+    '<div class="row3 rowcm">' +
+    "<label>Height <span class=\"tiny\">cm — the canvas itself</span>" +
+    "<input id=\"ew-hcm\" type=\"number\" min=\"0\" step=\"any\" inputmode=\"decimal\" autocomplete=\"off\"></label>" +
+    "<label>Length <span class=\"tiny\">cm</span>" +
+    "<input id=\"ew-lcm\" type=\"number\" min=\"0\" step=\"any\" inputmode=\"decimal\" autocomplete=\"off\"></label>" +
+    "</div>" +
     '<div class="row3">' +
     "<label>Style <span class=\"tiny\">movement</span><input id=\"ew-style\" autocomplete=\"off\"></label>" +
     "<label>Genre <span class=\"tiny\">subject</span><input id=\"ew-genre\" autocomplete=\"off\"></label>" +
@@ -5164,6 +5981,8 @@ function editWorkDialog(w, onSaved) {
   q("#ew-artist").value = w.artist || "";
   q("#ew-date").value = w.date || (w.year ? String(w.year) : "");
   q("#ew-medium").value = w.medium || "";
+  q("#ew-hcm").value = w.height_cm != null ? String(w.height_cm) : "";
+  q("#ew-lcm").value = w.length_cm != null ? String(w.length_cm) : "";
   q("#ew-style").value = w.style || "";
   q("#ew-genre").value = w.genre || "";
   q("#ew-school").value = w.school || "";
@@ -5207,6 +6026,8 @@ function editWorkDialog(w, onSaved) {
     const body = {
       title: q("#ew-title").value, artist: q("#ew-artist").value,
       date: q("#ew-date").value, medium: q("#ew-medium").value,
+      // Sent as typed; the server reads them as cm and an emptied field clears.
+      height_cm: q("#ew-hcm").value, length_cm: q("#ew-lcm").value,
       style: q("#ew-style").value, genre: q("#ew-genre").value,
       school: q("#ew-school").value,
       description: ed.textContent.trim() ? sanitizeRich(ed.innerHTML) : "",
@@ -5323,6 +6144,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowLeft") showWork(V.i - 1);
   else if (e.key === "Escape") closeViewer();
   else if (e.key === "c" || e.key === "C") collectHotkey();
+  else if (e.key === "h" || e.key === "H") hangHotkey();
   else if (e.key === "p" || e.key === "P") {
     // Turning placards on should actually show one, even if the last one was
     // folded away to its pill.
@@ -5355,6 +6177,22 @@ function collectHotkey() {
   if (!canCurate()) { toast("Only curators and owners can build collections."); return; }
   const work = V.list[V.i];
   if (work) addWorkToCollection(work);
+}
+
+/* ---- hotkey "h": hang the painting on screen in the museum ---- */
+async function hangHotkey() {
+  if (!isOwner()) { viewerFlash("Only the owner hangs the museum."); return; }
+  const work = V.list[V.i];
+  if (!work) return;
+  try {
+    const r = await api("/api/museum/hang", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [work.id] }),
+    });
+    viewerFlash(r.added
+      ? "✓ Hung in the museum — room " + r.room + ". Arrange it from the Museum page."
+      : "Already hangs in the museum.");
+  } catch (e) { viewerFlash("⚠ " + e.message); }
 }
 
 async function addWorkToCollection(work) {
