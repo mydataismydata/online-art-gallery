@@ -71,8 +71,9 @@ Every collection is **visible to everyone** who can sign in; only its creating C
 ## The Museum — a walkable 3-D gallery
 
 **Museum** in the top bar opens a first-person walk through rooms of your art:
-flat neutral walls, floor and ceiling, framed canvases hung to scale on the walls,
-and doorways leading room to room. No plugins or WebGL — it's plain CSS 3-D.
+flat neutral walls, floor and ceiling, framed canvases hung to scale on the walls
+with a small placard beside each piece, and doorways leading room to room. No
+plugins or WebGL — it's plain CSS 3-D.
 
 - **Walking:** the arrow keys are the whole interface — ↑ ↓ walk, ← → turn. The
   mouse wheel zooms in and out; clicking a painting strolls up to it, and the

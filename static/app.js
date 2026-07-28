@@ -3299,7 +3299,9 @@ async function museumArrangeView(keepScroll) {
 
 const MU_EYE = 158;                  // eye height off the floor, cm
 const MU_HANG = 150;                 // centre line the art hangs on, cm
-const MU_FRAME = 7;                  // frame width around the canvas, cm
+const MU_FRAME = 9;                  // frame width around the canvas, cm (see museum.css)
+const MU_LBL_W = 22, MU_LBL_H = 14;  // the wall placard beside each piece, cm
+const MU_LBL_SCALE = 10;             // drawn 10× and scaled down, so the type stays crisp
 const MU_WALL_H = 380;               // ceiling height
 const MU_DOOR_W = 170, MU_DOOR_H = 260;
 const MU_MARGIN = 70;                // bare wall kept at the ends of each run
@@ -3431,6 +3433,29 @@ function muArtEl(item, x, y, z, rotY) {
   return el;
 }
 
+/* The wall placard beside a painting: artist, title and date, medium and size —
+   a real label, small on the wall, read by walking up to it. It's laid out at
+   ten times its size and scaled down, so the type rasterises crisp instead of
+   being hinted to mush at 2 px. */
+function muLabelEl(work, x, y, z, rotY) {
+  const el = document.createElement("div");
+  el.className = "mu-label";
+  el.style.width = (MU_LBL_W * MU_LBL_SCALE) + "px";
+  el.style.height = (MU_LBL_H * MU_LBL_SCALE) + "px";
+  el.style.marginLeft = (-MU_LBL_W * MU_LBL_SCALE / 2) + "px";
+  el.style.marginTop = (-MU_LBL_H * MU_LBL_SCALE / 2) + "px";
+  el.style.transform = muT(x, y, z,
+    " rotateY(" + rotY + "deg) scale(" + (1 / MU_LBL_SCALE) + ")");
+  const when = work.date || work.year;
+  const line3 = [work.medium, cmDims(work)].filter(Boolean).join(" · ");
+  el.innerHTML =
+    '<span class="mu-lb-a">' + esc(work.artist || "Unknown artist") + "</span>" +
+    '<span class="mu-lb-t">' + esc(work.title || "Untitled") +
+    (when ? '<span class="mu-lb-d">, ' + esc(String(when)) + "</span>" : "") + "</span>" +
+    (line3 ? '<span class="mu-lb-m">' + esc(line3) + "</span>" : "");
+  return el;
+}
+
 /* One room's planes: floor, ceiling, side walls, and the far wall — split
    around the doorway when another room follows. The far wall is shared: its
    planes are double-sided, so the next room's entry side is the same wall seen
@@ -3511,16 +3536,27 @@ function muHangRoom(g, roomEl) {
       const c = t + slot.w / 2 - seg.len / 2;        // centred local offset
       const x = seg.cx + ax * c + nx * off;
       const z = seg.cz + az * c + nz * off;
+      // Each canvas gets its wall placard just left of the frame (left as the
+      // walk reads the wall), centred on that canvas's own height.
+      const label = (work, ly) => {
+        const cl = c - slot.w / 2 - 6 - MU_LBL_W / 2;
+        roomEl.appendChild(muLabelEl(work,
+          seg.cx + ax * cl + nx * off, ly, seg.cz + az * cl + nz * off, seg.rot));
+      };
       if (slot.items.length === 1) {
         const it = slot.items[0];
         roomEl.appendChild(muArtEl(it, x, -MU_HANG, z, seg.rot));
+        label(it.work, -MU_HANG);
       } else {
         // Two high: the pair shares the hang line, first work on top.
         const a = slot.items[0], b = slot.items[1];
         const ha = a.h + 2 * MU_FRAME, hb = b.h + 2 * MU_FRAME;
         const S = ha + hb + MU_STACK_GAP;
-        roomEl.appendChild(muArtEl(a, x, -(MU_HANG + S / 2 - ha / 2), z, seg.rot));
-        roomEl.appendChild(muArtEl(b, x, -(MU_HANG - S / 2 + hb / 2), z, seg.rot));
+        const ya = -(MU_HANG + S / 2 - ha / 2), yb = -(MU_HANG - S / 2 + hb / 2);
+        roomEl.appendChild(muArtEl(a, x, ya, z, seg.rot));
+        roomEl.appendChild(muArtEl(b, x, yb, z, seg.rot));
+        label(a.work, ya);
+        label(b.work, yb);
       }
       t += slot.w + g.gap;
     });
