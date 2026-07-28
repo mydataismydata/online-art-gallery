@@ -3336,7 +3336,10 @@ function muSlots(works, layout) {
   const F2 = MU_FRAME * 2;
   const sized = works.map((w) => Object.assign({ work: w }, muArtSize(w)));
   const slots = [];
-  const small = (s) => s.h <= 66 && s.l <= 110;
+  // Only a piece we KNOW is small may stack: an unmeasured work hangs at an
+  // assumed size, and guessing a painting small enough to pile up is exactly
+  // the guess a museum doesn't make.
+  const small = (s) => !s.est && s.h <= 66 && s.l <= 110;
   for (let i = 0; i < sized.length; i++) {
     const a = sized[i], b = sized[i + 1];
     if (layout === "tight" && b && small(a) && small(b)) {
@@ -3540,16 +3543,18 @@ function muHangRoom(g, roomEl, ri) {
       const x = seg.cx + ax * c + nx * off;
       const z = seg.cz + az * c + nz * off;
       // Each canvas gets its wall placard just left of the frame (left as the
-      // walk reads the wall), centred on that canvas's own height.
-      const label = (work, ly) => {
+      // walk reads the wall), tucked at the frame's lower corner — mid-height
+      // in a tight hang floats halfway to the neighbour and reads as nobody's.
+      const label = (it, centerUp) => {
         const cl = c - slot.w / 2 - 6 - MU_LBL_W / 2;
-        roomEl.appendChild(muLabelEl(work,
+        const ly = -(centerUp - it.h / 2 - MU_FRAME + MU_LBL_H / 2);
+        roomEl.appendChild(muLabelEl(it.work,
           seg.cx + ax * cl + nx * off, ly, seg.cz + az * cl + nz * off, seg.rot));
       };
       if (slot.items.length === 1) {
         const it = slot.items[0];
         roomEl.appendChild(muArtEl(it, x, -MU_HANG, z, seg.rot, ri));
-        label(it.work, -MU_HANG);
+        label(it, MU_HANG);
       } else {
         // Two high: the pair shares the hang line, first work on top.
         const a = slot.items[0], b = slot.items[1];
@@ -3558,8 +3563,8 @@ function muHangRoom(g, roomEl, ri) {
         const ya = -(MU_HANG + S / 2 - ha / 2), yb = -(MU_HANG - S / 2 + hb / 2);
         roomEl.appendChild(muArtEl(a, x, ya, z, seg.rot, ri));
         roomEl.appendChild(muArtEl(b, x, yb, z, seg.rot, ri));
-        label(a.work, ya);
-        label(b.work, yb);
+        label(a, -ya);
+        label(b, -yb);
       }
       t += slot.w + g.gap;
     });
