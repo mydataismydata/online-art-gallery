@@ -37,7 +37,7 @@ body.mu-open { overflow: hidden; }
    relaid on an exact lattice so the tile repeats without a seam. 10 × 30 cm
    planks, 180 cm to the repeat. */
 .mu-floor {
-  background: #bd9059 url("../img/parquet.png") repeat;
+  background: #ce965a url("../img/parquet.png") repeat;
   background-size: 180px 180px;
 }
 /* A frosted-glass skylight: luminous panes in a mullion grid, set in a
