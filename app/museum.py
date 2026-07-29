@@ -28,10 +28,25 @@ DEFAULT_LAYOUT = "spacious"
 # from a room's walls map hangs wherever the layout finds space.
 WALLS = ("n", "s", "e", "w")
 
-# Which wall of the PREVIOUS room a room's doorway sits on. South is never on
-# offer — that's where the previous room was entered from.
-VIAS = ("n", "e", "w")
-DEFAULT_VIA = "n"
+# Which of a room's OWN walls holds the doorway to the next room. The compass
+# is absolute — every room's north faces the same way — and any wall may hold
+# the door except, from room two on, the wall the room was itself entered
+# through: that one already leads backward.
+OPPOSITE = {"n": "s", "s": "n", "e": "w", "w": "e"}
+DEFAULT_EXIT = "n"
+
+
+def _norm_exits(rooms):
+    """Chain-normalise exits in place: each room's exit must be a wall and not
+    the room's own entry (the opposite of the previous room's exit)."""
+    entry = None
+    for r in rooms:
+        x = r.get("exit")
+        if x not in WALLS or x == entry:
+            x = next(w for w in ("n", "e", "s", "w") if w != entry)
+        r["exit"] = x
+        entry = OPPOSITE[x]
+    return rooms
 
 # Walls for runaway payloads, far above any hang a person would build by hand.
 MAX_ROOMS = 60
@@ -67,10 +82,9 @@ def _rooms(rec):
         ids = [w for w in r.get("work_ids") or [] if isinstance(w, str) and w]
         walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
         walls = {k: v for k, v in walls.items() if k in ids and v in WALLS}
-        via = r.get("via") if r.get("via") in VIAS else DEFAULT_VIA
-        out.append({"work_ids": ids, "walls": walls, "via": via,
+        out.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
                     "layout": clean_layout(r.get("layout"))})
-    return out
+    return _norm_exits(out)
 
 
 def detail():
@@ -83,7 +97,7 @@ def detail():
     rooms, hung = [], 0
     for r in _rooms(rec):
         works = [w for w in (library.get(wid) for wid in r["work_ids"]) if w]
-        rooms.append({"works": works, "walls": r["walls"], "via": r["via"],
+        rooms.append({"works": works, "walls": r["walls"], "exit": r["exit"],
                       "layout": r["layout"]})
         hung += len(works)
     return {"rooms": rooms, "count": hung,
@@ -122,9 +136,9 @@ def save(rooms_in):
         walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
         walls = {str(k): v for k, v in walls.items()
                  if str(k) in ids and v in WALLS}
-        via = r.get("via") if r.get("via") in VIAS else DEFAULT_VIA
-        rooms.append({"work_ids": ids, "walls": walls, "via": via,
+        rooms.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
                       "layout": clean_layout(r.get("layout"))})
+    _norm_exits(rooms)
     with _lock:
         rec = _read() or {}
         rec["rooms"] = rooms

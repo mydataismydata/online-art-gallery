@@ -86,12 +86,13 @@ WebGL — it's plain CSS 3-D.
   hang it — it joins the museum's last room, the same gesture as **C** for
   collections. Then **Arrange** (or `#/museum/arrange`) is where the curation
   happens: drag paintings into order and between rooms (or nudge them a step at
-  a time with ↑ ↓, a whole room with ⇈ ⇊), pin any painting to a compass wall — **N** is the far wall
-  as you walk in, **S** the one at your back, **W** left, **E** right, *auto*
-  lets the room decide — cut a room in two at any
-  painting (✂), merge rooms back, pick which wall of the previous room each
-  room's doorway sits on (**W**, **N** or **E** — so the museum turns corners
-  rather than running one straight line), and give every room its fit —
+  a time with ↑ ↓, a whole room with ⇈ ⇊), pin any painting to a compass wall
+  (the compass is absolute — north faces the same way in every room; *auto*
+  lets the room decide), cut a room in two at any
+  painting (✂), merge rooms back, pick which of each room's own walls holds the
+  doorway to the next room (**N**, **S**, **E** or **W**, less the wall it was
+  entered through — so the museum wanders the plan rather than running one
+  straight line), and give every room its fit —
   **Tight** hangs close together, pairs small pieces two high, and sizes the room
   snug around the count; **Spacious** hangs everything in one generous line.
   Every change saves as you make it.
