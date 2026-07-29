@@ -17,7 +17,10 @@
 .mu-floor {
   background: #eab069 url("../img/parquet.png") repeat;
   background-size: 180px 180px;
-  box-shadow: inset 0 0 52px 8px rgba(74, 58, 40, .40);
+  /* diffused skylight: contact darkening concentrated close to the walls */
+  box-shadow:
+    inset 0 0 30px 3px rgba(65, 50, 36, .27),
+    inset 0 0 8px 1px rgba(46, 35, 25, .18);
 }
 
 /* A frosted-glass skylight: luminous panes in a mullion grid, set in a
@@ -34,49 +37,242 @@
 }
 
 /* Walls in a warm light charcoal, sampled from the reference doorway photo;
-   side walls a shade deeper. The gradient is the skylight's doing — brightest
-   at the ceiling line, settled to the base tone within a couple of metres.
-   Pixel stops, not percents: every wall piece's top edge sits at the ceiling
-   whatever its height, so the pieces always agree. */
-.mu-wall { background: linear-gradient(180deg, #a89d95 0px, #9f948c 130px); }
-.mu-wall.mu-w-ew { background: linear-gradient(180deg, #9e938b 0px, #958b83 130px); }
-
-/* The doorway's tones, sampled from the photo, with its light painted on:
-   the architrave steps lighten as they come forward off the wall (mu-door is
-   the proud outer band, mu-d3 the deepest step and the reveal), and every
-   fascia carries the soft overhead light — a lit top edge, a shaded bottom,
-   faint crevices at its sides, and a soft shadow thrown down the surface
-   behind it. */
-.mu-door {
-  background: linear-gradient(180deg, #a69c91 0%, #968d83 45%, #857b70 100%);
-  box-shadow:
-    inset 0 3px 3px -1px rgba(255, 250, 240, .50),
-    inset 0 -3px 3px -1px rgba(28, 22, 16, .45),
-    inset 3px 0 4px -2px rgba(28, 22, 16, .28),
-    inset -3px 0 4px -2px rgba(28, 22, 16, .28),
-    0 8px 14px -4px rgba(28, 22, 16, .50);
+   side walls a shade deeper. A large skylight is an area source, so the
+   falloff is broad and subtle, not a directional wash. Pixel stops, not
+   percents: every wall piece's top edge sits at the ceiling whatever its
+   height, so the pieces always agree. */
+.mu-wall {
+  background:
+    linear-gradient(
+      180deg,
+      #aaa19a 0,
+      #a59c95 95px,
+      #a09790 240px,
+      #9d948d 100%
+    );
 }
-.mu-door.mu-d2 { background: linear-gradient(180deg, #9d9388 0%, #90877d 45%, #7f756a 100%); }
-.mu-door.mu-d3 { background: linear-gradient(180deg, #958b80 0%, #8a7f75 45%, #776d62 100%); }
+.mu-wall.mu-w-ew {
+  background:
+    linear-gradient(
+      180deg,
+      #a19891 0,
+      #9d948d 95px,
+      #978e87 240px,
+      #958c85 100%
+    );
+}
+
+/* -------------------------------------------------------------------------
+   PAINTED DOOR CASING
+
+   The three pieces are stepped in actual 3D, so each one should not also
+   look like a deeply rounded rail. The gradients below describe only a
+   shallow painted bevel — orientation-specific: jambs profile horizontally,
+   lintels vertically, and only the outer step throws a wall shadow.
+   ------------------------------------------------------------------------- */
+
+.mu-door {
+  --moulding-color: #978e84;
+
+  background-color: var(--moulding-color);
+  background-image: none;
+
+  /* Shadows are supplied selectively below. */
+  box-shadow: none;
+}
+
+/* Deeper steps receive slightly less skylight. */
+.mu-door.mu-d2 {
+  --moulding-color: #91887e;
+}
+
+.mu-door.mu-d3 {
+  --moulding-color: #8b8278;
+}
+
+/* Vertical jambs remain approximately the same brightness from top to
+   bottom. Their profile runs horizontally, not vertically. */
+
+.mu-casing.mu-jamb {
+  background-color: var(--moulding-color);
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(49, 41, 34, .20) 0%,
+      rgba(255, 252, 244, .14) 13%,
+      rgba(255, 252, 244, .05) 30%,
+      rgba(0, 0, 0, 0) 64%,
+      rgba(42, 34, 28, .16) 100%
+    );
+
+  box-shadow:
+    inset 1px 0 rgba(255, 252, 244, .14),
+    inset -1px 0 rgba(48, 39, 32, .16);
+}
+
+/* Mirror the profile across the opening. */
+.mu-casing.mu-jamb.mu-right {
+  background-image:
+    linear-gradient(
+      270deg,
+      rgba(49, 41, 34, .20) 0%,
+      rgba(255, 252, 244, .14) 13%,
+      rgba(255, 252, 244, .05) 30%,
+      rgba(0, 0, 0, 0) 64%,
+      rgba(42, 34, 28, .16) 100%
+    );
+}
+
+/* The lintel faces upward toward the skylight at its upper bevel and becomes
+   gradually darker toward its underside. */
+
+.mu-casing.mu-lintel {
+  background-color: var(--moulding-color);
+  background-image:
+    linear-gradient(
+      180deg,
+      rgba(255, 253, 247, .24) 0%,
+      rgba(255, 253, 247, .12) 16%,
+      rgba(255, 255, 255, 0) 47%,
+      rgba(49, 40, 33, .10) 74%,
+      rgba(42, 34, 28, .25) 100%
+    );
+
+  box-shadow:
+    inset 0 1px rgba(255, 253, 247, .24),
+    inset 0 -1px rgba(43, 35, 29, .22);
+}
+
+/* Only the outer step should throw a noticeable shadow onto the wall.
+   Applying a large shadow to every nested strip creates an upholstered,
+   tubular appearance. */
+
+.mu-casing:not(.mu-d2):not(.mu-d3) {
+  box-shadow:
+    inset 0 1px rgba(255, 253, 247, .16),
+    inset 0 -1px rgba(43, 35, 29, .17),
+    0 7px 13px -8px rgba(30, 24, 19, .44);
+}
+
+/* Door reveals are painted wall thickness, not decorative moulding. */
+
+.mu-reveal {
+  background-color: #837a71;
+  background-image:
+    linear-gradient(
+      180deg,
+      rgba(255, 252, 245, .08),
+      rgba(48, 39, 32, .10)
+    );
+
+  box-shadow:
+    inset 0 0 5px rgba(38, 31, 26, .24);
+}
+
+.mu-reveal-soffit {
+  background-color: #928980;
+  background-image:
+    linear-gradient(
+      180deg,
+      rgba(255, 253, 248, .18),
+      rgba(52, 43, 36, .08)
+    );
+}
 
 /* The front door: the gilded leaves, closed for good, on room 1's south wall. */
 .mu-front { background: #2a2118 url("../img/entry-door.jpg") center / 100% 100% no-repeat; }
 
-/* Baseboards and plinths sit darkest, lit edge up top, the floor's contact
-   shadow at their feet; the crown throws its shadow well down the wall. */
+/* Layout-neutral default; the real treatments are per member below. */
 .mu-trim {
-  background: linear-gradient(180deg, #9d9285 0%, #877b6f 30%, #877b6f 62%, #625749 100%);
-  box-shadow:
-    inset 0 2.5px 1px -1px rgba(255, 250, 240, .45),
-    inset 0 -4px 5px rgba(28, 22, 16, .35),
-    0 6px 10px -3px rgba(28, 22, 16, .55);
+  background-color: #8d847a;
 }
-.mu-trim.mu-crown {
-  background: linear-gradient(180deg, #b0a698 0%, #968d83 45%, #766c60 100%);
+
+/* -------------------------------------------------------------------------
+   BASEBOARD
+
+   Several shallow changes in profile rather than one large, rounded
+   highlight. The darkest line is at the floor contact.
+   ------------------------------------------------------------------------- */
+
+.mu-trim.mu-base {
+  background-color: #8d847a;
+  background-image:
+    linear-gradient(
+      180deg,
+      #aaa197 0%,
+      #b0a79d 5%,
+      #9c9389 12%,
+      #8f867d 23%,
+      #938a81 55%,
+      #877e75 72%,
+      #71685f 89%,
+      #595149 100%
+    );
+
   box-shadow:
-    inset 0 2px 1px -1px rgba(255, 250, 240, .45),
-    inset 0 -2.5px 2px rgba(28, 22, 16, .40),
-    0 12px 18px -6px rgba(28, 22, 16, .45);
+    inset 0 1px 0 rgba(255, 253, 247, .34),
+    inset 0 -2px 2px rgba(39, 32, 27, .27),
+    0 4px 8px -6px rgba(31, 25, 20, .48);
+}
+
+/* -------------------------------------------------------------------------
+   CROWN MOULDING
+
+   The upper edge is slightly occluded by the ceiling. Below that is a soft
+   skylight highlight, followed by a darker lower cove. The wall shadow is
+   broad but low contrast because the skylight is a large area source.
+   ------------------------------------------------------------------------- */
+
+.mu-trim.mu-crown {
+  background-color: #978e84;
+  background-image:
+    linear-gradient(
+      180deg,
+      #817970 0%,
+      #a49c92 9%,
+      #b8b0a6 21%,
+      #aaa298 35%,
+      #989087 51%,
+      #8c837a 67%,
+      #756d64 84%,
+      #5d554d 100%
+    );
+
+  box-shadow:
+    inset 0 1px rgba(255, 253, 247, .22),
+    inset 0 -1px rgba(38, 31, 26, .24),
+    0 10px 18px -10px rgba(29, 23, 19, .40);
+}
+
+/* -------------------------------------------------------------------------
+   PLINTH BLOCKS
+
+   Plinths should read as shallow rectangular blocks, not as short pieces of
+   the baseboard profile.
+   ------------------------------------------------------------------------- */
+
+.mu-trim.mu-plinth {
+  background-color: #8b8278;
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(50, 41, 34, .15),
+      transparent 12%,
+      transparent 87%,
+      rgba(46, 38, 31, .16)
+    ),
+    linear-gradient(
+      180deg,
+      #a59c92 0%,
+      #948b81 12%,
+      #8b8278 68%,
+      #6f665d 100%
+    );
+
+  box-shadow:
+    inset 1px 1px rgba(255, 253, 247, .20),
+    inset -1px -2px rgba(42, 34, 28, .22),
+    0 5px 9px -6px rgba(31, 25, 20, .45);
 }
 
 /* A painting: the div is the frame — a real gilded frame, photographed with a
