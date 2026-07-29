@@ -3605,8 +3605,10 @@ function muArtEl(item, x, y, z, rotY, ri) {
   // owned ~180 texels however many pixels the derivative brought — that was
   // the close-up ceiling. Same cure as the placards: lay the element out K
   // times life-size and scale it back down, so the raster keeps up with a
-  // visitor's nose. K aims the long side at ~1500 texels and never exceeds 8.
-  const K = Math.max(1, Math.min(8, Math.round(1500 / (Math.max(fw, fh) * MU_SS))));
+  // visitor's nose. K aims the long side at the /img derivative's own ceiling
+  // (~2560 texels on the supersampled desktop stage), so the raster is never
+  // the one discarding source pixels.
+  const K = Math.max(1, Math.min(16, Math.round(850 / Math.max(fw, fh))));
   const el = muEl("mu-art", fw * K, fh * K,
     muT(x, y, z, " rotateY(" + rotY + "deg) scale(" + (1 / K) + ")"));
   // The border IS the frame — the gilded border-image in museum.css rides on
