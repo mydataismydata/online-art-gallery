@@ -152,12 +152,14 @@ function renderNav() {
   // Private box with nobody signed in: the whole site sits behind the login wall.
   // Public box: anyone may browse, so we still build the nav for anonymous visitors.
   if (!SESSION.user && !isPublic()) { nav.innerHTML = ""; ub.innerHTML = ""; return; }
+  // The walk leads the nav — it's the front-of-house experience — though the
+  // landing page itself is still Artists.
   const links = [
+    ["#/museum", "museum", "Walk the Museum"],
     ["#/", "home", "Artists"],
     ["#/browse/era", "browse", "Browse"],
     ["#/connections", "connections", "Connections"],
     ["#/collections", "collections", "Collections"],
-    ["#/museum", "museum", "Museum"],
   ];
   if (isOwner()) links.push(["#/settings", "settings", "Settings"]);
   // No "Add artist" on the public snapshot — even for the owner. It's a nav link
