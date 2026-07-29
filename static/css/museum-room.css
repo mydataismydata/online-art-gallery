@@ -1,0 +1,104 @@
+/* MUSEUM — PHYSICAL RENDERING
+   Every surface of the walkable rooms: floors, ceiling, walls, doorway trim,
+   the front door, and the picture frames. The walk's chrome, placards and the
+   arrange screen stay in museum.css; this file is only the fabric of the
+   building. One CSS pixel is one centimetre of museum. */
+
+/* Every plane: centred on its own origin (negative margins), placed by
+   translate3d + rotate. */
+.mu-floor, .mu-ceil, .mu-wall, .mu-door, .mu-trim, .mu-front, .mu-art {
+  position: absolute; left: 0; top: 0;
+}
+
+/* Herringbone oak parquet — real planks harvested from a photograph and
+   relaid on an exact lattice so the tile repeats without a seam. 10 × 30 cm
+   planks, 180 cm to the repeat. The inset ring is the walls' contact shadow:
+   the floor darkens where it runs under the baseboards. */
+.mu-floor {
+  background: #eab069 url("../img/parquet.png") repeat;
+  background-size: 180px 180px;
+  box-shadow: inset 0 0 52px 8px rgba(74, 58, 40, .40);
+}
+
+/* A frosted-glass skylight: luminous panes in a mullion grid, set in a
+   plaster margin (the border). The glass is the room's light source, so it
+   stays the brightest surface in the museum. */
+.mu-ceil {
+  background:
+    repeating-linear-gradient(90deg, #c6bfae 0 5px, transparent 5px 95px),
+    repeating-linear-gradient(0deg, #c6bfae 0 5px, transparent 5px 95px),
+    linear-gradient(90deg, #faf8f0, #f2efe3);
+  border: 60px solid #e9e4d6;
+  /* the glass sits recessed in its plaster margin — shadow the well's edge */
+  box-shadow: inset 0 0 26px 4px rgba(112, 104, 90, .38);
+}
+
+/* Walls in a warm light charcoal, sampled from the reference doorway photo;
+   side walls a shade deeper. The gradient is the skylight's doing — brightest
+   at the ceiling line, settled to the base tone within a couple of metres.
+   Pixel stops, not percents: every wall piece's top edge sits at the ceiling
+   whatever its height, so the pieces always agree. */
+.mu-wall { background: linear-gradient(180deg, #a89d95 0px, #9f948c 130px); }
+.mu-wall.mu-w-ew { background: linear-gradient(180deg, #9e938b 0px, #958b83 130px); }
+
+/* The doorway's tones, sampled from the photo, with its light painted on:
+   the architrave steps lighten as they come forward off the wall (mu-door is
+   the proud outer band, mu-d3 the deepest step and the reveal), and every
+   fascia carries the soft overhead light — a lit top edge, a shaded bottom,
+   faint crevices at its sides, and a soft shadow thrown down the surface
+   behind it. */
+.mu-door {
+  background: linear-gradient(180deg, #a69c91 0%, #968d83 45%, #857b70 100%);
+  box-shadow:
+    inset 0 3px 3px -1px rgba(255, 250, 240, .50),
+    inset 0 -3px 3px -1px rgba(28, 22, 16, .45),
+    inset 3px 0 4px -2px rgba(28, 22, 16, .28),
+    inset -3px 0 4px -2px rgba(28, 22, 16, .28),
+    0 8px 14px -4px rgba(28, 22, 16, .50);
+}
+.mu-door.mu-d2 { background: linear-gradient(180deg, #9d9388 0%, #90877d 45%, #7f756a 100%); }
+.mu-door.mu-d3 { background: linear-gradient(180deg, #958b80 0%, #8a7f75 45%, #776d62 100%); }
+
+/* The front door: the gilded leaves, closed for good, on room 1's south wall. */
+.mu-front { background: #2a2118 url("../img/entry-door.jpg") center / 100% 100% no-repeat; }
+
+/* Baseboards and plinths sit darkest, lit edge up top, the floor's contact
+   shadow at their feet; the crown throws its shadow well down the wall. */
+.mu-trim {
+  background: linear-gradient(180deg, #9d9285 0%, #877b6f 30%, #877b6f 62%, #625749 100%);
+  box-shadow:
+    inset 0 2.5px 1px -1px rgba(255, 250, 240, .45),
+    inset 0 -4px 5px rgba(28, 22, 16, .35),
+    0 6px 10px -3px rgba(28, 22, 16, .55);
+}
+.mu-trim.mu-crown {
+  background: linear-gradient(180deg, #b0a698 0%, #968d83 45%, #766c60 100%);
+  box-shadow:
+    inset 0 2px 1px -1px rgba(255, 250, 240, .45),
+    inset 0 -2.5px 2px rgba(28, 22, 16, .40),
+    0 12px 18px -6px rgba(28, 22, 16, .45);
+}
+
+/* A painting: the div is the frame — a real gilded frame, photographed with a
+   transparent window (img/frame*.png), worn as a border-image: the corner
+   carving stays at the corners, the rails stretch to fit any canvas. The
+   border width (the frame's width) is set inline and must stay in step with
+   MU_FRAME in app.js (9 cm). The slice numbers are each frame's measured
+   moulding, in source pixels: top right bottom left. Shadow is drop-shadow,
+   not box-shadow, so it hugs the carving's silhouette instead of boxing it.
+   Which work wears which frame is hashed from its id in muArtEl. */
+.mu-art {
+  border: solid transparent;
+  border-image: url("../img/frame1.png") 62 64 62 66 stretch;
+  filter: drop-shadow(0 10px 20px rgba(20, 15, 8, .38))
+          drop-shadow(0 3px 7px rgba(20, 15, 8, .25));
+  backface-visibility: hidden;
+  cursor: pointer;
+}
+.mu-art.mu-f2 { border-image: url("../img/frame2.png") 114 111 110 113 stretch; }
+.mu-art img {
+  width: 100%; height: 100%; object-fit: fill; display: block;
+  background: #2a2622;
+  -webkit-user-drag: none; user-select: none;
+  pointer-events: none;
+}
