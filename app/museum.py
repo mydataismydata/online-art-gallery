@@ -28,6 +28,11 @@ DEFAULT_LAYOUT = "spacious"
 # from a room's walls map hangs wherever the layout finds space.
 WALLS = ("n", "s", "e", "w")
 
+# Which wall of the PREVIOUS room a room's doorway sits on. South is never on
+# offer — that's where the previous room was entered from.
+VIAS = ("n", "e", "w")
+DEFAULT_VIA = "n"
+
 # Walls for runaway payloads, far above any hang a person would build by hand.
 MAX_ROOMS = 60
 MAX_WORKS = 3000
@@ -62,7 +67,8 @@ def _rooms(rec):
         ids = [w for w in r.get("work_ids") or [] if isinstance(w, str) and w]
         walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
         walls = {k: v for k, v in walls.items() if k in ids and v in WALLS}
-        out.append({"work_ids": ids, "walls": walls,
+        via = r.get("via") if r.get("via") in VIAS else DEFAULT_VIA
+        out.append({"work_ids": ids, "walls": walls, "via": via,
                     "layout": clean_layout(r.get("layout"))})
     return out
 
@@ -77,7 +83,8 @@ def detail():
     rooms, hung = [], 0
     for r in _rooms(rec):
         works = [w for w in (library.get(wid) for wid in r["work_ids"]) if w]
-        rooms.append({"works": works, "walls": r["walls"], "layout": r["layout"]})
+        rooms.append({"works": works, "walls": r["walls"], "via": r["via"],
+                      "layout": r["layout"]})
         hung += len(works)
     return {"rooms": rooms, "count": hung,
             "updated": (rec or {}).get("updated")}
@@ -115,7 +122,8 @@ def save(rooms_in):
         walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
         walls = {str(k): v for k, v in walls.items()
                  if str(k) in ids and v in WALLS}
-        rooms.append({"work_ids": ids, "walls": walls,
+        via = r.get("via") if r.get("via") in VIAS else DEFAULT_VIA
+        rooms.append({"work_ids": ids, "walls": walls, "via": via,
                       "layout": clean_layout(r.get("layout"))})
     with _lock:
         rec = _read() or {}

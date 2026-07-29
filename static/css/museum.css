@@ -26,6 +26,9 @@ body.mu-open { overflow: hidden; }
 }
 .mu-roomg { position: absolute; transform-style: preserve-3d; }
 .mu-roomg.mu-hidden { display: none; }
+/* An exit wall and its doorway, built once and turned to whichever wall the
+   next room opens from. */
+.mu-doorg { position: absolute; transform-style: preserve-3d; }
 
 /* Every plane: centred on its own origin (negative margins), placed by
    translate3d + rotate. Flat neutral surfaces; each orientation carries its
@@ -234,6 +237,7 @@ body.mu-open { overflow: hidden; }
 .seg-btn.on + .seg-btn { border-left-color: var(--gold-line); }
 
 .mroom-merge { font-size: 12px; }
+.mroom-via-l { margin-left: 10px; white-space: nowrap; }
 
 /* Row extras the collections list doesn't have: the wall picker, a step up or
    down, cut here, and take down. */

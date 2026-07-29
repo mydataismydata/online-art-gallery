@@ -3124,6 +3124,18 @@ function muRoomSection(room, i, nrooms) {
   const seg = MU_LAYOUTS.map(([v, label]) =>
     '<button class="seg-btn' + (room.layout === v ? " on" : "") +
     '" type="button" data-layout="' + v + '">' + label + "</button>").join("");
+  // Which wall of the room before holds this room's doorway. South is never
+  // offered: that's the wall the previous room was itself entered through.
+  const via = room.via || "n";
+  const doorSeg = i > 0
+    ? '<span class="tiny mroom-via-l">door on its</span>' +
+      '<div class="seg" role="group" aria-label="Which wall of the previous room this room opens from">' +
+      [["w", "W"], ["n", "N"], ["e", "E"]].map(([v, label]) =>
+        '<button class="seg-btn seg-via' + (via === v ? " on" : "") +
+        '" type="button" data-via="' + v + '" title="This room opens off the ' +
+        { w: "west (left)", n: "north (far)", e: "east (right)" }[v] +
+        ' wall of the room before">' + label + "</button>").join("") + "</div>"
+    : "";
   const n = room.works.length;
   // Any room but the first can give its works back to the room above; an empty
   // first room (with rooms below) can simply go.
@@ -3132,11 +3144,12 @@ function muRoomSection(room, i, nrooms) {
     : (n === 0 && nrooms > 1
         ? '<button class="linkbtn mroom-merge" type="button">remove room</button>' : "");
   return (
-    '<section class="mroom" data-layout="' + esc(room.layout) + '">' +
+    '<section class="mroom" data-layout="' + esc(room.layout) + '" data-via="' + esc(via) + '">' +
       '<header class="mroom-head">' +
       "<h2>Room " + (i + 1) + "</h2>" +
       '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
-      '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" + drop +
+      '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
+      doorSeg + drop +
       "</header>" +
       '<ol class="arrange marrange">' +
       room.works.map((w) => muRow(w, (room.walls || {})[w.id])).join("") + "</ol>" +
@@ -3155,6 +3168,7 @@ function muSerialize() {
     return {
       work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
       walls: walls,
+      via: sec.dataset.via || "n",
       layout: sec.dataset.layout,
     };
   });
@@ -3231,10 +3245,15 @@ function wireMuseumArrange(container) {
     const btn = e.target.closest("button");
     if (!btn) return;
     const sec = btn.closest(".mroom");
-    if (btn.classList.contains("seg-btn") && sec) {
+    if (btn.classList.contains("seg-via") && sec) {
+      if (sec.dataset.via === btn.dataset.via) return;
+      sec.dataset.via = btn.dataset.via;
+      sec.querySelectorAll(".seg-via").forEach((b) => b.classList.toggle("on", b === btn));
+      muSaveArrangement(false);        // the walk re-plans; this screen needn't
+    } else if (btn.classList.contains("seg-btn") && sec) {
       if (sec.dataset.layout === btn.dataset.layout) return;
       sec.dataset.layout = btn.dataset.layout;
-      sec.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("on", b === btn));
+      sec.querySelectorAll(".seg-btn:not(.seg-via)").forEach((b) => b.classList.toggle("on", b === btn));
       muSaveArrangement(false);        // nothing structural moved; no re-render flicker
     } else if (btn.classList.contains("mroom-merge") && sec) {
       const prev = sec.previousElementSibling;
@@ -3321,8 +3340,11 @@ async function museumArrangeView(keepScroll) {
     "in, <b>S</b> at your back, <b>W</b> left, <b>E</b> right; auto lets the " +
     "room decide). ✂ cuts a room in two at that painting; <b>Tight</b> hangs " +
     "close (small pieces pair up, two high) and sizes the room snug; " +
-    "<b>Spacious</b> hangs one generous line. Add works by pressing <b>H</b> " +
-    "on any painting in the fullscreen viewer.</p>";
+    "<b>Spacious</b> hangs one generous line. Each room after the first also " +
+    "picks which wall of the room before holds its doorway — <b>W</b>, " +
+    "<b>N</b> or <b>E</b> — so the museum can turn corners instead of running " +
+    "one straight line. Add works by pressing <b>H</b> on any painting in " +
+    "the fullscreen viewer.</p>";
   app.innerHTML = page(
     head +
     '<div id="mrooms">' +
@@ -3381,7 +3403,7 @@ const MU_KEYSET = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
 const MU = {
   active: false, raf: 0, rooms: [], arts: [], ri: 0,
   cam: { x: 0, z: 0, yaw: 0, zoom: 1 },
-  vel: { f: 0, t: 0 }, keys: {}, glide: null,
+  vel: { f: 0, t: 0 }, keys: {}, glide: null, place: null,
   vp: null, world: null, baseP: 900, last: 0, nearTs: 0, near: null,
   pinch: null, points: new Map(),
 };
@@ -3443,28 +3465,42 @@ function muRoomGeom(slots, layout, hasExit, hasEntryDoor) {
   return { W: W, D: Math.round(D), gap: gap };
 }
 
-/* The room's hangable walls, in walk order: left wall, the far wall's two
-   shoulders (or its whole width when the museum ends here), right wall, then
-   the entry wall — passed on the way in, read on the way back out. */
+/* The room's four walls in its own frame — the room's centre is the origin,
+   the entry wall at +z. Used for hanging (as segments) and for building. */
+function muWalls(g) {
+  const W = g.W, D = g.D;
+  return [
+    { id: "w", rot: 90,  cx: -W / 2, cz: 0, len: D, cls: "mu-w-ew" },
+    { id: "n", rot: 0,   cx: 0, cz: -D / 2, len: W, cls: "mu-w-ns" },
+    { id: "e", rot: -90, cx: W / 2, cz: 0, len: D, cls: "mu-w-ew" },
+    { id: "s", rot: 180, cx: 0, cz: D / 2, len: W, cls: "mu-w-ns" },
+  ];
+}
+function muWallAxis(rot) {
+  const rad = rot * Math.PI / 180;
+  return [Math.cos(rad), -Math.sin(rad)];    // the wall's walk-order direction
+}
+
+/* The room's hangable walls, in walk order: left wall, far wall, right wall,
+   then the entry wall — passed on the way in, read on the way back out. A
+   doored wall (the exit, wherever it is, and the entry behind you) hangs its
+   two shoulders instead of its whole width. */
 function muRoomSegs(g) {
-  const W = g.W, D = g.D, z0 = g.z0 || 0, zf = z0 - D, zc = z0 - D / 2;
   const segs = [];
-  segs.push({ wall: "w", len: D, cap: D - 2 * MU_MARGIN, rot: 90,  cx: -W / 2, cz: zc });
-  if (g.hasExit) {
-    const sl = (W - MU_DOOR_W) / 2;
-    segs.push({ wall: "n", len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: -(MU_DOOR_W + sl) / 2, cz: zf });
-    segs.push({ wall: "n", len: sl, cap: sl - 2 * MU_MARGIN, rot: 0, cx: (MU_DOOR_W + sl) / 2, cz: zf });
-  } else {
-    segs.push({ wall: "n", len: W, cap: W - 2 * MU_MARGIN, rot: 0, cx: 0, cz: zf });
-  }
-  segs.push({ wall: "e", len: D, cap: D - 2 * MU_MARGIN, rot: -90, cx: W / 2, cz: zc });
-  if (g.hasEntry) {
-    const sl = (W - MU_DOOR_W) / 2;
-    segs.push({ wall: "s", len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: (MU_DOOR_W + sl) / 2, cz: z0 });
-    segs.push({ wall: "s", len: sl, cap: sl - 2 * MU_MARGIN, rot: 180, cx: -(MU_DOOR_W + sl) / 2, cz: z0 });
-  } else {
-    segs.push({ wall: "s", len: W, cap: W - 2 * MU_MARGIN, rot: 180, cx: 0, cz: z0 });
-  }
+  muWalls(g).forEach((w) => {
+    const doored = w.id === g.exit || (w.id === "s" && g.hasEntry);
+    if (!doored) {
+      segs.push({ wall: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
+                  rot: w.rot, cx: w.cx, cz: w.cz });
+      return;
+    }
+    const sl = (w.len - MU_DOOR_W) / 2, o = (MU_DOOR_W + sl) / 2;
+    const [ax, az] = muWallAxis(w.rot);
+    [-1, 1].forEach((s) => segs.push({
+      wall: w.id, len: sl, cap: sl - 2 * MU_MARGIN, rot: w.rot,
+      cx: w.cx + s * ax * o, cz: w.cz + s * az * o,
+    }));
+  });
   return segs;
 }
 
@@ -3548,9 +3584,20 @@ function muArtEl(item, x, y, z, rotY, ri) {
   el.appendChild(img);
   el.dataset.id = item.work.id;
   const rad = rotY * Math.PI / 180;
+  let nx = Math.sin(rad), nz = Math.cos(rad), wx = x, wz = z;
+  // The element lives in room-local coordinates (its group carries the room's
+  // place and turn); the walk's own math — clicks, placards, glides — wants
+  // world ones, so the room's transform is applied here once.
+  const pl = MU.place;
+  if (pl) {
+    wx = pl.cx + x * pl.cos + z * pl.sin;
+    wz = pl.cz - x * pl.sin + z * pl.cos;
+    const rx = nx * pl.cos + nz * pl.sin, rz = -nx * pl.sin + nz * pl.cos;
+    nx = rx; nz = rz;
+  }
   MU.arts.push({ el: el, img: img, work: item.work, est: item.est, ri: ri,
-                 x: x, z: z, w: fw, h: fh,
-                 nx: Math.sin(rad), nz: Math.cos(rad), hi: false });
+                 x: wx, z: wz, w: fw, h: fh,
+                 nx: nx, nz: nz, hi: false });
   return el;
 }
 
@@ -3584,36 +3631,38 @@ function muLabelEl(work, x, y, z, rotY) {
 function muBuildRoom(g, i, geoms, world) {
   const room = document.createElement("div");
   room.className = "mu-roomg";
-  const W = g.W, D = g.D, z0 = g.z0, zf = g.z0 - D, zc = z0 - D / 2;
-  const H = MU_WALL_H;
+  const W = g.W, D = g.D, H = MU_WALL_H;
 
-  room.appendChild(muEl("mu-floor", W, D, muT(0, 0, zc, " rotateX(90deg)")));
-  room.appendChild(muEl("mu-ceil", W, D, muT(0, -H, zc, " rotateX(-90deg)")));
-  room.appendChild(muEl("mu-wall mu-w-ew", D, H, muT(-W / 2, -H / 2, zc, " rotateY(90deg)")));
-  room.appendChild(muEl("mu-wall mu-w-ew", D, H, muT(W / 2, -H / 2, zc, " rotateY(-90deg)")));
+  room.appendChild(muEl("mu-floor", W, D, muT(0, 0, 0, " rotateX(90deg)")));
+  room.appendChild(muEl("mu-ceil", W, D, muT(0, -H, 0, " rotateX(-90deg)")));
 
-  // Entry wall: room 1 walls the visitor in behind the spawn; later rooms get
-  // theirs free — it's the previous room's far wall, seen from its other side.
-  if (i === 0) {
-    room.appendChild(muEl("mu-wall mu-w-ns", W, H, muT(0, -H / 2, z0, " rotateY(180deg)")));
-  }
-
-  const hasExit = i < geoms.length - 1;
-  if (hasExit) {
-    // The doorway wall spans the wider of the two rooms it separates.
-    const WB = Math.max(W, geoms[i + 1].W);
-    const side = (WB - MU_DOOR_W) / 2;
-    const scx = MU_DOOR_W / 2 + side / 2;
-    room.appendChild(muEl("mu-wall mu-w-ns", side, H, muT(-scx, -H / 2, zf, "")));
-    room.appendChild(muEl("mu-wall mu-w-ns", side, H, muT(scx, -H / 2, zf, "")));
+  // Three walls of the room's own (the fourth — south — is the previous
+  // room's exit wall seen from behind; room 1 gets a solid one to wall the
+  // visitor in behind the spawn). Whichever wall carries the exit is built
+  // split around its doorway, in a group of its own so the same assembly
+  // serves north, east or west alike.
+  muWalls(g).forEach((w) => {
+    if (w.id === "s" && i > 0) return;
+    const rot = " rotateY(" + w.rot + "deg)";
+    if (w.id !== g.exit) {
+      room.appendChild(muEl("mu-wall " + w.cls, w.len, H, muT(w.cx, -H / 2, w.cz, rot)));
+      return;
+    }
+    const span = Math.max(w.len, geoms[i + 1].W);   // shared wall spans the wider room
+    const wrap = document.createElement("div");
+    wrap.className = "mu-doorg";
+    wrap.style.transform =
+      "translate3d(" + w.cx + "px,0px," + w.cz + "px) rotateY(" + w.rot + "deg)";
+    const side = (span - MU_DOOR_W) / 2, scx = MU_DOOR_W / 2 + side / 2;
+    wrap.appendChild(muEl("mu-wall " + w.cls, side, H, muT(-scx, -H / 2, 0, "")));
+    wrap.appendChild(muEl("mu-wall " + w.cls, side, H, muT(scx, -H / 2, 0, "")));
     // A hair wider than the opening: it laps the side pieces so their meeting
     // line can't show as a seam (same colour, so the overlap is invisible).
-    room.appendChild(muEl("mu-wall mu-w-ns", MU_DOOR_W + 4, H - MU_DOOR_H,
-      muT(0, -(MU_DOOR_H + (H - MU_DOOR_H) / 2), zf, "")));
-    muDoorway(room, zf);
-  } else {
-    room.appendChild(muEl("mu-wall mu-w-ns", W, H, muT(0, -H / 2, zf, "")));
-  }
+    wrap.appendChild(muEl("mu-wall " + w.cls, MU_DOOR_W + 4, H - MU_DOOR_H,
+      muT(0, -(MU_DOOR_H + (H - MU_DOOR_H) / 2), 0, "")));
+    muDoorway(wrap, 0);
+    room.appendChild(wrap);
+  });
   muTrimRoom(room, i, g);
   world.appendChild(room);
   return room;
@@ -3653,24 +3702,25 @@ function muDoorway(room, zf) {
    The crown runs each wall's whole width; a baseboard breaks at a doorway,
    stopping where the casing lands. */
 function muTrimRoom(room, i, g) {
-  const W = g.W, D = g.D, z0 = g.z0, zf = z0 - D, zc = z0 - D / 2;
   const H = MU_WALL_H, off = 2.4;
   const yB = -MU_BASE / 2, yC = -(H - MU_CROWN / 2);
-  [[-W / 2 + off, " rotateY(90deg)"], [W / 2 - off, " rotateY(-90deg)"]].forEach(([x, rot]) => {
-    room.appendChild(muEl("mu-trim", D, MU_BASE, muT(x, yB, zc, rot)));
-    room.appendChild(muEl("mu-trim mu-crown", D, MU_CROWN, muT(x, yC, zc, rot)));
-  });
-  [[zf + off, "", g.hasExit], [z0 - off, " rotateY(180deg)", g.hasEntry]].forEach(([z, rot, doored]) => {
-    room.appendChild(muEl("mu-trim mu-crown", W, MU_CROWN, muT(0, yC, z, rot)));
-    if (doored) {
-      const sl = (W - MU_DOOR_W) / 2 - MU_PLINTH;
-      if (sl <= 0) return;
-      const cx = MU_DOOR_W / 2 + MU_PLINTH + sl / 2;
-      room.appendChild(muEl("mu-trim", sl, MU_BASE, muT(-cx, yB, z, rot)));
-      room.appendChild(muEl("mu-trim", sl, MU_BASE, muT(cx, yB, z, rot)));
-    } else {
-      room.appendChild(muEl("mu-trim", W, MU_BASE, muT(0, yB, z, rot)));
+  muWalls(g).forEach((w) => {
+    // the trim sits a shade off its wall, toward the room
+    const [nx, nz] = [Math.sin(w.rot * Math.PI / 180), Math.cos(w.rot * Math.PI / 180)];
+    const cx = w.cx + nx * off, cz = w.cz + nz * off;
+    const rot = " rotateY(" + w.rot + "deg)";
+    room.appendChild(muEl("mu-trim mu-crown", w.len, MU_CROWN, muT(cx, yC, cz, rot)));
+    const doored = w.id === g.exit || (w.id === "s" && g.hasEntry);
+    if (!doored) {
+      room.appendChild(muEl("mu-trim", w.len, MU_BASE, muT(cx, yB, cz, rot)));
+      return;
     }
+    const sl = (w.len - MU_DOOR_W) / 2 - MU_PLINTH;
+    if (sl <= 0) return;
+    const o = MU_DOOR_W / 2 + MU_PLINTH + sl / 2;
+    const [ax, az] = muWallAxis(w.rot);
+    [-1, 1].forEach((s) => room.appendChild(muEl("mu-trim", sl, MU_BASE,
+      muT(cx + s * ax * o, yB, cz + s * az * o, rot))));
   });
 }
 
@@ -3737,7 +3787,11 @@ function muBuild(museum) {
     const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, i > 0);
     g.slots = slots;
     g.layout = room.layout;
-    g.hasExit = i < rooms.length - 1;
+    // Which of this room's walls holds the door onward: the NEXT room's
+    // choice of transition. The entry is always behind you, on the south.
+    const nvia = i < rooms.length - 1 ? rooms[i + 1].via : null;
+    g.exit = nvia === "e" || nvia === "w" ? nvia : (nvia ? "n" : null);
+    g.via = room.via === "e" || room.via === "w" ? room.via : "n";
     g.hasEntry = i > 0;
     // Corners are sacred: if any wall's group would poke past one — the
     // proportional shares can fragment awkwardly — the room grows until
@@ -3752,17 +3806,48 @@ function muBuild(museum) {
     }
     geoms.push(g);
   });
-  let z0 = 0;
+  // Chain the rooms through their doorways: each room sits beyond whichever
+  // wall of the previous one its door is on, turned to face its own north.
+  // Every room's planes are built about its own centre; the group transform
+  // is what places and turns the whole room in the world.
+  let cx = 0, cz = 0, phi = 0;
   geoms.forEach((g, i) => {
-    g.z0 = z0;
-    z0 -= g.D;
+    let door = null;
+    if (i > 0) {
+      const p = geoms[i - 1];
+      const lv = { n: [0, -1], e: [1, 0], w: [-1, 0] }[g.via];
+      const c = Math.cos(phi), s = Math.sin(phi);
+      const u = [lv[0] * c + lv[1] * s, -lv[0] * s + lv[1] * c];
+      const dist = g.via === "n" ? p.D / 2 : p.W / 2;
+      door = { x: cx + u[0] * dist, z: cz + u[1] * dist, u: u };
+      cx = door.x + u[0] * (g.D / 2);
+      cz = door.z + u[1] * (g.D / 2);
+      phi += g.via === "e" ? -Math.PI / 2 : g.via === "w" ? Math.PI / 2 : 0;
+    }
     const el = muBuildRoom(g, i, geoms, MU.world);
+    el.style.transform =
+      "translate3d(" + cx + "px,0px," + cz + "px) rotateY(" + phi + "rad)";
+    MU.place = { cx: cx, cz: cz, cos: Math.cos(phi), sin: Math.sin(phi) };
     muHangRoom(g, el, i);
-    MU.rooms.push({ W: g.W, D: g.D, z0: g.z0, zf: g.z0 - g.D,
-                    layout: g.layout, el: el });
+    MU.place = null;
+    const turned = Math.abs(Math.round(Math.sin(phi))) === 1;
+    MU.rooms.push({ cx: cx, cz: cz,
+                    hx: turned ? g.D / 2 : g.W / 2,
+                    hz: turned ? g.W / 2 : g.D / 2,
+                    doors: [], layout: g.layout, el: el });
+    if (door) {
+      const edge = Math.abs(door.u[1]) > 0.5 ? "z" : "x";
+      const at = edge === "z" ? door.z : door.x;
+      const c = edge === "z" ? door.x : door.z;
+      [MU.rooms[i - 1], MU.rooms[i]].forEach((r, k) => r.doors.push({
+        edge: edge, at: at, c: c, to: i - 1 + (1 - k),
+        side: (edge === "z" ? at > r.cz : at > r.cx) ? 1 : -1,
+      }));
+    }
   });
-  MU.cam.x = 0;
-  MU.cam.z = -Math.min(110, (MU.rooms[0] ? MU.rooms[0].D : 400) / 4);
+  const r0 = MU.rooms[0];
+  MU.cam.x = r0 ? r0.cx : 0;
+  MU.cam.z = r0 ? r0.cz + r0.hz - Math.min(110, r0.hz / 2) : 0;
   MU.cam.yaw = 0;
   MU.cam.zoom = 1;
   MU.ri = 0;
@@ -3785,30 +3870,39 @@ function muRoomLabel() {
                    " · " + (r.layout === "tight" ? "tight" : "spacious") + " hang";
 }
 
-/* Walls stop you, doorways don't: crossing the far or entry plane is allowed
-   only through the door's width, and while you're in the doorway you stay in
-   it, so there's no slipping sideways into the wall's edge. */
+/* Walls stop you, doorways don't: crossing any of the room's four sides is
+   allowed only through a door's width, and while you're in a doorway you stay
+   in it, so there's no slipping sideways into the wall's edge. Stepping fully
+   past the shared wall hands you to the room on the other side. */
 function muMove(dx, dz) {
   const cam = MU.cam, rooms = MU.rooms;
   if (!rooms.length) return;
-  const pad = 45, dpad = 24;
+  const pad = 45, dhalf = MU_DOOR_W / 2 - 24, near = pad + 26;
   let nx = cam.x + dx, nz = cam.z + dz;
-  let r = rooms[MU.ri];
-  const doorX = MU_DOOR_W / 2 - dpad;
-  if (nz < r.zf + pad &&
-      !(MU.ri < rooms.length - 1 && Math.abs(nx) < doorX)) nz = r.zf + pad;
-  if (nz > r.z0 - pad &&
-      !(MU.ri > 0 && Math.abs(nx) < doorX)) nz = r.z0 - pad;
-  let ri = MU.ri;
-  while (ri < rooms.length - 1 && nz < rooms[ri].zf) ri++;
-  while (ri > 0 && nz > rooms[ri].z0) ri--;
-  if (ri !== MU.ri) { MU.ri = ri; muRoomLabel(); muCull(); }
-  r = rooms[ri];
-  const nearDoor = (ri < rooms.length - 1 && nz < r.zf + pad + 26) ||
-                   (ri > 0 && nz > r.z0 - pad - 26);
-  const xmax = nearDoor ? doorX : r.W / 2 - pad;
-  cam.x = Math.max(-xmax, Math.min(xmax, nx));
-  cam.z = Math.max(rooms[rooms.length - 1].zf + pad, Math.min(-10, nz));
+  const r = rooms[MU.ri];
+  const door = (edge, side, along) => r.doors.find((d) =>
+    d.edge === edge && d.side === side && Math.abs(along - d.c) < dhalf);
+  const zlo = r.cz - r.hz, zhi = r.cz + r.hz;
+  const xlo = r.cx - r.hx, xhi = r.cx + r.hx;
+  const dn = door("z", -1, nx), ds = door("z", 1, nx);
+  const dw = door("x", -1, nz), de = door("x", 1, nz);
+  if (nz < zlo + pad && !dn) nz = zlo + pad;
+  if (nz > zhi - pad && !ds) nz = zhi - pad;
+  if (nx < xlo + pad && !dw) nx = xlo + pad;
+  if (nx > xhi - pad && !de) nx = xhi - pad;
+  const hug = dhalf - 1;               // stay strictly inside the door test
+  if (dn && nz < zlo + near) nx = Math.max(dn.c - hug, Math.min(dn.c + hug, nx));
+  if (ds && nz > zhi - near) nx = Math.max(ds.c - hug, Math.min(ds.c + hug, nx));
+  if (dw && nx < xlo + near) nz = Math.max(dw.c - hug, Math.min(dw.c + hug, nz));
+  if (de && nx > xhi - near) nz = Math.max(de.c - hug, Math.min(de.c + hug, nz));
+  cam.x = nx;
+  cam.z = nz;
+  let to = -1;
+  if (dn && nz < zlo) to = dn.to;
+  else if (ds && nz > zhi) to = ds.to;
+  else if (dw && nx < xlo) to = dw.to;
+  else if (de && nx > xhi) to = de.to;
+  if (to >= 0 && to !== MU.ri) { MU.ri = to; muRoomLabel(); muCull(); }
 }
 
 function muApply() {
@@ -3875,8 +3969,11 @@ function muNearest(ts) {
    distance where it fills the view comfortably. */
 function muGlideTarget(art) {
   const d = Math.max(150, Math.min(520, 1.25 * Math.max(art.w, art.h * 1.4)));
-  return { x: art.x + art.nx * d, z: art.z + art.nz * d,
-           yaw: Math.atan2(-art.nx, art.nz) };
+  const r = MU.rooms[art.ri];
+  // stand inside the painting's own room, whatever its size
+  const x = Math.max(r.cx - r.hx + 50, Math.min(r.cx + r.hx - 50, art.x + art.nx * d));
+  const z = Math.max(r.cz - r.hz + 50, Math.min(r.cz + r.hz - 50, art.z + art.nz * d));
+  return { x: x, z: z, yaw: Math.atan2(-art.nx, art.nz) };
 }
 
 /* Already stood before it? Then a click means "open it", not "approach it". */

@@ -89,7 +89,9 @@ WebGL — it's plain CSS 3-D.
   a time with ↑ ↓, a whole room with ⇈ ⇊), pin any painting to a compass wall — **N** is the far wall
   as you walk in, **S** the one at your back, **W** left, **E** right, *auto*
   lets the room decide — cut a room in two at any
-  painting (✂), merge rooms back, and give every room its fit —
+  painting (✂), merge rooms back, pick which wall of the previous room each
+  room's doorway sits on (**W**, **N** or **E** — so the museum turns corners
+  rather than running one straight line), and give every room its fit —
   **Tight** hangs close together, pairs small pieces two high, and sizes the room
   snug around the count; **Spacious** hangs everything in one generous line.
   Every change saves as you make it.
