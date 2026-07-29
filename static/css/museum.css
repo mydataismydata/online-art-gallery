@@ -24,6 +24,10 @@ body.mu-open { overflow: hidden; }
   transform-style: preserve-3d;
   will-change: transform;
 }
+/* The supersampling stage: a uniform scale-up of the whole scene (camera
+   strides scale to match in muApply), so the compositor rasterises every
+   plane at several texels per centimetre instead of one. */
+.mu-stage { position: absolute; transform-style: preserve-3d; }
 .mu-roomg { position: absolute; transform-style: preserve-3d; }
 .mu-roomg.mu-hidden { display: none; }
 /* An exit wall and its doorway, built once and turned to whichever wall the

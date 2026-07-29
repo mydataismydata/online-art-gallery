@@ -3417,6 +3417,15 @@ const MU_SPEED = 310;                // walk, cm/s
 const MU_TURN = 1.75;                // turn, rad/s
 const MU_KEYSET = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
 
+// The scene is authored at 1 px = 1 cm, but the compositor rasterises each
+// plane at its CSS size — so anything nearer than the perspective distance
+// was magnified on screen and went soft. The stage scales the whole scene up
+// (and the camera's strides with it): the projection is identical, but every
+// plane is drawn at MU_SS times the texel density. The crispness is paid for
+// in the VIEWER'S GPU memory — rendering is entirely client-side — so coarse
+// pointers (phones) take a gentler factor.
+const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches) ? 2 : 3;
+
 const MU = {
   active: false, raf: 0, rooms: [], arts: [], ri: 0,
   cam: { x: 0, z: 0, yaw: 0, zoom: 1 },
@@ -3822,6 +3831,12 @@ function muHangRoom(g, roomEl, ri) {
 
 function muBuild(museum) {
   MU.world.innerHTML = "";
+  // the supersampling stage: everything lives inside this uniform scale
+  const stage = document.createElement("div");
+  stage.className = "mu-stage";
+  stage.style.transform = "scale3d(" + MU_SS + "," + MU_SS + "," + MU_SS + ")";
+  MU.world.appendChild(stage);
+  MU.stage = stage;
   MU.rooms = [];
   MU.arts = [];
   const rooms = museum.rooms.filter((r) => r.works.length);
@@ -3874,7 +3889,7 @@ function muBuild(museum) {
       cx = door.x + u[0] * eThis;
       cz = door.z + u[1] * eThis;
     }
-    const el = muBuildRoom(g, i, geoms, MU.world);
+    const el = muBuildRoom(g, i, geoms, MU.stage);
     el.style.transform = "translate3d(" + cx + "px,0px," + cz + "px)";
     MU.place = { cx: cx, cz: cz };
     muHangRoom(g, el, i);
@@ -3961,7 +3976,8 @@ function muApply() {
   // renders at size·P/d — a true pinhole.
   MU.world.style.transform =
     "translateZ(" + P + "px) rotateY(" + cam.yaw.toFixed(4) + "rad) " +
-    "translate3d(" + (-cam.x).toFixed(1) + "px," + MU_EYE + "px," + (-cam.z).toFixed(1) + "px)";
+    "translate3d(" + (-cam.x * MU_SS).toFixed(1) + "px," + (MU_EYE * MU_SS) +
+    "px," + (-cam.z * MU_SS).toFixed(1) + "px)";
 }
 
 /* The wall label for wherever you've stopped: the nearest painting you're
