@@ -3363,8 +3363,14 @@ const MU_LBL_W = 22, MU_LBL_H = 14;  // the wall placard beside each piece, cm
 const MU_LBL_SCALE = 10;             // drawn 10× and scaled down, so the type stays crisp
 const MU_WALL_H = 380;               // ceiling height
 const MU_DOOR_W = 170, MU_DOOR_H = 260;
-const MU_JAMB = 22;                  // door casing width (jambs and lintel alike)
-const MU_JX = MU_DOOR_W / 2 + MU_JAMB / 2;
+// The doorway's dress, after the reference photo: a three-step architrave
+// (band edges measured out from the opening; each band a little prouder of
+// the wall than the last), a reveal as deep as the wall is thick, and a
+// plinth block where casing meets floor.
+const MU_CASE_E = [0, 7, 17, 31];    // band edges out from the opening, cm
+const MU_CASE_P = [2.6, 5.2, 7.8];   // how proud of the wall each band sits
+const MU_REVEAL = 24;                // the wall's thickness through the opening
+const MU_PLINTH = MU_CASE_E[3] + 4;  // plinth block reach beyond the opening
 const MU_BASE = 24, MU_CROWN = 15;   // the woodwork: wide baseboard, plain crown
 const MU_MARGIN = 70;                // bare wall kept at the ends of each run
 const MU_STACK_GAP = 18;             // air between two stacked pieces
@@ -3604,22 +3610,42 @@ function muBuildRoom(g, i, geoms, world) {
     // line can't show as a seam (same colour, so the overlap is invisible).
     room.appendChild(muEl("mu-wall mu-w-ns", MU_DOOR_W + 4, H - MU_DOOR_H,
       muT(0, -(MU_DOOR_H + (H - MU_DOOR_H) / 2), zf, "")));
-    // The casing that makes an opening read as a doorway rather than a same-
-    // coloured wall seen through a gap: wide jambs and a lintel, faced both
-    // ways. Kept a good 2.6 cm proud of the wall — closer than that and the
-    // compositor starts treating trim and wall as coplanar, and the wall wins.
-    [2.6, -2.6].forEach((dz) => {
-      room.appendChild(muEl("mu-door", MU_JAMB, MU_DOOR_H, muT(-MU_JX, -MU_DOOR_H / 2, zf + dz, "")));
-      room.appendChild(muEl("mu-door", MU_JAMB, MU_DOOR_H, muT(MU_JX, -MU_DOOR_H / 2, zf + dz, "")));
-      room.appendChild(muEl("mu-door", MU_DOOR_W + 2 * MU_JAMB, MU_JAMB,
-        muT(0, -(MU_DOOR_H + MU_JAMB / 2), zf + dz, "")));
-    });
+    muDoorway(room, zf);
   } else {
     room.appendChild(muEl("mu-wall mu-w-ns", W, H, muT(0, -H / 2, zf, "")));
   }
   muTrimRoom(room, i, g);
   world.appendChild(room);
   return room;
+}
+
+/* The doorway dressed like the reference: the opening gets a reveal as deep
+   as the wall is thick, and on both faces a three-step architrave — each band
+   nesting outward from the opening and sitting a little prouder of the wall,
+   shaded a step lighter as it comes forward — dying onto plinth blocks at the
+   floor. No lights in this museum, so the shading IS the moulding. */
+function muDoorway(room, zf) {
+  const E = MU_CASE_E, P = MU_CASE_P, HD = MU_DOOR_H, TD = MU_REVEAL;
+  // the reveal: jambs and soffit through the wall's thickness
+  room.appendChild(muEl("mu-door mu-d3", TD, HD, muT(-MU_DOOR_W / 2, -HD / 2, zf, " rotateY(90deg)")));
+  room.appendChild(muEl("mu-door mu-d3", TD, HD, muT(MU_DOOR_W / 2, -HD / 2, zf, " rotateY(-90deg)")));
+  room.appendChild(muEl("mu-door mu-d3", MU_DOOR_W + 2, TD, muT(0, -HD, zf, " rotateX(90deg)")));
+  [1, -1].forEach((s) => {
+    for (let k = 0; k < 3; k++) {
+      const x0 = MU_DOOR_W / 2 + E[k], x1 = MU_DOOR_W / 2 + E[k + 1];
+      const cls = ["mu-door mu-d3", "mu-door mu-d2", "mu-door"][k];
+      const dz = s * P[k];
+      const jt = HD + E[k];            // this band's lintel line — tops nest too
+      room.appendChild(muEl(cls, x1 - x0, jt, muT(-(x0 + x1) / 2, -jt / 2, zf + dz, "")));
+      room.appendChild(muEl(cls, x1 - x0, jt, muT((x0 + x1) / 2, -jt / 2, zf + dz, "")));
+      room.appendChild(muEl(cls, 2 * x1, E[k + 1] - E[k],
+        muT(0, -(jt + (E[k + 1] - E[k]) / 2), zf + dz, "")));
+    }
+    // plinth blocks: a touch wider and prouder than the whole architrave
+    const pw = MU_PLINTH + 2, pc = MU_DOOR_W / 2 - 2 + pw / 2;
+    room.appendChild(muEl("mu-trim", pw, MU_BASE + 8, muT(-pc, -(MU_BASE + 8) / 2, zf + s * (P[2] + 1.2), "")));
+    room.appendChild(muEl("mu-trim", pw, MU_BASE + 8, muT(pc, -(MU_BASE + 8) / 2, zf + s * (P[2] + 1.2), "")));
+  });
 }
 
 /* The room's woodwork, one colour with the door casing: a wide baseboard at
@@ -3632,14 +3658,14 @@ function muTrimRoom(room, i, g) {
   const yB = -MU_BASE / 2, yC = -(H - MU_CROWN / 2);
   [[-W / 2 + off, " rotateY(90deg)"], [W / 2 - off, " rotateY(-90deg)"]].forEach(([x, rot]) => {
     room.appendChild(muEl("mu-trim", D, MU_BASE, muT(x, yB, zc, rot)));
-    room.appendChild(muEl("mu-trim", D, MU_CROWN, muT(x, yC, zc, rot)));
+    room.appendChild(muEl("mu-trim mu-crown", D, MU_CROWN, muT(x, yC, zc, rot)));
   });
   [[zf + off, "", g.hasExit], [z0 - off, " rotateY(180deg)", g.hasEntry]].forEach(([z, rot, doored]) => {
-    room.appendChild(muEl("mu-trim", W, MU_CROWN, muT(0, yC, z, rot)));
+    room.appendChild(muEl("mu-trim mu-crown", W, MU_CROWN, muT(0, yC, z, rot)));
     if (doored) {
-      const sl = (W - MU_DOOR_W) / 2 - MU_JAMB;
+      const sl = (W - MU_DOOR_W) / 2 - MU_PLINTH;
       if (sl <= 0) return;
-      const cx = MU_DOOR_W / 2 + MU_JAMB + sl / 2;
+      const cx = MU_DOOR_W / 2 + MU_PLINTH + sl / 2;
       room.appendChild(muEl("mu-trim", sl, MU_BASE, muT(-cx, yB, z, rot)));
       room.appendChild(muEl("mu-trim", sl, MU_BASE, muT(cx, yB, z, rot)));
     } else {

@@ -50,11 +50,19 @@ body.mu-open { overflow: hidden; }
     linear-gradient(90deg, #faf8f0, #f2efe3);
   border: 60px solid #e9e4d6;
 }
-.mu-wall { background: #d6cfc2; }               /* facing walls (north/south) */
-.mu-wall.mu-w-ew { background: #c9c2b4; }       /* side walls, a shade deeper */
-/* Doorway casing, baseboards and crown share the one trim colour — a warm
-   grey a step deeper than the walls, wide and plain. */
-.mu-door, .mu-trim { background: #a69d8e; }
+/* Walls in a warm light charcoal, sampled from the reference doorway photo;
+   side walls a shade deeper, which is all the lighting a flat museum needs. */
+.mu-wall { background: #9f948c; }               /* facing walls (north/south) */
+.mu-wall.mu-w-ew { background: #958b83; }       /* side walls, a shade deeper */
+/* The doorway's tones, also sampled from the photo. The architrave steps
+   lighten as they come forward off the wall (mu-door is the proud outer band,
+   mu-d3 the deepest step and the reveal); with no lights in this museum, the
+   shading is what draws the moulding. Baseboards and plinths sit darkest. */
+.mu-door { background: #968d83; }
+.mu-door.mu-d2 { background: #90877d; }
+.mu-door.mu-d3 { background: #8a7f75; }
+.mu-trim { background: #877b6f; }
+.mu-trim.mu-crown { background: #968d83; }
 
 /* A painting: the div is the frame — a real gilded frame, photographed with a
    transparent window (img/frame*.png), worn as a border-image: the corner
