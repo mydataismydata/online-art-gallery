@@ -38,10 +38,12 @@ body.mu-open { overflow: hidden; }
 }
 /* Herringbone oak parquet — real planks harvested from a photograph and
    relaid on an exact lattice so the tile repeats without a seam. 10 × 30 cm
-   planks, 180 cm to the repeat. */
+   planks, 180 cm to the repeat. The inset ring is the walls' contact shadow:
+   the floor darkens where it runs under the baseboards. */
 .mu-floor {
   background: #eab069 url("../img/parquet.png") repeat;
   background-size: 180px 180px;
+  box-shadow: inset 0 0 52px 8px rgba(74, 58, 40, .40);
 }
 /* A frosted-glass skylight: luminous panes in a mullion grid, set in a
    plaster margin (the border). The glass is the room's light source, so it
@@ -69,33 +71,33 @@ body.mu-open { overflow: hidden; }
    faint crevices at its sides, and a soft shadow thrown down the surface
    behind it. */
 .mu-door {
-  background: #968d83;
+  background: linear-gradient(180deg, #a69c91 0%, #968d83 45%, #857b70 100%);
   box-shadow:
-    inset 0 2px 2px -1px rgba(255, 250, 240, .30),
-    inset 0 -2px 2px -1px rgba(30, 24, 18, .32),
-    inset 2.5px 0 3px -2px rgba(30, 24, 18, .18),
-    inset -2.5px 0 3px -2px rgba(30, 24, 18, .18),
-    0 6px 9px -5px rgba(30, 24, 18, .38);
+    inset 0 3px 3px -1px rgba(255, 250, 240, .50),
+    inset 0 -3px 3px -1px rgba(28, 22, 16, .45),
+    inset 3px 0 4px -2px rgba(28, 22, 16, .28),
+    inset -3px 0 4px -2px rgba(28, 22, 16, .28),
+    0 8px 14px -4px rgba(28, 22, 16, .50);
 }
 /* The front door: the gilded leaves, closed for good, on room 1's south wall. */
 .mu-front { background: #2a2118 url("../img/entry-door.jpg") center / 100% 100% no-repeat; }
-.mu-door.mu-d2 { background: #90877d; }
-.mu-door.mu-d3 { background: #8a7f75; }
+.mu-door.mu-d2 { background: linear-gradient(180deg, #9d9388 0%, #90877d 45%, #7f756a 100%); }
+.mu-door.mu-d3 { background: linear-gradient(180deg, #958b80 0%, #8a7f75 45%, #776d62 100%); }
 /* Baseboards and plinths sit darkest, lit edge up top, the floor's contact
-   shadow at their feet; the crown throws its shadow softly down the wall. */
+   shadow at their feet; the crown throws its shadow well down the wall. */
 .mu-trim {
-  background: linear-gradient(180deg, #93887b 0%, #877b6f 22%, #877b6f 72%, #6e6357 100%);
+  background: linear-gradient(180deg, #9d9285 0%, #877b6f 30%, #877b6f 62%, #625749 100%);
   box-shadow:
-    inset 0 1.8px 0 rgba(255, 250, 240, .30),
-    inset 0 -2.5px 3px rgba(30, 24, 18, .22),
-    0 4px 6px -3px rgba(30, 24, 18, .40);
+    inset 0 2.5px 1px -1px rgba(255, 250, 240, .45),
+    inset 0 -4px 5px rgba(28, 22, 16, .35),
+    0 6px 10px -3px rgba(28, 22, 16, .55);
 }
 .mu-trim.mu-crown {
-  background: linear-gradient(180deg, #a89e91 0%, #968d83 50%, #82786c 100%);
+  background: linear-gradient(180deg, #b0a698 0%, #968d83 45%, #766c60 100%);
   box-shadow:
-    inset 0 1.5px 0 rgba(255, 250, 240, .32),
-    inset 0 -1.8px 0 rgba(30, 24, 18, .30),
-    0 8px 12px -6px rgba(30, 24, 18, .35);
+    inset 0 2px 1px -1px rgba(255, 250, 240, .45),
+    inset 0 -2.5px 2px rgba(28, 22, 16, .40),
+    0 12px 18px -6px rgba(28, 22, 16, .45);
 }
 
 /* A painting: the div is the frame — a real gilded frame, photographed with a
