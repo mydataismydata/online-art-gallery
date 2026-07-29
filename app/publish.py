@@ -42,12 +42,14 @@ ARTISTS_SUBDIR = "artists"
 COLLECTIONS_SUBDIR = "collections"
 LINKS_SUBDIR = "links"
 THREADS_SUBDIR = "threads"
+MUSEUM_SUBDIR = "museum"
 
 # Everything that isn't a work travels the same way: one deterministic JSON file
 # per record, named by the record's own id, in its own directory. `_sync` writes
 # one only when its bytes actually change, which is what keeps the repo quiet —
-# re-exporting an untouched gallery stages nothing at all.
-_EXTRAS = ("bios", "collections", "links", "threads")
+# re-exporting an untouched gallery stages nothing at all. (The museum is the
+# degenerate case: a directory of exactly one record, the whole hang.)
+_EXTRAS = ("bios", "collections", "links", "threads", "museum")
 
 # Placard fields carried to the public site: everything the viewer shows plus
 # provenance. Width/height are intentionally omitted -- the public work's real
@@ -225,7 +227,8 @@ def repo_status():
     if wd.is_dir():
         st["works"] = sum(1 for _ in wd.glob("*.json"))
     for key, sub in (("artists", ARTISTS_SUBDIR), ("collections", COLLECTIONS_SUBDIR),
-                     ("links", LINKS_SUBDIR), ("threads", THREADS_SUBDIR)):
+                     ("links", LINKS_SUBDIR), ("threads", THREADS_SUBDIR),
+                     ("museum", MUSEUM_SUBDIR)):
         d = repo / sub
         st[key] = sum(1 for _ in d.glob("*.json")) if d.is_dir() else None
     st["last_export"] = last_export()
@@ -241,6 +244,7 @@ def repo_status():
     st["collection_changes"] = pending_collections()
     st["link_changes"] = pending_links()
     st["thread_changes"] = pending_threads()
+    st["museum_changes"] = pending_museum()
     st["threads_held"] = held_threads()
     try:
         st["retire_count"] = len(retired_pids())
@@ -469,6 +473,42 @@ def pending_collections():
     return _pending(COLLECTIONS_SUBDIR, _collection_blobs)
 
 
+# ---------------- the museum hang ----------------
+
+def _museum_blobs():
+    """{'museum': (label, json)} — the walk, as one record for the whole hang:
+    rooms are ordered and chained by their exits, so they only make sense whole.
+    Membership and wall pins travel as pids, for the same reason collections'
+    membership does.
+
+    A room keeps the published part of its walls — hang ten, publish six, and
+    the public walk shows six, repairing itself on later exports as the rest go
+    over. Skipped entirely while no published work hangs at all: "the owner
+    hasn't published the hang yet" must not arrive as "take the walls down"."""
+    pid_by_wid = {w["id"]: w["pid"] for w in library.all_works() if w.get("pid")}
+    rooms, hung = [], 0
+    for r in museum.export_rooms():
+        pids = [pid_by_wid[wid] for wid in r["work_ids"] if wid in pid_by_wid]
+        hung += len(pids)
+        rooms.append({
+            "work_pids": pids,
+            "walls": {pid_by_wid[wid]: wall for wid, wall in r["walls"].items()
+                      if wid in pid_by_wid},
+            "exit": r["exit"],
+            "layout": r["layout"],
+        })
+    if not hung:
+        return {}
+    blob = {"id": "museum", "rooms": rooms}
+    return {"museum": ("the walk",
+                       json.dumps(blob, ensure_ascii=False, indent=1,
+                                  sort_keys=True))}
+
+
+def pending_museum():
+    return _pending(MUSEUM_SUBDIR, _museum_blobs)
+
+
 # ---------------- connections: hand-written links + threads ----------------
 
 def _published_artists():
@@ -642,7 +682,8 @@ def publish_works(ids):
             ("bios", ARTISTS_SUBDIR, _artist_blobs),
             ("collections", COLLECTIONS_SUBDIR, _collection_blobs),
             ("links", LINKS_SUBDIR, _link_blobs),
-            ("threads", THREADS_SUBDIR, _thread_blobs)):
+            ("threads", THREADS_SUBDIR, _thread_blobs),
+            ("museum", MUSEUM_SUBDIR, _museum_blobs)):
         try:
             blobs = blobs_fn()
             extra[name] = _sync(repo, subdir, blobs)
@@ -693,7 +734,7 @@ def _and(bits):
 # The singular of each extra, for prose. Keyed off _EXTRAS so a new kind of thing
 # that travels can't be added to the export and forgotten in what it says it did.
 _NOUN = {"bios": "bio", "collections": "collection", "links": "link",
-         "threads": "thread"}
+         "threads": "thread", "museum": "museum hang"}
 
 
 def _summary(works, extra, retired=0):
@@ -905,6 +946,41 @@ def _import_collections(repo):
     return out
 
 
+def _import_museum(repo):
+    """Rebuild the walk from the published hang, each pid mapped back to this
+    box's work id. Run AFTER the works, like collections, and recomputed on
+    every pull for the same reason: local ids move when a work arrives under a
+    corrected name and is re-identified. A pid with no work here (deleted on
+    this box, or not yet pulled) simply leaves a gap on the wall; the room —
+    and the chain of exits that shapes the building — comes through whole.
+
+    A repo with no museum record leaves the hang here alone: the private box
+    may simply never have published one, and a hand-built walk must not be torn
+    down for that. (The flip side of the export's guard: emptying the museum
+    over there prunes the record rather than shipping an empty one, so this box
+    keeps its last hang until the next published one arrives.)"""
+    rec = next((r for r in _read_records(repo, MUSEUM_SUBDIR)
+                if r.get("id") == "museum"), None)
+    if not rec:
+        return {"imported": 0, "rooms": 0, "hung": 0}
+    wid_by_pid = {w["pid"]: w["id"] for w in library.all_works() if w.get("pid")}
+    rooms = []
+    for r in rec.get("rooms") or []:
+        if not isinstance(r, dict):
+            continue
+        walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
+        rooms.append({
+            "work_ids": [wid_by_pid[p] for p in r.get("work_pids") or []
+                         if p in wid_by_pid],
+            "walls": {wid_by_pid[p]: wall for p, wall in walls.items()
+                      if p in wid_by_pid},
+            "exit": r.get("exit"),
+            "layout": r.get("layout"),
+        })
+    d = museum.save(rooms)
+    return {"imported": 1, "rooms": len(d["rooms"]), "hung": d["count"]}
+
+
 def _prewarm(artists):
     wanted = {(a or "").casefold() for a in artists}
     try:
@@ -996,11 +1072,13 @@ def pull_and_import():
     except Exception as e:
         bios = {"added": 0, "updated": 0, "unchanged": 0}
         errors.append({"pid": "artists", "error": str(e)})
-    # Collections resolve pids against the library, so they follow the works. Links
-    # and threads name painters, who are just there once the works are.
+    # Collections and the museum resolve pids against the library, so they follow
+    # the works. Links and threads name painters, who are just there once the
+    # works are.
     imports = {"collections": lambda: _import_collections(repo),
                "links": lambda: links.import_published(_read_records(repo, LINKS_SUBDIR)),
-               "threads": lambda: threads.import_published(_read_records(repo, THREADS_SUBDIR))}
+               "threads": lambda: threads.import_published(_read_records(repo, THREADS_SUBDIR)),
+               "museum": lambda: _import_museum(repo)}
     got = {}
     for name, fn in imports.items():
         try:

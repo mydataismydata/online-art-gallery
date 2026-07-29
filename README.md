@@ -70,7 +70,7 @@ Every collection is **visible to everyone** who can sign in; only its creating C
 
 ## The Museum — a walkable 3-D gallery
 
-**Museum** in the top bar opens a first-person walk through rooms of your art:
+**Walk the Museum** in the top bar opens a first-person walk through rooms of your art:
 warm light-charcoal walls under a frosted-glass skylight, herringbone oak
 parquet, canvases hung to scale in gilded frames with a small placard beside
 each piece, and doorways in stepped casings leading room to room. No plugins or
@@ -103,8 +103,10 @@ WebGL — it's plain CSS 3-D.
   an assumed size (marked *est. size* while arranging) until you fill them in,
   by hand in the placard editor or in bulk through **Settings → Import / export**.
 
-The hang is per-box (the public snapshot's owner curates their own museum there);
-anyone who can browse can walk it.
+The hang travels with the public push: rooms, order, wall pins, doorways and
+layouts go over keyed by published id, and works you haven't published yet
+simply leave a gap on the public wall until they follow. Anyone who can browse
+can walk it.
 
 ## The library is just folders
 

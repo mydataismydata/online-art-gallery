@@ -197,6 +197,14 @@ def hung_ids():
     return [w for r in _rooms(rec) for w in r["work_ids"]]
 
 
+def export_rooms():
+    """The hang as stored — ordered ids, sparse walls, exit and layout per room —
+    for the publisher to translate into pids. Chain-normalised, like every read."""
+    with _lock:
+        rec = _read()
+    return _rooms(rec)
+
+
 def remap_works(id_map):
     """Follow works whose id changed because their file moved (an artist rename
     or a repoint) — the museum's copy of collections.remap_works, for the same

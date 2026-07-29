@@ -4866,6 +4866,7 @@ function publishPanelHtml(st) {
   const colN = st && st.collection_changes != null ? st.collection_changes : null;
   const lnkN = st && st.link_changes != null ? st.link_changes : null;
   const thrN = st && st.thread_changes != null ? st.thread_changes : null;
+  const musN = st && st.museum_changes != null ? st.museum_changes : null;
   const retN = st && st.retire_count != null ? st.retire_count : null;
   const heldN = (st && st.threads_held) || 0;
   const last = st && st.last_export;
@@ -4883,10 +4884,11 @@ function publishPanelHtml(st) {
   if (colN) pend.push(n(colN, "changed collection", "changed collections"));
   if (lnkN) pend.push(n(lnkN, "changed link", "changed links"));
   if (thrN) pend.push(n(thrN, "changed thread", "changed threads"));
+  if (musN) pend.push("the re-hung museum");
   // Works deleted here after being published: the next push retires them from
   // the repo, and the public box takes them down on its next pull.
   if (retN) pend.push(n(retN, "deleted work to retire", "deleted works to retire"));
-  const known = [newN, plaN, bioN, colN, lnkN, thrN].every((v) => v != null);
+  const known = [newN, plaN, bioN, colN, lnkN, thrN, musN].every((v) => v != null);
   // A thread travels whole or not at all, so one naming an unpublished painter has
   // nothing to push — say so, or its absence over there looks like a fault.
   const heldTxt = heldN
@@ -4899,7 +4901,8 @@ function publishPanelHtml(st) {
   return setSec("public", "Public server",
     "Everything your gallery has that the public site doesn't — new paintings, " +
     "placards you've corrected since publishing them, rewritten artist bios, your " +
-    "collections, and the connections you've written by hand — goes over in one " +
+    "collections, the museum walk as you've hung it, and the connections you've " +
+    "written by hand — goes over in one " +
     "push. <b>Push to public</b> on an artist page sends just the works you select, " +
     "and is the way to send a better image of a painting that's already up. " +
     repoPill(st),
@@ -4967,9 +4970,10 @@ function pullPanelHtml(st) {
   has("collections", "collection", "collections");
   has("links", "link", "links");
   has("threads", "thread", "threads");
+  has("museum", "museum hang", "museum hangs");
   return setSec("pull", "Pull new artwork",
-    "Fetch the latest works, artist bios, collections and connections your local " +
-    "gallery pushed, and import them here. " + repoPill(st) +
+    "Fetch the latest works, artist bios, collections, connections and the museum " +
+    "walk your local gallery pushed, and import them here. " + repoPill(st) +
     (holds.length ? " · " + holds.join(" · ") + " in the repo" : ""),
     '<div class="pullpanel"><div class="bf-actions">' +
     '<button type="button" class="cta-btn" id="pull-btn">Pull new artwork</button>' +
@@ -4998,6 +5002,11 @@ function wirePullPanel() {
                    (v.removed ? ", removed " + v.removed : "") + ".");
         if (n) touched.push(n + " " + (n === 1 ? one : many));
       });
+      if (r.museum && r.museum.imported) {
+        lines.push("Museum: " + r.museum.rooms + " room(s), " +
+                   r.museum.hung + " hung.");
+        touched.push("the museum walk");
+      }
       msg.className = "formmsg ok";
       msg.textContent = lines.join(" ");
       toast("Pull complete: +" + r.added + " new, " + r.updated + " updated" +
