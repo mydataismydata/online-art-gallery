@@ -30,14 +30,29 @@ body.mu-open { overflow: hidden; }
 /* Every plane: centred on its own origin (negative margins), placed by
    translate3d + rotate. Flat neutral surfaces; each orientation carries its
    own brightness, which is all the "lighting" a flat museum needs. */
-.mu-floor, .mu-ceil, .mu-wall, .mu-door, .mu-art {
+.mu-floor, .mu-ceil, .mu-wall, .mu-door, .mu-trim, .mu-art {
   position: absolute; left: 0; top: 0;
 }
-.mu-floor { background: #8d8172; }
-.mu-ceil { background: #efeae0; }
+/* Basketweave oak parquet, drawn once and tiled — 130 cm to the repeat. */
+.mu-floor {
+  background: #c99f6b url("../img/parquet.png") repeat;
+  background-size: 130px 130px;
+}
+/* A frosted-glass skylight: luminous panes in a mullion grid, set in a
+   plaster margin (the border). The glass is the room's light source, so it
+   stays the brightest surface in the museum. */
+.mu-ceil {
+  background:
+    repeating-linear-gradient(90deg, #c6bfae 0 5px, transparent 5px 95px),
+    repeating-linear-gradient(0deg, #c6bfae 0 5px, transparent 5px 95px),
+    linear-gradient(90deg, #faf8f0, #f2efe3);
+  border: 60px solid #e9e4d6;
+}
 .mu-wall { background: #d6cfc2; }               /* facing walls (north/south) */
 .mu-wall.mu-w-ew { background: #c9c2b4; }       /* side walls, a shade deeper */
-.mu-door { background: #575044; }               /* doorway casing */
+/* Doorway casing, baseboards and crown share the one trim colour — a warm
+   grey a step deeper than the walls, wide and plain. */
+.mu-door, .mu-trim { background: #a69d8e; }
 
 /* A painting: the div is the frame — a real gilded frame, photographed with a
    transparent window (img/frame*.png), worn as a border-image: the corner

@@ -3363,6 +3363,9 @@ const MU_LBL_W = 22, MU_LBL_H = 14;  // the wall placard beside each piece, cm
 const MU_LBL_SCALE = 10;             // drawn 10× and scaled down, so the type stays crisp
 const MU_WALL_H = 380;               // ceiling height
 const MU_DOOR_W = 170, MU_DOOR_H = 260;
+const MU_JAMB = 22;                  // door casing width (jambs and lintel alike)
+const MU_JX = MU_DOOR_W / 2 + MU_JAMB / 2;
+const MU_BASE = 24, MU_CROWN = 15;   // the woodwork: wide baseboard, plain crown
 const MU_MARGIN = 70;                // bare wall kept at the ends of each run
 const MU_STACK_GAP = 18;             // air between two stacked pieces
 const MU_SPEED = 310;                // walk, cm/s
@@ -3597,24 +3600,52 @@ function muBuildRoom(g, i, geoms, world) {
     const scx = MU_DOOR_W / 2 + side / 2;
     room.appendChild(muEl("mu-wall mu-w-ns", side, H, muT(-scx, -H / 2, zf, "")));
     room.appendChild(muEl("mu-wall mu-w-ns", side, H, muT(scx, -H / 2, zf, "")));
-    room.appendChild(muEl("mu-wall mu-w-ns", MU_DOOR_W, H - MU_DOOR_H,
+    // A hair wider than the opening: it laps the side pieces so their meeting
+    // line can't show as a seam (same colour, so the overlap is invisible).
+    room.appendChild(muEl("mu-wall mu-w-ns", MU_DOOR_W + 4, H - MU_DOOR_H,
       muT(0, -(MU_DOOR_H + (H - MU_DOOR_H) / 2), zf, "")));
     // The casing that makes an opening read as a doorway rather than a same-
-    // coloured wall seen through a gap: jambs and a lintel, faced both ways.
-    // Kept a good 2.6 cm proud of the wall — closer than that and the
+    // coloured wall seen through a gap: wide jambs and a lintel, faced both
+    // ways. Kept a good 2.6 cm proud of the wall — closer than that and the
     // compositor starts treating trim and wall as coplanar, and the wall wins.
-    const JW = 13, JX = MU_DOOR_W / 2 + JW / 2, JY = -MU_DOOR_H / 2;
     [2.6, -2.6].forEach((dz) => {
-      room.appendChild(muEl("mu-door", JW, MU_DOOR_H, muT(-JX, JY, zf + dz, "")));
-      room.appendChild(muEl("mu-door", JW, MU_DOOR_H, muT(JX, JY, zf + dz, "")));
-      room.appendChild(muEl("mu-door", MU_DOOR_W + 2 * JW, 15,
-        muT(0, -(MU_DOOR_H + 7.5), zf + dz, "")));
+      room.appendChild(muEl("mu-door", MU_JAMB, MU_DOOR_H, muT(-MU_JX, -MU_DOOR_H / 2, zf + dz, "")));
+      room.appendChild(muEl("mu-door", MU_JAMB, MU_DOOR_H, muT(MU_JX, -MU_DOOR_H / 2, zf + dz, "")));
+      room.appendChild(muEl("mu-door", MU_DOOR_W + 2 * MU_JAMB, MU_JAMB,
+        muT(0, -(MU_DOOR_H + MU_JAMB / 2), zf + dz, "")));
     });
   } else {
     room.appendChild(muEl("mu-wall mu-w-ns", W, H, muT(0, -H / 2, zf, "")));
   }
+  muTrimRoom(room, i, g);
   world.appendChild(room);
   return room;
+}
+
+/* The room's woodwork, one colour with the door casing: a wide baseboard at
+   the floor and a plain crown at the ceiling, on every face the room shows.
+   The crown runs each wall's whole width; a baseboard breaks at a doorway,
+   stopping where the casing lands. */
+function muTrimRoom(room, i, g) {
+  const W = g.W, D = g.D, z0 = g.z0, zf = z0 - D, zc = z0 - D / 2;
+  const H = MU_WALL_H, off = 2.4;
+  const yB = -MU_BASE / 2, yC = -(H - MU_CROWN / 2);
+  [[-W / 2 + off, " rotateY(90deg)"], [W / 2 - off, " rotateY(-90deg)"]].forEach(([x, rot]) => {
+    room.appendChild(muEl("mu-trim", D, MU_BASE, muT(x, yB, zc, rot)));
+    room.appendChild(muEl("mu-trim", D, MU_CROWN, muT(x, yC, zc, rot)));
+  });
+  [[zf + off, "", g.hasExit], [z0 - off, " rotateY(180deg)", g.hasEntry]].forEach(([z, rot, doored]) => {
+    room.appendChild(muEl("mu-trim", W, MU_CROWN, muT(0, yC, z, rot)));
+    if (doored) {
+      const sl = (W - MU_DOOR_W) / 2 - MU_JAMB;
+      if (sl <= 0) return;
+      const cx = MU_DOOR_W / 2 + MU_JAMB + sl / 2;
+      room.appendChild(muEl("mu-trim", sl, MU_BASE, muT(-cx, yB, z, rot)));
+      room.appendChild(muEl("mu-trim", sl, MU_BASE, muT(cx, yB, z, rot)));
+    } else {
+      room.appendChild(muEl("mu-trim", W, MU_BASE, muT(0, yB, z, rot)));
+    }
+  });
 }
 
 /* Hang one room: segments in walk order, each group of slots centred on its
