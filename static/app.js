@@ -3601,10 +3601,17 @@ function muT(x, y, z, rot) {
 
 function muArtEl(item, x, y, z, rotY, ri) {
   const fw = item.l + 2 * MU_FRAME, fh = item.h + 2 * MU_FRAME;
-  const el = muEl("mu-art", fw, fh, muT(x, y, z, " rotateY(" + rotY + "deg)"));
+  // The compositor rasterises a plane at its layout size, so a 60cm canvas
+  // owned ~180 texels however many pixels the derivative brought — that was
+  // the close-up ceiling. Same cure as the placards: lay the element out K
+  // times life-size and scale it back down, so the raster keeps up with a
+  // visitor's nose. K aims the long side at ~1500 texels and never exceeds 8.
+  const K = Math.max(1, Math.min(8, Math.round(1500 / (Math.max(fw, fh) * MU_SS))));
+  const el = muEl("mu-art", fw * K, fh * K,
+    muT(x, y, z, " rotateY(" + rotY + "deg) scale(" + (1 / K) + ")"));
   // The border IS the frame — the gilded border-image in museum.css rides on
   // it; without this line the picture stretches over the moulding.
-  el.style.borderWidth = MU_FRAME + "px";
+  el.style.borderWidth = (MU_FRAME * K) + "px";
   // Which frame a work wears is its own to keep: hashed from the id, so a
   // wall mixes frames but every painting keeps its frame visit after visit.
   if (parseInt(item.work.id.slice(0, 6), 16) % 2) el.classList.add("mu-f2");
