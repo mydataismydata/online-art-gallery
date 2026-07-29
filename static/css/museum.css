@@ -62,6 +62,8 @@ body.mu-open { overflow: hidden; }
    mu-d3 the deepest step and the reveal); with no lights in this museum, the
    shading is what draws the moulding. Baseboards and plinths sit darkest. */
 .mu-door { background: #968d83; }
+/* The front door: the gilded leaves, closed for good, on room 1's south wall. */
+.mu-front { background: #2a2118 url("../img/entry-door.jpg") center / 100% 100% no-repeat; }
 .mu-door.mu-d2 { background: #90877d; }
 .mu-door.mu-d3 { background: #8a7f75; }
 .mu-trim { background: #877b6f; }

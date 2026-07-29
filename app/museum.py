@@ -38,8 +38,9 @@ DEFAULT_EXIT = "n"
 
 def _norm_exits(rooms):
     """Chain-normalise exits in place: each room's exit must be a wall and not
-    the room's own entry (the opposite of the previous room's exit)."""
-    entry = None
+    the room's own entry (the opposite of the previous room's exit). Room one
+    starts with its entry on the south wall — the museum's front door."""
+    entry = "s"
     for r in rooms:
         x = r.get("exit")
         if x not in WALLS or x == entry:

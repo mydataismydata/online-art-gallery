@@ -76,7 +76,9 @@ parquet, canvases hung to scale in gilded frames with a small placard beside
 each piece, and doorways in stepped casings leading room to room. No plugins or
 WebGL — it's plain CSS 3-D.
 
-- **Walking:** the arrow keys are the whole interface — ↑ ↓ walk, ← → turn. The
+- **Walking:** you arrive just inside the museum's gilded front door, closed
+  for good in the centre of room 1's south wall. The arrow keys are the whole
+  interface — ↑ ↓ walk, ← → turn. The
   mouse wheel zooms in and out; clicking a painting strolls up to it, and the
   placard of whatever you stop in front of appears at the foot of the screen.
   `Esc` leaves.

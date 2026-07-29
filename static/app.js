@@ -3137,7 +3137,9 @@ function muRoomSection(room, i, nrooms, entry) {
       [["w", "W"], ["n", "N"], ["e", "E"], ["s", "S"]].map(([v, label]) =>
         v === entry
           ? '<button class="seg-btn seg-via" type="button" disabled ' +
-            'title="The ' + MU_WALL_NAME[v] + ' wall holds the door back to room ' + i + '">' +
+            'title="' + (i === 0
+              ? "The south wall holds the museum's front door"
+              : "The " + MU_WALL_NAME[v] + " wall holds the door back to room " + i) + '">' +
             label + "</button>"
           : '<button class="seg-btn seg-via' + (exit === v ? " on" : "") +
             '" type="button" data-exit="' + v + '" title="The doorway to room ' + (i + 2) +
@@ -3353,7 +3355,7 @@ async function museumArrangeView(keepScroll) {
     "<b>E</b> or <b>W</b>, less the wall it was entered through — so the " +
     "museum wanders the plan instead of running one straight line. Add works " +
     "by pressing <b>H</b> on any painting in the fullscreen viewer.</p>";
-  let entry = null;                    // the wall each room was entered through
+  let entry = "s";                     // the wall each room was entered through
   const sections = rooms.map((r, i) => {
     const html = muRoomSection(r, i, rooms.length, entry);
     entry = MU_OPP[r.exit] || "s";
@@ -3407,6 +3409,7 @@ const MU_CASE_E = [0, 7, 17, 31];    // band edges out from the opening, cm
 const MU_CASE_P = [2.6, 5.2, 7.8];   // how proud of the wall each band sits
 const MU_REVEAL = 24;                // the wall's thickness through the opening
 const MU_PLINTH = MU_CASE_E[3] + 4;  // plinth block reach beyond the opening
+const MU_FRONT_W = 200, MU_FRONT_H = 285;   // the front door's gilded leaves
 const MU_BASE = 24, MU_CROWN = 15;   // the woodwork: wide baseboard, plain crown
 const MU_MARGIN = 70;                // bare wall kept at the ends of each run
 const MU_STACK_GAP = 18;             // air between two stacked pieces
@@ -3502,13 +3505,15 @@ function muWallAxis(rot) {
 function muRoomSegs(g) {
   const segs = [];
   muWalls(g).forEach((w) => {
-    const doored = w.id === g.exit || w.id === g.entry;
+    const front = w.id === "s" && g.front;   // room 1's own front door
+    const doored = w.id === g.exit || w.id === g.entry || front;
     if (!doored) {
       segs.push({ wall: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
                   rot: w.rot, cx: w.cx, cz: w.cz });
       return;
     }
-    const sl = (w.len - MU_DOOR_W) / 2, o = (MU_DOOR_W + sl) / 2;
+    const ow = front ? MU_FRONT_W : MU_DOOR_W;
+    const sl = (w.len - ow) / 2, o = (ow + sl) / 2;
     const [ax, az] = muWallAxis(w.rot);
     [-1, 1].forEach((s) => segs.push({
       wall: w.id, len: sl, cap: sl - 2 * MU_MARGIN, rot: w.rot,
@@ -3671,6 +3676,7 @@ function muBuildRoom(g, i, geoms, world) {
     muDoorway(wrap, 0);
     room.appendChild(wrap);
   });
+  if (g.front) muFrontDoor(room, g);
   muTrimRoom(room, i, g);
   world.appendChild(room);
   return room;
@@ -3705,6 +3711,31 @@ function muDoorway(room, zf) {
   });
 }
 
+/* The museum's front door: room 1's south wall always carries it, closed and
+   centred — the gilded leaves from the reference, wearing the same stepped
+   architrave and plinth blocks as every open doorway. The walk begins just
+   inside it. */
+function muFrontDoor(room, g) {
+  const E = MU_CASE_E, P = MU_CASE_P, FW = MU_FRONT_W, FH = MU_FRONT_H;
+  const wrap = document.createElement("div");
+  wrap.className = "mu-doorg";
+  wrap.style.transform = "translate3d(0px,0px," + (g.D / 2) + "px) rotateY(180deg)";
+  wrap.appendChild(muEl("mu-front", FW, FH, muT(0, -FH / 2, 2.4, "")));
+  for (let k = 0; k < 3; k++) {
+    const x0 = FW / 2 + E[k], x1 = FW / 2 + E[k + 1];
+    const cls = ["mu-door mu-d3", "mu-door mu-d2", "mu-door"][k];
+    const jt = FH + E[k];
+    wrap.appendChild(muEl(cls, x1 - x0, jt, muT(-(x0 + x1) / 2, -jt / 2, P[k], "")));
+    wrap.appendChild(muEl(cls, x1 - x0, jt, muT((x0 + x1) / 2, -jt / 2, P[k], "")));
+    wrap.appendChild(muEl(cls, 2 * x1, E[k + 1] - E[k],
+      muT(0, -(jt + (E[k + 1] - E[k]) / 2), P[k], "")));
+  }
+  const pw = MU_PLINTH + 2, pc = FW / 2 - 2 + pw / 2;
+  [-1, 1].forEach((s) => wrap.appendChild(muEl("mu-trim", pw, MU_BASE + 8,
+    muT(s * pc, -(MU_BASE + 8) / 2, P[2] + 1.2, ""))));
+  room.appendChild(wrap);
+}
+
 /* The room's woodwork, one colour with the door casing: a wide baseboard at
    the floor and a plain crown at the ceiling, on every face the room shows.
    The crown runs each wall's whole width; a baseboard breaks at a doorway,
@@ -3718,14 +3749,16 @@ function muTrimRoom(room, i, g) {
     const cx = w.cx + nx * off, cz = w.cz + nz * off;
     const rot = " rotateY(" + w.rot + "deg)";
     room.appendChild(muEl("mu-trim mu-crown", w.len, MU_CROWN, muT(cx, yC, cz, rot)));
-    const doored = w.id === g.exit || w.id === g.entry;
+    const front = w.id === "s" && g.front;
+    const doored = w.id === g.exit || w.id === g.entry || front;
     if (!doored) {
       room.appendChild(muEl("mu-trim", w.len, MU_BASE, muT(cx, yB, cz, rot)));
       return;
     }
-    const sl = (w.len - MU_DOOR_W) / 2 - MU_PLINTH;
+    const ow = front ? MU_FRONT_W : MU_DOOR_W;
+    const sl = (w.len - ow) / 2 - MU_PLINTH;
     if (sl <= 0) return;
-    const o = MU_DOOR_W / 2 + MU_PLINTH + sl / 2;
+    const o = ow / 2 + MU_PLINTH + sl / 2;
     const [ax, az] = muWallAxis(w.rot);
     [-1, 1].forEach((s) => room.appendChild(muEl("mu-trim", sl, MU_BASE,
       muT(cx + s * ax * o, yB, cz + s * az * o, rot))));
@@ -3793,16 +3826,18 @@ function muBuild(museum) {
   // The compass is absolute: every room's north faces the same way. Each
   // room names the wall its onward door sits on; its entry is simply the
   // opposite of the room before's exit, and the two may never coincide.
-  let entry = null;
+  // Room 1's entry is the museum's own front door, on its south wall.
+  let entry = "s";
   rooms.forEach((room, i) => {
     const slots = muSlots(room.works, room.layout, room.walls);
-    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, i > 0);
+    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, true);
     g.slots = slots;
     g.layout = room.layout;
     let ex = room.exit;
     if (!MU_OPP[ex] || ex === entry) ex = ["n", "e", "s", "w"].find((w) => w !== entry);
     g.exit = i < rooms.length - 1 ? ex : null;
-    g.entry = entry;
+    g.entry = i > 0 ? entry : null;      // room 1 draws its own south wall
+    g.front = i === 0;
     entry = MU_OPP[ex];
     // Corners are sacred: if any wall's group would poke past one — the
     // proportional shares can fragment awkwardly — the room grows until
@@ -3850,18 +3885,11 @@ function muBuild(museum) {
       }));
     }
   });
-  // Spawn against the wall opposite room 1's exit, facing the way onward.
+  // Spawn just inside the front door, facing north into the museum.
   const r0 = MU.rooms[0];
-  if (r0) {
-    const u = DIRW[geoms[0].exit || "n"];
-    const extent = u[0] ? r0.hx : r0.hz;
-    const back = extent - Math.min(110, extent / 2);
-    MU.cam.x = r0.cx - u[0] * back;
-    MU.cam.z = r0.cz - u[1] * back;
-    MU.cam.yaw = Math.atan2(u[0], -u[1]);
-  } else {
-    MU.cam.x = 0; MU.cam.z = 0; MU.cam.yaw = 0;
-  }
+  MU.cam.x = r0 ? r0.cx : 0;
+  MU.cam.z = r0 ? r0.cz + r0.hz - Math.min(150, r0.hz / 2) : 0;
+  MU.cam.yaw = 0;
   MU.cam.zoom = 1;
   MU.ri = 0;
   muRoomLabel();
