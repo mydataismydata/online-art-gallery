@@ -33,10 +33,12 @@ body.mu-open { overflow: hidden; }
 .mu-floor, .mu-ceil, .mu-wall, .mu-door, .mu-trim, .mu-art {
   position: absolute; left: 0; top: 0;
 }
-/* Basketweave oak parquet, drawn once and tiled — 130 cm to the repeat. */
+/* Herringbone oak parquet — real planks harvested from a photograph and
+   relaid on an exact lattice so the tile repeats without a seam. 10 × 30 cm
+   planks, 180 cm to the repeat. */
 .mu-floor {
-  background: #c99f6b url("../img/parquet.png") repeat;
-  background-size: 130px 130px;
+  background: #bd9059 url("../img/parquet.png") repeat;
+  background-size: 180px 180px;
 }
 /* A frosted-glass skylight: luminous panes in a mullion grid, set in a
    plaster margin (the border). The glass is the room's light source, so it
