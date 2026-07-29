@@ -3516,9 +3516,12 @@ function muRoomSegs(g) {
   muWalls(g).forEach((w) => {
     const front = w.id === "s" && g.front;   // room 1's own front door
     const doored = w.id === g.exit || w.id === g.entry || front;
+    // a doored wall has thickness: its face sits at the reveal's edge, so
+    // everything mounted on it hangs that much further into the room
+    const off = doored ? MU_REVEAL / 2 : 0;
     if (!doored) {
       segs.push({ wall: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
-                  rot: w.rot, cx: w.cx, cz: w.cz });
+                  rot: w.rot, cx: w.cx, cz: w.cz, off: off });
       return;
     }
     const ow = front ? MU_FRONT_W : MU_DOOR_W;
@@ -3526,7 +3529,7 @@ function muRoomSegs(g) {
     const [ax, az] = muWallAxis(w.rot);
     [-1, 1].forEach((s) => segs.push({
       wall: w.id, len: sl, cap: sl - 2 * MU_MARGIN, rot: w.rot,
-      cx: w.cx + s * ax * o, cz: w.cz + s * az * o,
+      cx: w.cx + s * ax * o, cz: w.cz + s * az * o, off: off,
     }));
   });
   return segs;
@@ -3670,7 +3673,9 @@ function muBuildRoom(g, i, geoms, world) {
       return;
     }
     // A doored wall: the exit passage, or room 1's closed front door. The
-    // shared exit wall spans the wider of the two rooms it separates.
+    // shared exit wall spans the wider of the two rooms it separates. A
+    // doored wall has real thickness — its faces sit at the reveal's edges,
+    // so the reveal ends flush with them instead of finning into the room.
     const ow = front ? MU_FRONT_W : MU_DOOR_W;
     const oh = front ? MU_FRONT_H : MU_DOOR_H;
     const span = front ? w.len : Math.max(w.len,
@@ -3679,16 +3684,10 @@ function muBuildRoom(g, i, geoms, world) {
     wrap.className = "mu-doorg";
     wrap.style.transform =
       "translate3d(" + w.cx + "px,0px," + w.cz + "px) rotateY(" + w.rot + "deg)";
-    const side = (span - ow) / 2, scx = ow / 2 + side / 2;
-    wrap.appendChild(muEl("mu-wall " + w.cls, side, H, muT(-scx, -H / 2, 0, "")));
-    wrap.appendChild(muEl("mu-wall " + w.cls, side, H, muT(scx, -H / 2, 0, "")));
-    // A hair wider than the opening: it laps the side pieces so their meeting
-    // line can't show as a seam (same colour, so the overlap is invisible).
-    wrap.appendChild(muEl("mu-wall " + w.cls, ow + 4, H - oh,
-      muT(0, -(oh + (H - oh) / 2), 0, "")));
     // The front door faces the room alone (its far side is the outside
     // world); a passage is dressed on both faces.
-    muDoorway(wrap, ow, oh, front ? [0] : [0, 180], front ? "mu-entry-door" : null);
+    muDoorway(wrap, ow, oh, front ? [0] : [0, 180], front ? "mu-entry-door" : null,
+      span, H, w.cls);
     room.appendChild(wrap);
   });
   muTrimRoom(room, i, g);
@@ -3704,8 +3703,9 @@ function muBuildRoom(g, i, geoms, world) {
    so the same assembly serves every wall and both sides of it. A closed
    doorway gets a leaf at the back of the reveal (the front door's gilded
    leaves ride in as a class). */
-function muDoorway(wrap, ow, oh, faces, leafCls) {
+function muDoorway(wrap, ow, oh, faces, leafCls, span, H, wallCls) {
   const cx2 = ow / 2 + MU_CASE_W / 2;      // casing / block / plinth centreline
+  const FZ = MU_REVEAL / 2;                // each face sits at the reveal's edge
   wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-left", MU_REVEAL, oh,
     muT(-ow / 2, -oh / 2, 0, " rotateY(90deg)")));
   wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-right", MU_REVEAL, oh,
@@ -3714,28 +3714,36 @@ function muDoorway(wrap, ow, oh, faces, leafCls) {
     muT(0, -oh, 0, " rotateX(90deg)")));
   if (leafCls) {
     wrap.appendChild(muEl("mu-door-leaf " + leafCls, ow - 4, oh - 4,
-      muT(0, -(oh - 4) / 2, -(MU_REVEAL / 2 + 0.2), "")));
+      muT(0, -(oh - 4) / 2, -(FZ + 0.2), "")));
   }
+  const side = (span - ow) / 2, scx = ow / 2 + side / 2;
   faces.forEach((deg) => {
     const f = document.createElement("div");
     f.className = "mu-doorg";
     f.style.transform = "rotateY(" + deg + "deg)";
+    // this face's wall, flush with the reveal's edge
+    f.appendChild(muEl("mu-wall " + wallCls, side, H, muT(-scx, -H / 2, FZ, "")));
+    f.appendChild(muEl("mu-wall " + wallCls, side, H, muT(scx, -H / 2, FZ, "")));
+    // A hair wider than the opening: it laps the side pieces so their meeting
+    // line can't show as a seam (same colour, so the overlap is invisible).
+    f.appendChild(muEl("mu-wall " + wallCls, ow + 4, H - oh,
+      muT(0, -(oh + (H - oh) / 2), FZ, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-left",
-      MU_CASE_W, oh, muT(-cx2, -oh / 2, 2, "")));
+      MU_CASE_W, oh, muT(-cx2, -oh / 2, FZ + 2, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-right",
-      MU_CASE_W, oh, muT(cx2, -oh / 2, 2, "")));
+      MU_CASE_W, oh, muT(cx2, -oh / 2, FZ + 2, "")));
     f.appendChild(muEl("mu-door-corner-block mu-door-corner-left",
-      MU_CORNER, MU_CORNER, muT(-cx2, -(oh + MU_CORNER / 2), 3.5, "")));
+      MU_CORNER, MU_CORNER, muT(-cx2, -(oh + MU_CORNER / 2), FZ + 3.5, "")));
     f.appendChild(muEl("mu-door-corner-block mu-door-corner-right",
-      MU_CORNER, MU_CORNER, muT(cx2, -(oh + MU_CORNER / 2), 3.5, "")));
+      MU_CORNER, MU_CORNER, muT(cx2, -(oh + MU_CORNER / 2), FZ + 3.5, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-head",
-      2 * cx2 - MU_CORNER, MU_CASE_W, muT(0, -(oh + MU_CASE_W / 2), 2, "")));
-    f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(-cx2, -15, 3, "")));
-    f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(cx2, -15, 3, "")));
+      2 * cx2 - MU_CORNER, MU_CASE_W, muT(0, -(oh + MU_CASE_W / 2), FZ + 2, "")));
+    f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(-cx2, -15, FZ + 3, "")));
+    f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(cx2, -15, FZ + 3, "")));
     // floor contact under each plinth: a horizontal fade, wall at local -z
     [-cx2, cx2].forEach((px) => f.appendChild(muEl(
       "mu-floor-shadow mu-plinth-floor-shadow mu-floor-shadow-north",
-      MU_CORNER, 12, muT(px, -0.18, 9, " rotateX(90deg)"))));
+      MU_CORNER, 12, muT(px, -0.18, FZ + 9, " rotateX(90deg)"))));
     wrap.appendChild(f);
   });
 }
@@ -3749,10 +3757,14 @@ function muDoorway(wrap, ow, oh, faces, leafCls) {
    floor. Segment and shadow are a pair: shorten one, shorten both. */
 const MU_FS_NAME = { n: "north", s: "south", e: "east", w: "west" };
 function muTrimRoom(room, i, g) {
-  const H = MU_WALL_H, off = 2.4;
+  const H = MU_WALL_H;
   const yB = -MU_BASE / 2, yC = -(H - MU_CROWN / 2);
   muWalls(g).forEach((w) => {
-    // the trim sits a shade off its wall, toward the room
+    const front = w.id === "s" && g.front;
+    const doored = w.id === g.exit || w.id === g.entry || front;
+    // the trim sits a shade off its wall face, toward the room — and a
+    // doored wall's face sits at the reveal's edge
+    const off = (doored ? MU_REVEAL / 2 : 0) + 2.4;
     const [nx, nz] = [Math.sin(w.rot * Math.PI / 180), Math.cos(w.rot * Math.PI / 180)];
     const cx = w.cx + nx * off, cz = w.cz + nz * off;
     const rot = " rotateY(" + w.rot + "deg)";
@@ -3765,8 +3777,6 @@ function muTrimRoom(room, i, g) {
         muT(bx + nx * 5, -0.15, bz + nz * 5, " rotateX(90deg)")));
     };
     room.appendChild(muEl("mu-trim mu-crown", w.len, MU_CROWN, muT(cx, yC, cz, rot)));
-    const front = w.id === "s" && g.front;
-    const doored = w.id === g.exit || w.id === g.entry || front;
     if (!doored) {
       base(w.len, cx, cz);
       return;
@@ -3787,9 +3797,11 @@ function muHangRoom(g, roomEl, ri) {
   const segs = muRoomSegs(g);
   muDistribute(g.slots, segs, g.gap);
 
-  const off = 2.4;                       // cm off the wall — see the casing note
   segs.forEach((seg) => {
     if (!seg.slots.length) return;
+    // a shade off the wall face — and a doored wall's face sits at the
+    // reveal's edge, seg.off further into the room
+    const off = seg.off + 2.4;
     const groupW = seg.slots.reduce((t, s) => t + s.w, 0) +
                    g.gap * (seg.slots.length - 1);
     let t = (seg.len - groupW) / 2;      // from the segment's walk-order start
