@@ -33,7 +33,7 @@ body.mu-open { overflow: hidden; }
 /* Every plane: centred on its own origin (negative margins), placed by
    translate3d + rotate. Flat neutral surfaces; each orientation carries its
    own brightness, which is all the "lighting" a flat museum needs. */
-.mu-floor, .mu-ceil, .mu-wall, .mu-door, .mu-trim, .mu-art {
+.mu-floor, .mu-ceil, .mu-wall, .mu-door, .mu-trim, .mu-front, .mu-art {
   position: absolute; left: 0; top: 0;
 }
 /* Herringbone oak parquet — real planks harvested from a photograph and

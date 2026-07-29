@@ -3730,7 +3730,8 @@ function muFrontDoor(room, g) {
     wrap.appendChild(muEl(cls, 2 * x1, E[k + 1] - E[k],
       muT(0, -(jt + (E[k + 1] - E[k]) / 2), P[k], "")));
   }
-  const pw = MU_PLINTH + 2, pc = FW / 2 - 2 + pw / 2;
+  // plinths clear of the leaves: the door is a door, not a wall to lap over
+  const pw = MU_PLINTH + 2, pc = FW / 2 + pw / 2;
   [-1, 1].forEach((s) => wrap.appendChild(muEl("mu-trim", pw, MU_BASE + 8,
     muT(s * pc, -(MU_BASE + 8) / 2, P[2] + 1.2, ""))));
   room.appendChild(wrap);
