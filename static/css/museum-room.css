@@ -94,10 +94,6 @@
   --mu-door-face: #aaa8a2;
   --mu-door-edge-dark: #817e78;
 
-  --mu-head-face: #918e88;
-  --mu-head-lower: #706d67;
-  --mu-head-underside: #56534f;
-
   --mu-reveal-front: #a09d97;
   --mu-reveal-middle: #908d87;
   --mu-reveal-back: #74716b;
@@ -413,8 +409,9 @@
 /* =========================================================================
    DOORWAY CASING
 
-   Each side remains one physical casing element. The horizontal head is
-   darker and casts a stronger shadow than either vertical member.
+   Three pieces of the same moulding, mitred at 45°. The head carries the
+   identical profile to the sides — outer edge to opening — so every ridge
+   meets its counterpart across the mitre line.
    ========================================================================= */
 
 .mu-door-casing {
@@ -422,20 +419,11 @@
   background-repeat: no-repeat;
 }
 
-/* Left casing:
-   - first layer is short head-shadow bleed
-   - second layer describes the profile across its width */
+/* Left casing: the profile across its width, outer edge at 0. No head-shadow
+   bleed — the mitred head sits flush, nothing overhangs the joint. */
 
 .mu-door-casing-left {
   background-image:
-    linear-gradient(
-      180deg,
-      rgba(45, 42, 39, 0.30) 0,
-      rgba(45, 42, 39, 0.20) 8px,
-      rgba(45, 42, 39, 0.10) 19px,
-      rgba(45, 42, 39, 0.04) 31px,
-      rgba(45, 42, 39, 0) 46px
-    ),
     linear-gradient(
       90deg,
 
@@ -483,18 +471,10 @@
     drop-shadow(2px 3px 2px rgba(38, 34, 30, 0.075));
 }
 
-/* Right casing */
+/* Right casing: the same profile mirrored, outer edge at 100%. */
 
 .mu-door-casing-right {
   background-image:
-    linear-gradient(
-      180deg,
-      rgba(45, 42, 39, 0.30) 0,
-      rgba(45, 42, 39, 0.20) 8px,
-      rgba(45, 42, 39, 0.10) 19px,
-      rgba(45, 42, 39, 0.04) 31px,
-      rgba(45, 42, 39, 0) 46px
-    ),
     linear-gradient(
       270deg,
 
@@ -544,45 +524,45 @@
 
 /* Horizontal head casing
 
-   The lower lip is much darker than the vertical casing. Its two shadows
-   create a narrow contact line and a broader soft penumbra. */
+   The sides' profile exactly, turned to run top-to-bottom — outer edge at
+   the top, opening at the bottom — so each band lands on its counterpart
+   at the mitre. Its shadows make a narrow contact line and a soft penumbra
+   below, which is all that still tells it apart from the verticals. */
 
 .mu-door-casing-head {
-  background-color: var(--mu-head-face);
-
   background-image:
     linear-gradient(
       180deg,
 
-      #aaa8a2 0,
-      #aaa8a2 1px,
+      #94918b 0,
+      #94918b 2px,
 
-      #b6b4ae 1px,
-      #b6b4ae 2px,
+      #bbb9b3 2px,
+      #bbb9b3 3px,
 
-      #9d9a94 2px,
-      #9d9a94 6px,
+      #aaa8a2 3px,
+      #aaa8a2 7px,
 
-      #aaa8a2 6px,
+      #b5b3ad 7px,
+      #b5b3ad 8px,
+
       #aaa8a2 8px,
+      #aaa8a2 24%,
 
-      #97948e 8px,
-      #97948e 22%,
+      #afada7 24%,
+      #afada7 29%,
 
-      var(--mu-head-face) 22%,
-      var(--mu-head-face) 52%,
+      #a7a59f 29%,
+      #a7a59f 77%,
 
-      #83807a 52%,
-      #83807a 69%,
+      #9f9c96 77%,
+      #9f9c96 88%,
 
-      #74716b 69%,
-      #74716b 81%,
+      #92908a 88%,
+      #92908a calc(100% - 2px),
 
-      var(--mu-head-lower) 81%,
-      var(--mu-head-lower) calc(100% - 4px),
-
-      var(--mu-head-underside) calc(100% - 4px),
-      var(--mu-head-underside) 100%
+      var(--mu-door-edge-dark) calc(100% - 2px),
+      var(--mu-door-edge-dark) 100%
     );
 
   clip-path:
