@@ -30,6 +30,7 @@
 .mu-jamb-soffit,
 .mu-door-leaf,
 .mu-door-casing,
+.mu-door-wallshade,
 .mu-door-plinth,
 .mu-trim,
 .mu-front,
@@ -56,6 +57,7 @@
 .mu-floor-shadow,
 .mu-door-leaf,
 .mu-door-casing,
+.mu-door-wallshade,
 .mu-door-plinth,
 .mu-door-panel,
 .mu-door-handle {
@@ -412,6 +414,12 @@
    Three pieces of the same moulding, mitred at 45°. The head carries the
    identical profile to the sides — outer edge to opening — so every ridge
    meets its counterpart across the mitre line.
+
+   The outermost step is the lightest band, near enough the wall colour to
+   melt into it; its own cast shadow sits just inward of it (below on the
+   head, toward the opening on the sides). Under the overhead light the
+   head's under-shadow is darker than anything down the sides — the sides
+   get only a faint feathered shade on the wall (.mu-door-wallshade).
    ========================================================================= */
 
 .mu-door-casing {
@@ -427,32 +435,26 @@
     linear-gradient(
       90deg,
 
-      #94918b 0,
-      #94918b 2px,
+      #b2afa9 0,
+      #b2afa9 5px,
 
-      #bbb9b3 2px,
-      #bbb9b3 3px,
+      #8d8a84 5px,
+      #8d8a84 6px,
 
-      #aaa8a2 3px,
-      #aaa8a2 7px,
+      #9b9892 6px,
+      #9b9892 7px,
 
-      #b5b3ad 7px,
-      #b5b3ad 8px,
+      #a4a19b 7px,
+      #a4a19b 8px,
 
       #aaa8a2 8px,
-      #aaa8a2 24%,
+      #aaa8a2 72%,
 
-      #afada7 24%,
-      #afada7 29%,
+      #a09d97 72%,
+      #a09d97 86%,
 
-      #a7a59f 29%,
-      #a7a59f 77%,
-
-      #9f9c96 77%,
-      #9f9c96 88%,
-
-      #92908a 88%,
-      #92908a calc(100% - 2px),
+      #928f89 86%,
+      #928f89 calc(100% - 2px),
 
       var(--mu-door-edge-dark) calc(100% - 2px),
       var(--mu-door-edge-dark) 100%
@@ -465,10 +467,6 @@
       18px 100%,
       0 100%
     );
-
-  filter:
-    drop-shadow(1px 0 rgba(255, 255, 255, 0.055))
-    drop-shadow(2px 3px 2px rgba(38, 34, 30, 0.075));
 }
 
 /* Right casing: the same profile mirrored, outer edge at 100%. */
@@ -478,32 +476,26 @@
     linear-gradient(
       270deg,
 
-      #94918b 0,
-      #94918b 2px,
+      #b2afa9 0,
+      #b2afa9 5px,
 
-      #bbb9b3 2px,
-      #bbb9b3 3px,
+      #8d8a84 5px,
+      #8d8a84 6px,
 
-      #aaa8a2 3px,
-      #aaa8a2 7px,
+      #9b9892 6px,
+      #9b9892 7px,
 
-      #b5b3ad 7px,
-      #b5b3ad 8px,
+      #a4a19b 7px,
+      #a4a19b 8px,
 
       #aaa8a2 8px,
-      #aaa8a2 24%,
+      #aaa8a2 72%,
 
-      #afada7 24%,
-      #afada7 29%,
+      #a09d97 72%,
+      #a09d97 86%,
 
-      #a7a59f 29%,
-      #a7a59f 77%,
-
-      #9f9c96 77%,
-      #9f9c96 88%,
-
-      #92908a 88%,
-      #92908a calc(100% - 2px),
+      #928f89 86%,
+      #928f89 calc(100% - 2px),
 
       var(--mu-door-edge-dark) calc(100% - 2px),
       var(--mu-door-edge-dark) 100%
@@ -516,50 +508,41 @@
       18px 100%,
       0 100%
     );
-
-  filter:
-    drop-shadow(-1px 0 rgba(255, 255, 255, 0.055))
-    drop-shadow(-2px 3px 2px rgba(38, 34, 30, 0.075));
 }
 
 /* Horizontal head casing
 
    The sides' profile exactly, turned to run top-to-bottom — outer edge at
    the top, opening at the bottom — so each band lands on its counterpart
-   at the mitre. Its shadows make a narrow contact line and a soft penumbra
-   below, which is all that still tells it apart from the verticals. */
+   at the mitre. Its under-shadow — a narrow contact line and a soft
+   penumbra — is deliberately darker than anything the sides throw: the
+   light is overhead, and this is the one horizontal member. */
 
 .mu-door-casing-head {
   background-image:
     linear-gradient(
       180deg,
 
-      #94918b 0,
-      #94918b 2px,
+      #b2afa9 0,
+      #b2afa9 5px,
 
-      #bbb9b3 2px,
-      #bbb9b3 3px,
+      #8d8a84 5px,
+      #8d8a84 6px,
 
-      #aaa8a2 3px,
-      #aaa8a2 7px,
+      #9b9892 6px,
+      #9b9892 7px,
 
-      #b5b3ad 7px,
-      #b5b3ad 8px,
+      #a4a19b 7px,
+      #a4a19b 8px,
 
       #aaa8a2 8px,
-      #aaa8a2 24%,
+      #aaa8a2 72%,
 
-      #afada7 24%,
-      #afada7 29%,
+      #a09d97 72%,
+      #a09d97 86%,
 
-      #a7a59f 29%,
-      #a7a59f 77%,
-
-      #9f9c96 77%,
-      #9f9c96 88%,
-
-      #92908a 88%,
-      #92908a calc(100% - 2px),
+      #928f89 86%,
+      #928f89 calc(100% - 2px),
 
       var(--mu-door-edge-dark) calc(100% - 2px),
       var(--mu-door-edge-dark) 100%
@@ -574,9 +557,57 @@
     );
 
   filter:
-    drop-shadow(0 1px rgba(255, 255, 255, 0.04))
     drop-shadow(0 3px 2px rgba(31, 28, 25, 0.30))
     drop-shadow(0 9px 6px rgba(31, 28, 25, 0.18));
+}
+
+/* The faint feathered shade the side casings lay on the wall itself:
+   darkest against the trim, feathering away from it, strongest near the
+   floor and gone well before the top — far lighter than the head's
+   under-shadow. Sized and placed by muDoorway. */
+
+.mu-door-wallshade {
+  pointer-events: none;
+}
+
+.mu-door-wallshade-left {
+  background-image:
+    linear-gradient(
+      270deg,
+      rgba(40, 36, 32, 0.10) 0,
+      rgba(40, 36, 32, 0.04) 10px,
+      rgba(40, 36, 32, 0) 100%
+    );
+}
+
+.mu-door-wallshade-right {
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(40, 36, 32, 0.10) 0,
+      rgba(40, 36, 32, 0.04) 10px,
+      rgba(40, 36, 32, 0) 100%
+    );
+}
+
+.mu-door-wallshade-left,
+.mu-door-wallshade-right {
+  -webkit-mask-image:
+    linear-gradient(
+      180deg,
+      transparent 0,
+      rgba(0, 0, 0, 0.3) 45%,
+      rgba(0, 0, 0, 0.85) 80%,
+      #000 100%
+    );
+  mask-image:
+    linear-gradient(
+      180deg,
+      transparent 0,
+      rgba(0, 0, 0, 0.3) 45%,
+      rgba(0, 0, 0, 0.85) 80%,
+      #000 100%
+    );
 }
 
 /* =========================================================================

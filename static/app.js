@@ -3725,8 +3725,8 @@ function muBuildRoom(g, i, geoms, world) {
 }
 
 /* One doorway, one object: a deep reveal through the wall's thickness, and
-   on each requested face a single casing piece per side, a head casing
-   spanning between square corner blocks, and a shallow plinth at each casing
+   on each requested face a single casing piece per side, a mitred head
+   casing spanning the full outer width, and a shallow plinth at each casing
    foot — plus that face's floor-contact shadow strips. The wall plane is the
    wrap's local z = 0; faces are nested groups turned to look at their room,
    so the same assembly serves every wall and both sides of it. A closed
@@ -3774,6 +3774,12 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, H, wallCls) {
       MU_CASE_W, oh + MU_CASE_W, muT(cx2, -(oh + MU_CASE_W) / 2, FZ + 2, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-head",
       ow + 2 * MU_CASE_W, MU_CASE_W, muT(0, -(oh + MU_CASE_W / 2), FZ + 2, "")));
+    // The casing's shade on the wall beside it, between wall and casing
+    // planes: abuts each outer edge, fades upward (museum-room.css).
+    f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-left", 26, oh + MU_CASE_W,
+      muT(-(ow / 2 + MU_CASE_W + 13), -(oh + MU_CASE_W) / 2, FZ + 1, "")));
+    f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-right", 26, oh + MU_CASE_W,
+      muT(ow / 2 + MU_CASE_W + 13, -(oh + MU_CASE_W) / 2, FZ + 1, "")));
     f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(-cx2, -15, FZ + 3, "")));
     f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(cx2, -15, FZ + 3, "")));
     // floor contact under each plinth: a horizontal fade, wall at local -z
