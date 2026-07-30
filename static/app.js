@@ -4648,11 +4648,13 @@ function bulkPanelHtml() {
       "(list or “a; b” — the first is the one the map clusters on), description, " +
       "wikidata_id, wikipedia_url.") +
     bulkBoxHtml("works", "Artworks",
-      "One record per painting, matched by <code>artist</code> + <code>title</code> " +
-      "together — those two identify the work and are never changed here (renames " +
-      "move files; do them in the placard editor). Fields: date, medium, style, " +
-      "genre, school, description. A painting the museum holds twice is brought " +
-      "up to the record on both copies."));
+      "One record per painting, matched by its exported <code>id</code> — the one " +
+      "name that tells two same-titled paintings apart — or by <code>artist</code> " +
+      "+ <code>title</code> when a record has no id. Those keys are never changed " +
+      "here (renames move files; do them in the placard editor), and the source " +
+      "columns ride along for reference only. Fields: date, medium, " +
+      "height_cm, length_cm, style, genre, school, description. Without an id, a " +
+      "painting the museum holds twice is brought up to the record on both copies."));
 }
 
 function one0(kind) { return kind === "artists" ? "artist" : "work"; }

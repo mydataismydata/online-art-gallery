@@ -3,8 +3,10 @@
 The owner's round trip is CSV out, JSON back in: export the artists/artworks
 sheets, fill the blanks somewhere comfortable, paste the result here. So the
 fields accepted are exactly the exported columns, and records are matched the
-way the exports were keyed — an artist by name, a work by artist + title, all
-folded so an accent or a case difference doesn't orphan a row.
+way the exports were keyed — an artist by name, a work by its exported `id`
+first (the only name that tells two same-titled paintings apart), falling back
+to artist + title for a record without one, all folded so an accent or a case
+difference doesn't orphan a row.
 
 Two rules keep a paste from doing quiet damage:
 
@@ -18,10 +20,14 @@ Two rules keep a paste from doing quiet damage:
   preview it showed — the library may have moved between the two clicks — it
   recounts, writes what it counted, and reports what it wrote.
 
-A work record's artist and title are its KEY, never fields to change: renaming
-moves files and re-ids works, which is update_work's job and no business of a
-batch. Duplicate copies of a painting (same artist, same title, two files) are
-all brought up to the pasted record — they're the same picture on two walls.
+A work record's id, artist and title are its KEY, never fields to change:
+renaming moves files and re-ids works, which is update_work's job and no
+business of a batch. The source trio (source, source_id, source_url) exports
+for reference — it's the provenance the placard links — and imports ignore it:
+where a file came from is the downloader's paperwork, not batch metadata.
+Without an id, duplicate copies of a painting (same artist, same title, two
+files) are all brought up to the pasted record — they may be the same picture
+on two walls; with ids, each copy answers only to its own record.
 """
 import json
 import re
@@ -179,15 +185,26 @@ def _apply_artists(diff):
 # ---------------- works ----------------
 
 def _diff_works(records):
+    by_id = {w["id"]: w for w in library.all_works()}
     by_key = defaultdict(list)
-    for w in library.all_works():
+    for w in by_id.values():
         by_key[(fold(w["artist"]), fold(w["title"]))].append(w)
 
-    def key_of(r):
+    def _pair(r):
         a, t = r.get("artist"), r.get("title")
         if not (isinstance(a, str) and a.strip() and isinstance(t, str) and t.strip()):
             return None
         return (fold(a), fold(t))
+
+    def key_of(r):
+        # The id names one painting exactly — two same-titled works by one
+        # painter stay two records. A hand-made record without one still
+        # matches by the name pair.
+        i = r.get("id")
+        if isinstance(i, str) and i.strip():
+            return ("id", i.strip())
+        p = _pair(r)
+        return ("at",) + p if p else None
 
     rows, folded, invalid = _dedupe(records, key_of)
     out = {"kind": "works", "total": len(records), "folded": folded,
@@ -196,10 +213,18 @@ def _diff_works(records):
     updates = {}                      # work id -> {field: value}
 
     for k, rec in rows:
-        copies = by_key.get(k)
+        if k[0] == "id":
+            w = by_id.get(k[1])
+            # A stale id (a rename re-ids works) falls back to the name pair
+            # the record still carries, so an old export doesn't just orphan.
+            copies = [w] if w else by_key.get(_pair(rec) or ())
+        else:
+            copies = by_key.get(k[1:])
         if not copies:
-            out["unknown"].append("%s — %s" % (rec.get("artist").strip(),
-                                               rec.get("title").strip()))
+            p = _pair(rec)
+            out["unknown"].append("%s — %s" % (rec["artist"].strip(),
+                                               rec["title"].strip())
+                                  if p else "id " + k[1])
             continue
         rec_changes = None
         touched_here = 0
@@ -280,7 +305,9 @@ def export_works(ids=None):
                              w["title"].casefold()))
     out = []
     for w in rows:
-        rec = {"artist": w["artist"], "title": w["title"]}
+        # The id leads: it's the one name that tells two same-titled paintings
+        # apart, and what the import matches first.
+        rec = {"id": w["id"], "artist": w["artist"], "title": w["title"]}
         for f in WORK_FIELDS:
             if f in NUMERIC_WORK_FIELDS:
                 # A number when recorded, "" when not — the blank against the
@@ -288,6 +315,11 @@ def export_works(ids=None):
                 rec[f] = w.get(f) if w.get(f) is not None else ""
             else:
                 rec[f] = (w.get(f) or "").strip()
+        # The provenance the placard links, along for reference. The import
+        # leaves it alone — where a file came from isn't batch metadata.
+        rec["source"] = (w.get("source") or "").strip()
+        rec["source_id"] = (w.get("source_id") or "").strip()
+        rec["source_url"] = (w.get("source_url") or "").strip()
         out.append(rec)
     return out
 
