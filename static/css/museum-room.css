@@ -1,13 +1,15 @@
 /* MUSEUM — PHYSICAL RENDERING
+   Every visible architectural surface in the walkable rooms.
+
    One CSS pixel represents one centimetre.
 
-   Lighting model:
-   - one large, soft source above the room
-   - horizontal doorway members are darker than vertical members
-   - the downward-facing head reveal is the darkest doorway surface
-   - the head creates a short ambient shadow bleed down the side jambs
-   - vertical casing shadows remain faint
-   - floor contact shadows use separate horizontal geometry
+   Lighting is painted for a large, soft overhead source:
+   - broad, low-contrast wall illumination
+   - horizontal trim shadows darker than vertical trim shadows
+   - the underside of each doorway head is its darkest surface
+   - short, soft shadow bleed down the tops of the side jambs
+   - restrained shadows along vertical casing
+   - separate horizontal floor-contact shadows
 */
 
 /* =========================================================================
@@ -21,7 +23,6 @@
 .mu-jamb-reveal,
 .mu-door-leaf,
 .mu-door-casing,
-.mu-door-corner-block,
 .mu-door-plinth,
 .mu-trim,
 .mu-front,
@@ -46,7 +47,6 @@
 .mu-jamb-reveal,
 .mu-door-leaf,
 .mu-door-casing,
-.mu-door-corner-block,
 .mu-door-plinth,
 .mu-door-panel,
 .mu-door-handle {
@@ -58,36 +58,41 @@
    ========================================================================= */
 
 :root {
-  --mu-wall-front-top: #b9b6b0;
-  --mu-wall-front-mid: #b0ada7;
+  --mu-wall-front-top: #b8b5ae;
+  --mu-wall-front-mid: #afaca6;
   --mu-wall-front-bottom: #aaa7a1;
 
-  --mu-wall-side-top: #b0ada7;
-  --mu-wall-side-mid: #a8a59f;
-  --mu-wall-side-bottom: #a29f99;
+  --mu-wall-side-top: #aeaba5;
+  --mu-wall-side-mid: #a6a39d;
+  --mu-wall-side-bottom: #a19e98;
 
-  --mu-casing-light: #b9b7b1;
-  --mu-casing-face: #aaa8a2;
-  --mu-casing-mid: #9d9a94;
-  --mu-casing-edge: #898680;
+  --mu-door-face: #aaa8a2;
+  --mu-door-edge-dark: #817e78;
 
   --mu-head-face: #918e88;
-  --mu-head-lower: #6d6a65;
-  --mu-head-underside: #57544f;
+  --mu-head-lower: #706d67;
+  --mu-head-underside: #56534f;
 
-  --mu-reveal-front: #9e9b95;
-  --mu-reveal-middle: #8b8882;
-  --mu-reveal-back: #716e69;
-  --mu-reveal-head: #66635e;
-  --mu-reveal-head-dark: #4d4a46;
+  --mu-reveal-front: #a09d97;
+  --mu-reveal-middle: #908d87;
+  --mu-reveal-back: #74716b;
+
+  --mu-reveal-head-front: #74716c;
+  --mu-reveal-head-middle: #605d58;
+  --mu-reveal-head-back: #494642;
 
   --mu-trim-face: #aaa8a2;
+
   --mu-shadow-rgb: 45, 38, 32;
 }
 
 /* =========================================================================
    FLOOR
    ========================================================================= */
+
+/* Herringbone oak parquet. The broad inset shadow supplies only a slight
+   room-scale reduction. Local wall and trim contact shadows are separate
+   horizontal planes rendered by .mu-floor-shadow elements. */
 
 .mu-floor {
   background:
@@ -97,7 +102,6 @@
 
   background-size: 180px 180px;
 
-  /* Broad room-scale reduction only. */
   box-shadow:
     inset 0 0 24px 2px rgba(62, 47, 34, 0.10);
 }
@@ -105,7 +109,12 @@
 /* =========================================================================
    FLOOR-CONTACT SHADOW PLANES
 
-   These elements lie horizontally about 0.1–0.2 px above the floor.
+   These elements lie horizontally, slightly above the parquet. They allow
+   the shadow beneath baseboards and plinths to bleed onto the floor instead
+   of appearing attached to a vertical surface.
+
+   Shadow planes should be raised approximately 0.1–0.2 px above the floor
+   in their inline transforms to prevent z-fighting.
    ========================================================================= */
 
 .mu-floor-shadow {
@@ -113,6 +122,8 @@
   background-color: transparent;
   transform-style: preserve-3d;
 }
+
+/* North wall: darkest at the north edge, fading south into the room. */
 
 .mu-floor-shadow-north {
   background-image:
@@ -125,6 +136,8 @@
     );
 }
 
+/* South wall: darkest at the south edge, fading north into the room. */
+
 .mu-floor-shadow-south {
   background-image:
     linear-gradient(
@@ -135,6 +148,8 @@
       rgba(var(--mu-shadow-rgb), 0) 9px
     );
 }
+
+/* West wall: darkest at the west edge, fading east into the room. */
 
 .mu-floor-shadow-west {
   background-image:
@@ -147,6 +162,8 @@
     );
 }
 
+/* East wall: darkest at the east edge, fading west into the room. */
+
 .mu-floor-shadow-east {
   background-image:
     linear-gradient(
@@ -157,6 +174,9 @@
       rgba(var(--mu-shadow-rgb), 0) 9px
     );
 }
+
+/* Plinth shadows are localized. Fade their ends so they do not terminate
+   with visible rectangular edges. */
 
 .mu-plinth-floor-shadow {
   -webkit-mask-image:
@@ -254,6 +274,9 @@
    WALLS
    ========================================================================= */
 
+/* The reference architecture uses a restrained warm gray. The vertical
+   change is broad and subtle, consistent with diffuse overhead illumination. */
+
 .mu-wall {
   background-color: var(--mu-wall-front-mid);
 
@@ -261,11 +284,13 @@
     linear-gradient(
       180deg,
       var(--mu-wall-front-top) 0,
-      #b4b1ab 110px,
+      #b3b0aa 110px,
       var(--mu-wall-front-mid) 270px,
       var(--mu-wall-front-bottom) 100%
     );
 }
+
+/* Side walls receive slightly less indirect light. */
 
 .mu-wall.mu-w-ew {
   background-color: var(--mu-wall-side-mid);
@@ -274,7 +299,7 @@
     linear-gradient(
       180deg,
       var(--mu-wall-side-top) 0,
-      #aba8a2 110px,
+      #aaa7a1 110px,
       var(--mu-wall-side-mid) 270px,
       var(--mu-wall-side-bottom) 100%
     );
@@ -283,13 +308,14 @@
 /* =========================================================================
    DOORWAY REVEALS
 
-   The left and right reveals are relatively quiet vertical surfaces.
+   Reveals describe the thickness of the wall. They are not decorative
+   moulding and therefore receive no raised casing shadow.
 
-   Their first background layer creates the short shadow bleed cast down from
-   the head reveal. It is strongest at the top and disappears within roughly
-   45–55 cm.
+   The side reveals use two background layers:
+   1. A short vertical shadow bleed beneath the head reveal.
+   2. A horizontal gradient describing depth through the wall.
 
-   Their second layer describes depth into the wall.
+   The downward-facing head reveal is the darkest part of the doorway.
    ========================================================================= */
 
 .mu-jamb-reveal {
@@ -297,117 +323,126 @@
 }
 
 /* Left reveal:
-   - top-to-bottom layer = shadow bleed from the head
-   - left-to-right layer = wall-depth shading */
+   - the first gradient bleeds head shadow down the top of the jamb
+   - the second gradient darkens toward the rear of the opening */
 
 .mu-jamb-reveal-left {
   background-image:
     linear-gradient(
       180deg,
-      rgba(42, 40, 37, 0.38) 0,
-      rgba(42, 40, 37, 0.25) 8px,
-      rgba(42, 40, 37, 0.14) 20px,
-      rgba(42, 40, 37, 0.065) 34px,
-      rgba(42, 40, 37, 0.02) 46px,
-      rgba(42, 40, 37, 0) 56px
+      rgba(43, 40, 37, 0.38) 0,
+      rgba(43, 40, 37, 0.28) 7px,
+      rgba(43, 40, 37, 0.17) 17px,
+      rgba(43, 40, 37, 0.09) 29px,
+      rgba(43, 40, 37, 0.035) 42px,
+      rgba(43, 40, 37, 0) 56px
     ),
     linear-gradient(
       90deg,
       var(--mu-reveal-front) 0%,
-      #999690 16%,
-      var(--mu-reveal-middle) 57%,
-      #7e7b75 82%,
+      #9a9791 15%,
+      var(--mu-reveal-middle) 58%,
+      #827f79 82%,
       var(--mu-reveal-back) 100%
     );
 
   box-shadow:
     inset 1px 0 rgba(255, 255, 255, 0.07),
-    inset -2px 0 3px rgba(43, 40, 36, 0.13);
+    inset -2px 0 3px rgba(48, 44, 40, 0.13);
 }
 
-/* Right reveal mirrors only the depth profile. The top shadow remains
-   top-to-bottom on both sides. */
+/* The depth profile is mirrored on the right. The top shadow bleed remains
+   vertical because the head shades both side jambs in the same direction. */
 
 .mu-jamb-reveal-right {
   background-image:
     linear-gradient(
       180deg,
-      rgba(42, 40, 37, 0.38) 0,
-      rgba(42, 40, 37, 0.25) 8px,
-      rgba(42, 40, 37, 0.14) 20px,
-      rgba(42, 40, 37, 0.065) 34px,
-      rgba(42, 40, 37, 0.02) 46px,
-      rgba(42, 40, 37, 0) 56px
+      rgba(43, 40, 37, 0.38) 0,
+      rgba(43, 40, 37, 0.28) 7px,
+      rgba(43, 40, 37, 0.17) 17px,
+      rgba(43, 40, 37, 0.09) 29px,
+      rgba(43, 40, 37, 0.035) 42px,
+      rgba(43, 40, 37, 0) 56px
     ),
     linear-gradient(
       270deg,
       var(--mu-reveal-front) 0%,
-      #999690 16%,
-      var(--mu-reveal-middle) 57%,
-      #7e7b75 82%,
+      #9a9791 15%,
+      var(--mu-reveal-middle) 58%,
+      #827f79 82%,
       var(--mu-reveal-back) 100%
     );
 
   box-shadow:
     inset -1px 0 rgba(255, 255, 255, 0.07),
-    inset 2px 0 3px rgba(43, 40, 36, 0.13);
+    inset 2px 0 3px rgba(48, 44, 40, 0.13);
 }
 
-/* The downward-facing head reveal is the darkest doorway surface.
+/* The head reveal faces downward and away from the skylight. It is therefore
+   darker than the head casing, side reveals, vertical casing and door leaf.
 
-   The dark value belongs to the surface itself, not to a large drop shadow.
-   This keeps the result soft and architectural rather than graphic. */
+   Keep most of the darkness on the surface itself rather than relying on a
+   large cast shadow. This makes the opening feel deep without producing a
+   hard graphic stripe. */
 
 .mu-jamb-reveal-head {
-  background-color: var(--mu-reveal-head);
+  background-color: var(--mu-reveal-head-middle);
 
   background-image:
     linear-gradient(
       180deg,
-      #77746e 0%,
-      #6f6c66 14%,
-      #65625d 38%,
-      #5c5954 65%,
-      #53504c 84%,
-      var(--mu-reveal-head-dark) 100%
+      var(--mu-reveal-head-front) 0%,
+      #6d6a65 15%,
+      var(--mu-reveal-head-middle) 42%,
+      #57544f 67%,
+      #504d49 84%,
+      var(--mu-reveal-head-back) 100%
     );
 
   box-shadow:
-    inset 0 2px 3px rgba(255, 255, 255, 0.035),
+    inset 0 1px rgba(255, 255, 255, 0.035),
     inset 0 -3px 5px rgba(29, 27, 25, 0.30),
     0 4px 8px -6px rgba(29, 27, 25, 0.34);
 }
 
 /* =========================================================================
-   VERTICAL DOORWAY CASING
+   DOORWAY CASING
 
-   Vertical members remain substantially lighter and flatter than the head.
-   Their cast shadows are deliberately faint.
+   Each side is one physical casing element. Narrow value changes inside
+   that element suggest a restrained, square-stepped profile.
 
-   The first background layer adds a short shadow at the top where the
-   horizontal member overlaps the vertical casing. The second layer describes
-   the casing profile across its width.
+   Vertical members stay comparatively light. Their cast shadows are faint.
+
+   The horizontal head is darker, has a dark lower lip, and casts a stronger
+   downward shadow. Its mitred shape is retained.
    ========================================================================= */
 
 .mu-door-casing {
-  background-color: var(--mu-casing-face);
+  background-color: var(--mu-door-face);
   background-repeat: no-repeat;
 }
+
+/* Left casing:
+   - first layer adds short head-shadow bleed at the top
+   - second layer describes the profile across its width
+   - outer wall edge is on the left; opening edge is on the right */
 
 .mu-door-casing-left {
   background-image:
     linear-gradient(
       180deg,
       rgba(48, 45, 41, 0.24) 0,
-      rgba(48, 45, 41, 0.14) 8px,
-      rgba(48, 45, 41, 0.065) 20px,
-      rgba(48, 45, 41, 0.018) 34px,
-      rgba(48, 45, 41, 0) 46px
+      rgba(48, 45, 41, 0.16) 8px,
+      rgba(48, 45, 41, 0.08) 19px,
+      rgba(48, 45, 41, 0.03) 31px,
+      rgba(48, 45, 41, 0) 45px
     ),
     linear-gradient(
       90deg,
-      #97948e 0,
-      #97948e 2px,
+
+      #94918b 0,
+      #94918b 2px,
 
       #bbb9b3 2px,
       #bbb9b3 3px,
@@ -433,30 +468,42 @@
       #92908a 88%,
       #92908a calc(100% - 2px),
 
-      #817e78 calc(100% - 2px),
-      #817e78 100%
+      var(--mu-door-edge-dark) calc(100% - 2px),
+      var(--mu-door-edge-dark) 100%
     );
 
-  box-shadow:
-    inset 1px 0 rgba(255, 255, 255, 0.07),
-    inset -1px 0 rgba(51, 47, 43, 0.07),
-    2px 3px 6px -6px rgba(38, 34, 30, 0.16);
+  /* The top end is mitred from the outer corner to the opening corner. */
+  clip-path:
+    polygon(
+      0 0,
+      18px 18px,
+      18px 100%,
+      0 100%
+    );
+
+  /* Keep vertical cast shadows substantially lighter than the head shadow. */
+  filter:
+    drop-shadow(1px 0 rgba(255, 255, 255, 0.055))
+    drop-shadow(2px 3px 2px rgba(38, 34, 30, 0.075));
 }
+
+/* Right casing mirrors the left profile and mitre. */
 
 .mu-door-casing-right {
   background-image:
     linear-gradient(
       180deg,
       rgba(48, 45, 41, 0.24) 0,
-      rgba(48, 45, 41, 0.14) 8px,
-      rgba(48, 45, 41, 0.065) 20px,
-      rgba(48, 45, 41, 0.018) 34px,
-      rgba(48, 45, 41, 0) 46px
+      rgba(48, 45, 41, 0.16) 8px,
+      rgba(48, 45, 41, 0.08) 19px,
+      rgba(48, 45, 41, 0.03) 31px,
+      rgba(48, 45, 41, 0) 45px
     ),
     linear-gradient(
       270deg,
-      #97948e 0,
-      #97948e 2px,
+
+      #94918b 0,
+      #94918b 2px,
 
       #bbb9b3 2px,
       #bbb9b3 3px,
@@ -482,25 +529,32 @@
       #92908a 88%,
       #92908a calc(100% - 2px),
 
-      #817e78 calc(100% - 2px),
-      #817e78 100%
+      var(--mu-door-edge-dark) calc(100% - 2px),
+      var(--mu-door-edge-dark) 100%
     );
 
-  box-shadow:
-    inset -1px 0 rgba(255, 255, 255, 0.07),
-    inset 1px 0 rgba(51, 47, 43, 0.07),
-    -2px 3px 6px -6px rgba(38, 34, 30, 0.16);
+  clip-path:
+    polygon(
+      0 18px,
+      18px 0,
+      18px 100%,
+      0 100%
+    );
+
+  filter:
+    drop-shadow(-1px 0 rgba(255, 255, 255, 0.055))
+    drop-shadow(-2px 3px 2px rgba(38, 34, 30, 0.075));
 }
 
-/* =========================================================================
-   HORIZONTAL HEAD CASING
+/* The head casing is intentionally darker than the vertical casing.
 
-   This member is intentionally darker and more strongly articulated than
-   either vertical casing.
+   The broad face transitions into a distinctly dark lower lip. Two
+   drop-shadows create:
+   - a narrow, dark contact shadow directly under the trim
+   - a broader, lower-opacity penumbra beneath it
 
-   The darkest band is confined to the lower edge. It represents the
-   downward-facing lip and the ambient occlusion immediately beneath it.
-   ========================================================================= */
+   Because filter follows the clipped silhouette, both shadows respect the
+   mitred ends. */
 
 .mu-door-casing-head {
   background-color: var(--mu-head-face);
@@ -512,100 +566,54 @@
       #aaa8a2 0,
       #aaa8a2 1px,
 
-      #b7b5af 1px,
-      #b7b5af 2px,
+      #b6b4ae 1px,
+      #b6b4ae 2px,
 
-      #9e9b95 2px,
-      #9e9b95 6px,
+      #9d9a94 2px,
+      #9d9a94 6px,
 
       #aaa8a2 6px,
       #aaa8a2 8px,
 
-      #96938d 8px,
-      #96938d 22%,
+      #97948e 8px,
+      #97948e 22%,
 
-      #8e8b85 22%,
-      #8e8b85 56%,
+      var(--mu-head-face) 22%,
+      var(--mu-head-face) 54%,
 
-      #85827c 56%,
-      #85827c 73%,
+      #85827c 54%,
+      #85827c 70%,
 
-      #77746e 73%,
-      #77746e 84%,
+      #797670 70%,
+      #797670 82%,
 
-      #686560 84%,
-      #686560 calc(100% - 4px),
+      var(--mu-head-lower) 82%,
+      var(--mu-head-lower) calc(100% - 4px),
 
       var(--mu-head-underside) calc(100% - 4px),
       var(--mu-head-underside) 100%
     );
 
-  box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.07),
-    inset 0 -2px 3px rgba(35, 32, 29, 0.26),
-
-    /* Dark, narrow contact immediately below the head. */
-    0 3px 4px -2px rgba(36, 33, 30, 0.29),
-
-    /* Soft penumbra from the diffuse overhead source. */
-    0 9px 14px -10px rgba(36, 33, 30, 0.34);
-}
-
-/* =========================================================================
-   CORNER BLOCKS
-
-   The blocks bridge the dark horizontal head and lighter vertical casings.
-   Their lower portion is dark enough to continue the horizontal shadow, but
-   their faces remain quieter than the head reveal.
-   ========================================================================= */
-
-.mu-door-corner-block {
-  background-color: #96938d;
-
-  background-image:
-    linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.035) 0,
-      transparent 15%,
-      transparent 84%,
-      rgba(43, 40, 36, 0.08) 100%
-    ),
-    linear-gradient(
-      180deg,
-      #a7a59f 0,
-      #a7a59f 2px,
-
-      #9b9892 2px,
-      #9b9892 18%,
-
-      #918e88 18%,
-      #918e88 60%,
-
-      #817e78 60%,
-      #817e78 78%,
-
-      #706d67 78%,
-      #706d67 calc(100% - 3px),
-
-      #5f5c57 calc(100% - 3px),
-      #5f5c57 100%
+  clip-path:
+    polygon(
+      0 0,
+      100% 0,
+      calc(100% - 18px) 100%,
+      18px 100%
     );
 
-  box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.055),
-    inset 0 -2px rgba(38, 35, 32, 0.14),
-    0 5px 8px -6px rgba(36, 33, 30, 0.27);
-}
-
-.mu-door-corner-block::before,
-.mu-door-corner-block::after {
-  display: none;
-  content: none;
+  filter:
+    drop-shadow(0 1px rgba(255, 255, 255, 0.045))
+    drop-shadow(0 3px 2px rgba(34, 31, 28, 0.25))
+    drop-shadow(0 8px 5px rgba(34, 31, 28, 0.15));
 }
 
 /* =========================================================================
    DOORWAY PLINTHS
    ========================================================================= */
+
+/* The plinth is only a quiet termination at floor level. It should not look
+   like a separate pedestal or a fourth decorative casing component. */
 
 .mu-door-plinth {
   background-color: #a4a19b;
@@ -614,26 +622,26 @@
     linear-gradient(
       180deg,
 
-      #b5b3ad 0,
-      #b5b3ad 1px,
+      #b8b6b0 0,
+      #b8b6b0 1px,
 
-      #aaa8a2 1px,
-      #aaa8a2 18%,
+      #a9a7a1 1px,
+      #a9a7a1 18%,
 
-      #a4a19b 18%,
-      #a4a19b 82%,
+      #a3a09a 18%,
+      #a3a09a 82%,
 
-      #94918b 82%,
-      #94918b calc(100% - 2px),
+      #918e88 82%,
+      #918e88 calc(100% - 2px),
 
-      #7b7872 calc(100% - 2px),
-      #7b7872 100%
+      #77746e calc(100% - 2px),
+      #77746e 100%
     );
 
   box-shadow:
-    inset 1px 0 rgba(255, 255, 255, 0.07),
-    inset -1px 0 rgba(53, 49, 45, 0.07),
-    0 3px 5px -5px rgba(36, 32, 28, 0.23);
+    inset 1px 0 rgba(255, 255, 255, 0.08),
+    inset -1px 0 rgba(53, 49, 45, 0.08),
+    0 3px 5px -5px rgba(36, 32, 28, 0.25);
 }
 
 /* =========================================================================
@@ -645,40 +653,48 @@
 
   background-color: #77736d;
 
+  /* The first layer adds overhead occlusion immediately behind the head
+     reveal. The remaining layers describe the door face. */
   background-image:
     linear-gradient(
+      180deg,
+      rgba(30, 28, 25, 0.30) 0,
+      rgba(30, 28, 25, 0.18) 8px,
+      rgba(30, 28, 25, 0.07) 20px,
+      rgba(30, 28, 25, 0) 34px
+    ),
+    linear-gradient(
       90deg,
-      rgba(255, 255, 255, 0.055) 0,
+      rgba(255, 255, 255, 0.07) 0,
       transparent 10%,
       transparent 90%,
-      rgba(45, 40, 36, 0.11) 100%
+      rgba(45, 40, 36, 0.12) 100%
     ),
     linear-gradient(
       180deg,
-      #817d77 0,
-      #7a7670 44%,
-      #716d67 100%
+      #85817b 0,
+      #7e7a74 44%,
+      #74706a 100%
     );
 
   box-shadow:
-    inset 0 0 0 2px rgba(47, 42, 38, 0.22),
-    inset 8px 0 12px -12px rgba(255, 255, 255, 0.13),
-    inset -8px 0 12px -12px rgba(36, 32, 28, 0.20),
-
-    /* A little overhead occlusion behind the head reveal. */
-    inset 0 13px 16px -13px rgba(30, 28, 25, 0.32);
+    inset 0 0 0 2px rgba(47, 42, 38, 0.24),
+    inset 8px 0 12px -12px rgba(255, 255, 255, 0.16),
+    inset -8px 0 12px -12px rgba(36, 32, 28, 0.22);
 }
+
+/* Restrained recessed panels for ordinary closed doors. */
 
 .mu-door-panel {
   left: 16px;
   width: calc(100% - 32px);
 
-  background-color: #77736d;
+  background-color: #79756f;
 
   background-image:
     linear-gradient(
       180deg,
-      rgba(255, 255, 255, 0.05),
+      rgba(255, 255, 255, 0.06),
       transparent 30%,
       rgba(43, 39, 35, 0.07) 100%
     );
@@ -687,7 +703,7 @@
 
   box-shadow:
     inset 0 2px 3px rgba(42, 38, 34, 0.16),
-    0 1px rgba(255, 255, 255, 0.055);
+    0 1px rgba(255, 255, 255, 0.06);
 
   transform: translateZ(0.4px);
 }
@@ -701,6 +717,8 @@
   top: 160px;
   bottom: 18px;
 }
+
+/* Small, subdued brass handle. */
 
 .mu-door-handle {
   right: 17px;
@@ -726,23 +744,39 @@
   transform: translateZ(1px);
 }
 
+/* Photographed front door. Preserve the photograph while adding a short
+   shadow beneath the head reveal. */
+
 .mu-door-leaf.mu-entry-door {
   background:
+    linear-gradient(
+      180deg,
+      rgba(19, 17, 14, 0.36) 0,
+      rgba(19, 17, 14, 0.21) 9px,
+      rgba(19, 17, 14, 0.08) 22px,
+      rgba(19, 17, 14, 0) 38px
+    ),
     #2a2118
     url("../img/entry-door.jpg")
     center / cover
     no-repeat;
 
-  /* Preserve some top occlusion even on the photographed leaf. */
   box-shadow:
-    inset 0 0 0 2px rgba(31, 26, 21, 0.30),
-    inset 0 14px 18px -14px rgba(22, 19, 16, 0.38);
+    inset 0 0 0 2px rgba(31, 26, 21, 0.30);
 }
 
-/* Backward compatibility for older front-door markup. */
+/* Backward compatibility if an older front-door element still uses
+   .mu-front instead of .mu-door-leaf.mu-entry-door. */
 
 .mu-front {
   background:
+    linear-gradient(
+      180deg,
+      rgba(19, 17, 14, 0.36) 0,
+      rgba(19, 17, 14, 0.21) 9px,
+      rgba(19, 17, 14, 0.08) 22px,
+      rgba(19, 17, 14, 0) 38px
+    ),
     #2a2118
     url("../img/entry-door.jpg")
     center / cover
@@ -757,6 +791,10 @@
   background-color: var(--mu-trim-face);
 }
 
+/* Flat, restrained museum baseboard. The darkest line is confined to the
+   floor contact. The actual bleed onto the parquet comes from the separate
+   .mu-floor-shadow geometry. */
+
 .mu-trim.mu-base {
   background-color: var(--mu-trim-face);
 
@@ -764,8 +802,8 @@
     linear-gradient(
       180deg,
 
-      #bbb9b3 0,
-      #bbb9b3 1px,
+      #bebcb6 0,
+      #bebcb6 1px,
 
       #aeaca6 1px,
       #aeaca6 13%,
@@ -781,16 +819,19 @@
     );
 
   box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.12),
-    0 2px 4px -4px rgba(38, 34, 30, 0.22);
+    inset 0 1px rgba(255, 255, 255, 0.14),
+    0 2px 4px -4px rgba(38, 34, 30, 0.24);
 }
 
 /* =========================================================================
    CROWN MOULDING
 
-   Like the doorway head, the crown is a horizontal architectural member.
-   Its lower shadow is therefore darker than the shadows on vertical trim,
-   but remains soft because the source is broad.
+   The crown is another horizontal architectural member. Its lower profile
+   and wall shadow are therefore appreciably darker than the shadows beside
+   vertical doorway casing.
+
+   Two shadows create a dark contact immediately below the crown and a soft
+   secondary bleed farther down the wall.
    ========================================================================= */
 
 .mu-trim.mu-crown {
@@ -800,30 +841,33 @@
     linear-gradient(
       180deg,
 
-      #8b8882 0%,
+      #8c8983 0%,
       #a09d97 8%,
-      #afada7 19%,
-      #a5a29c 33%,
-      #98958f 50%,
+      #b0aea8 19%,
+      #a6a39d 34%,
+      #999690 51%,
       #898680 67%,
       #74716b 83%,
-      #5d5a55 100%
+      #5b5853 100%
     );
 
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.10),
-    inset 0 -2px 2px rgba(35, 32, 29, 0.23),
+    inset 0 -2px 2px rgba(35, 32, 29, 0.24),
 
-    /* Narrow contact directly below the crown. */
-    0 4px 5px -3px rgba(35, 32, 29, 0.27),
+    /* Dark contact directly below the horizontal trim. */
+    0 4px 5px -3px rgba(35, 32, 29, 0.28),
 
-    /* Broader, softer bleed down the wall. */
+    /* Broader penumbra from the large overhead source. */
     0 12px 18px -11px rgba(35, 32, 29, 0.34);
 }
 
 /* =========================================================================
    PICTURE FRAMES
    ========================================================================= */
+
+/* The element itself forms the frame. The transparent center of the frame
+   image exposes the child artwork. */
 
 .mu-art {
   border: solid transparent;
