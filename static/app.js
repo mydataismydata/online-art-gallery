@@ -3765,16 +3765,15 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, H, wallCls) {
     // line can't show as a seam (same colour, so the overlap is invisible).
     f.appendChild(muEl("mu-wall " + wallCls, ow + 4, H - oh,
       muT(0, -(oh + (H - oh) / 2), FZ, "")));
+    // Mitred casing, no corner blocks: the sides rise past the opening by the
+    // casing's own width, the head spans the full outer width, and each meets
+    // the other on a 45° cut (the clip-paths in museum-room.css).
     f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-left",
-      MU_CASE_W, oh, muT(-cx2, -oh / 2, FZ + 2, "")));
+      MU_CASE_W, oh + MU_CASE_W, muT(-cx2, -(oh + MU_CASE_W) / 2, FZ + 2, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-right",
-      MU_CASE_W, oh, muT(cx2, -oh / 2, FZ + 2, "")));
-    f.appendChild(muEl("mu-door-corner-block mu-door-corner-left",
-      MU_CORNER, MU_CORNER, muT(-cx2, -(oh + MU_CORNER / 2), FZ + 3.5, "")));
-    f.appendChild(muEl("mu-door-corner-block mu-door-corner-right",
-      MU_CORNER, MU_CORNER, muT(cx2, -(oh + MU_CORNER / 2), FZ + 3.5, "")));
+      MU_CASE_W, oh + MU_CASE_W, muT(cx2, -(oh + MU_CASE_W) / 2, FZ + 2, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-head",
-      2 * cx2 - MU_CORNER, MU_CASE_W, muT(0, -(oh + MU_CASE_W / 2), FZ + 2, "")));
+      ow + 2 * MU_CASE_W, MU_CASE_W, muT(0, -(oh + MU_CASE_W / 2), FZ + 2, "")));
     f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(-cx2, -15, FZ + 3, "")));
     f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(cx2, -15, FZ + 3, "")));
     // floor contact under each plinth: a horizontal fade, wall at local -z

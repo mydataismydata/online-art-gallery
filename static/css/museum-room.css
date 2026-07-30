@@ -22,7 +22,6 @@
 .mu-jamb-reveal,
 .mu-door-leaf,
 .mu-door-casing,
-.mu-door-corner-block,
 .mu-door-plinth,
 .mu-trim,
 .mu-front,
@@ -47,7 +46,6 @@
 .mu-jamb-reveal,
 .mu-door-leaf,
 .mu-door-casing,
-.mu-door-corner-block,
 .mu-door-plinth,
 .mu-door-panel,
 .mu-door-handle {
@@ -422,9 +420,13 @@
       var(--mu-door-edge-dark) 100%
     );
 
-  box-shadow:
-    1px 0 rgba(255, 255, 255, 0.09),
-    4px 5px 8px -7px rgba(38, 34, 30, 0.26);
+  /* The top end is the mitre: a 45° cut from the outer top corner down to the
+     opening's corner, meeting the head casing edge to edge. clip-path clips
+     box-shadow with it, so the soft shadows ride a filter instead. */
+  clip-path: polygon(0 0, 18px 18px, 18px 100%, 0 100%);
+  filter:
+    drop-shadow(1px 0 rgba(255, 255, 255, 0.09))
+    drop-shadow(3px 4px 2px rgba(38, 34, 30, 0.14));
 }
 
 /* Right casing mirrors the left. */
@@ -468,13 +470,16 @@
       var(--mu-door-edge-dark) 100%
     );
 
-  box-shadow:
-    -1px 0 rgba(255, 255, 255, 0.09),
-    -4px 5px 8px -7px rgba(38, 34, 30, 0.26);
+  clip-path: polygon(0 18px, 18px 0, 18px 100%, 0 100%);
+  filter:
+    drop-shadow(-1px 0 rgba(255, 255, 255, 0.09))
+    drop-shadow(-3px 4px 2px rgba(38, 34, 30, 0.14));
 }
 
 /* The head casing uses the same square profile in the horizontal direction.
-   Its lower edge is darker, and it casts one restrained downward shadow. */
+   Its lower edge is darker, and it casts one restrained downward shadow. It
+   spans the full outer width, both ends cut 45° down to the opening's
+   corners to meet the side casings' mitres. */
 
 .mu-door-casing-head {
   background-color: var(--mu-door-face);
@@ -517,56 +522,10 @@
       #716e68 100%
     );
 
-  box-shadow:
-    0 1px rgba(255, 255, 255, 0.08),
-    0 5px 8px -7px rgba(37, 33, 29, 0.30);
-}
-
-/* =========================================================================
-   DOORWAY CORNER BLOCKS
-
-   Existing square geometry is retained, but its treatment is integrated
-   with the casing. The blocks should read as thicker joints, not ornaments.
-   ========================================================================= */
-
-.mu-door-corner-block {
-  background-color: var(--mu-door-face);
-
-  background-image:
-    linear-gradient(
-      180deg,
-
-      #85827c 0,
-      #85827c 2px,
-
-      #c0beb8 2px,
-      #c0beb8 3px,
-
-      #a29f99 3px,
-      #a29f99 7px,
-
-      #bab8b2 7px,
-      #bab8b2 8px,
-
-      #aaa8a2 8px,
-      #aaa8a2 82%,
-
-      #96938d 82%,
-      #96938d calc(100% - 3px),
-
-      var(--mu-door-edge-dark) calc(100% - 3px),
-      var(--mu-door-edge-dark) 100%
-    );
-
-  box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.08),
-    0 5px 8px -7px rgba(37, 33, 29, 0.28);
-}
-
-.mu-door-corner-block::before,
-.mu-door-corner-block::after {
-  display: none;
-  content: none;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 18px) 100%, 18px 100%);
+  filter:
+    drop-shadow(0 1px rgba(255, 255, 255, 0.08))
+    drop-shadow(0 4px 2px rgba(37, 33, 29, 0.16));
 }
 
 /* =========================================================================
