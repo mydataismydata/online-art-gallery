@@ -310,7 +310,9 @@ def all_works():
 def _matches(value, wanted):
     if wanted is None:
         return True
-    have = (value or "Unknown").strip().casefold()
+    # "Unclassified" is the browse bucket for works without the facet — the
+    # same word facets() files them under, so the chip and the filter agree.
+    have = (value or "Unclassified").strip().casefold()
     return have == wanted.strip().casefold()
 
 
@@ -398,7 +400,7 @@ def facets():
         counter = Counter()
         display = {}
         for w in all_works():
-            v = (w.get(key) or "Unknown").strip()
+            v = (w.get(key) or "Unclassified").strip()
             cf = v.casefold()
             # variants differing only in case count together; show the capitalized one
             if cf not in display or (display[cf][:1].islower() and v[:1].isupper()):
