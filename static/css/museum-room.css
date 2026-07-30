@@ -3,13 +3,18 @@
 
    One CSS pixel represents one centimetre.
 
-   Lighting is painted for a large, soft overhead source:
+   Lighting is painted for one large, soft overhead source:
    - broad, low-contrast wall illumination
    - horizontal trim shadows darker than vertical trim shadows
-   - the underside of each doorway head is its darkest surface
-   - short, soft shadow bleed down the tops of the side jambs
+   - the doorway soffit is the darkest doorway surface
+   - short shadow bleed down the tops of the side jambs
    - restrained shadows along vertical casing
    - separate horizontal floor-contact shadows
+
+   IMPORTANT:
+   Horizontal jamb heads are commonly rotated with rotateX(90deg). They must
+   remain visible from either side of the opening. Do not globally apply
+   backface-visibility:hidden to .mu-jamb-reveal.
 */
 
 /* =========================================================================
@@ -21,6 +26,8 @@
 .mu-ceil,
 .mu-wall,
 .mu-jamb-reveal,
+.mu-jamb-reveal-soffit,
+.mu-jamb-soffit,
 .mu-door-leaf,
 .mu-door-casing,
 .mu-door-plinth,
@@ -43,14 +50,32 @@
   transform-style: preserve-3d;
 }
 
+/* Do not include .mu-jamb-reveal here. The horizontal head can be presented
+   to the camera as a back face after rotateX(90deg). */
+
 .mu-floor-shadow,
-.mu-jamb-reveal,
 .mu-door-leaf,
 .mu-door-casing,
 .mu-door-plinth,
 .mu-door-panel,
 .mu-door-handle {
   backface-visibility: hidden;
+}
+
+/* Vertical reveals do not need two-sided rendering. */
+
+.mu-jamb-reveal-left,
+.mu-jamb-reveal-right {
+  backface-visibility: hidden;
+}
+
+/* The soffit must be visible from either connected room. */
+
+.mu-jamb-reveal-head,
+.mu-jamb-reveal-soffit,
+.mu-jamb-soffit {
+  backface-visibility: visible;
+  transform-style: preserve-3d;
 }
 
 /* =========================================================================
@@ -77,12 +102,11 @@
   --mu-reveal-middle: #908d87;
   --mu-reveal-back: #74716b;
 
-  --mu-reveal-head-front: #74716c;
-  --mu-reveal-head-middle: #605d58;
-  --mu-reveal-head-back: #494642;
+  --mu-reveal-head-front: #66635e;
+  --mu-reveal-head-middle: #54514d;
+  --mu-reveal-head-back: #44413e;
 
   --mu-trim-face: #aaa8a2;
-
   --mu-shadow-rgb: 45, 38, 32;
 }
 
@@ -90,9 +114,8 @@
    FLOOR
    ========================================================================= */
 
-/* Herringbone oak parquet. The broad inset shadow supplies only a slight
-   room-scale reduction. Local wall and trim contact shadows are separate
-   horizontal planes rendered by .mu-floor-shadow elements. */
+/* Herringbone oak parquet. The inset shadow supplies only a slight room-scale
+   reduction. Local contact shadows use separate horizontal planes. */
 
 .mu-floor {
   background:
@@ -109,12 +132,7 @@
 /* =========================================================================
    FLOOR-CONTACT SHADOW PLANES
 
-   These elements lie horizontally, slightly above the parquet. They allow
-   the shadow beneath baseboards and plinths to bleed onto the floor instead
-   of appearing attached to a vertical surface.
-
-   Shadow planes should be raised approximately 0.1–0.2 px above the floor
-   in their inline transforms to prevent z-fighting.
+   These elements lie horizontally about 0.1–0.2 px above the parquet.
    ========================================================================= */
 
 .mu-floor-shadow {
@@ -122,8 +140,6 @@
   background-color: transparent;
   transform-style: preserve-3d;
 }
-
-/* North wall: darkest at the north edge, fading south into the room. */
 
 .mu-floor-shadow-north {
   background-image:
@@ -136,8 +152,6 @@
     );
 }
 
-/* South wall: darkest at the south edge, fading north into the room. */
-
 .mu-floor-shadow-south {
   background-image:
     linear-gradient(
@@ -148,8 +162,6 @@
       rgba(var(--mu-shadow-rgb), 0) 9px
     );
 }
-
-/* West wall: darkest at the west edge, fading east into the room. */
 
 .mu-floor-shadow-west {
   background-image:
@@ -162,8 +174,6 @@
     );
 }
 
-/* East wall: darkest at the east edge, fading west into the room. */
-
 .mu-floor-shadow-east {
   background-image:
     linear-gradient(
@@ -175,8 +185,7 @@
     );
 }
 
-/* Plinth shadows are localized. Fade their ends so they do not terminate
-   with visible rectangular edges. */
+/* Localized plinth shadows fade at their lateral ends. */
 
 .mu-plinth-floor-shadow {
   -webkit-mask-image:
@@ -274,9 +283,6 @@
    WALLS
    ========================================================================= */
 
-/* The reference architecture uses a restrained warm gray. The vertical
-   change is broad and subtle, consistent with diffuse overhead illumination. */
-
 .mu-wall {
   background-color: var(--mu-wall-front-mid);
 
@@ -289,8 +295,6 @@
       var(--mu-wall-front-bottom) 100%
     );
 }
-
-/* Side walls receive slightly less indirect light. */
 
 .mu-wall.mu-w-ew {
   background-color: var(--mu-wall-side-mid);
@@ -308,34 +312,29 @@
 /* =========================================================================
    DOORWAY REVEALS
 
-   Reveals describe the thickness of the wall. They are not decorative
-   moulding and therefore receive no raised casing shadow.
-
    The side reveals use two background layers:
-   1. A short vertical shadow bleed beneath the head reveal.
+   1. A short shadow bleed beneath the head.
    2. A horizontal gradient describing depth through the wall.
 
-   The downward-facing head reveal is the darkest part of the doorway.
+   The downward-facing head reveal is the darkest doorway surface.
    ========================================================================= */
 
 .mu-jamb-reveal {
   background-color: var(--mu-reveal-middle);
 }
 
-/* Left reveal:
-   - the first gradient bleeds head shadow down the top of the jamb
-   - the second gradient darkens toward the rear of the opening */
+/* Left reveal */
 
 .mu-jamb-reveal-left {
   background-image:
     linear-gradient(
       180deg,
-      rgba(43, 40, 37, 0.38) 0,
-      rgba(43, 40, 37, 0.28) 7px,
-      rgba(43, 40, 37, 0.17) 17px,
-      rgba(43, 40, 37, 0.09) 29px,
-      rgba(43, 40, 37, 0.035) 42px,
-      rgba(43, 40, 37, 0) 56px
+      rgba(39, 37, 34, 0.46) 0,
+      rgba(39, 37, 34, 0.34) 7px,
+      rgba(39, 37, 34, 0.21) 17px,
+      rgba(39, 37, 34, 0.11) 29px,
+      rgba(39, 37, 34, 0.045) 42px,
+      rgba(39, 37, 34, 0) 58px
     ),
     linear-gradient(
       90deg,
@@ -351,19 +350,18 @@
     inset -2px 0 3px rgba(48, 44, 40, 0.13);
 }
 
-/* The depth profile is mirrored on the right. The top shadow bleed remains
-   vertical because the head shades both side jambs in the same direction. */
+/* Right reveal */
 
 .mu-jamb-reveal-right {
   background-image:
     linear-gradient(
       180deg,
-      rgba(43, 40, 37, 0.38) 0,
-      rgba(43, 40, 37, 0.28) 7px,
-      rgba(43, 40, 37, 0.17) 17px,
-      rgba(43, 40, 37, 0.09) 29px,
-      rgba(43, 40, 37, 0.035) 42px,
-      rgba(43, 40, 37, 0) 56px
+      rgba(39, 37, 34, 0.46) 0,
+      rgba(39, 37, 34, 0.34) 7px,
+      rgba(39, 37, 34, 0.21) 17px,
+      rgba(39, 37, 34, 0.11) 29px,
+      rgba(39, 37, 34, 0.045) 42px,
+      rgba(39, 37, 34, 0) 58px
     ),
     linear-gradient(
       270deg,
@@ -379,43 +377,44 @@
     inset 2px 0 3px rgba(48, 44, 40, 0.13);
 }
 
-/* The head reveal faces downward and away from the skylight. It is therefore
-   darker than the head casing, side reveals, vertical casing and door leaf.
+/* Horizontal reveal / soffit
 
-   Keep most of the darkness on the surface itself rather than relying on a
-   large cast shadow. This makes the opening feel deep without producing a
-   hard graphic stripe. */
+   Multiple selector names are included so the rule works whether the markup
+   calls the element a head, reveal-soffit or jamb-soffit.
 
-.mu-jamb-reveal-head {
-  background-color: var(--mu-reveal-head-middle);
+   The !important declaration is deliberately limited to this surface. It
+   prevents a generic wall or doorway background from replacing the dark
+   downward-facing material.
 
-  background-image:
+   backface-visibility:visible is required because rotateX(90deg) can present
+   the element's back face to one of the connected rooms. */
+
+.mu-jamb-reveal-head,
+.mu-jamb-reveal-soffit,
+.mu-jamb-soffit {
+  background:
     linear-gradient(
       180deg,
       var(--mu-reveal-head-front) 0%,
-      #6d6a65 15%,
+      #5f5c57 16%,
       var(--mu-reveal-head-middle) 42%,
-      #57544f 67%,
-      #504d49 84%,
+      #4c4945 70%,
       var(--mu-reveal-head-back) 100%
-    );
+    ) !important;
+
+  backface-visibility: visible;
 
   box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.035),
-    inset 0 -3px 5px rgba(29, 27, 25, 0.30),
-    0 4px 8px -6px rgba(29, 27, 25, 0.34);
+    inset 0 1px rgba(255, 255, 255, 0.025),
+    inset 0 -3px 5px rgba(24, 22, 20, 0.34),
+    0 4px 8px -6px rgba(24, 22, 20, 0.38);
 }
 
 /* =========================================================================
    DOORWAY CASING
 
-   Each side is one physical casing element. Narrow value changes inside
-   that element suggest a restrained, square-stepped profile.
-
-   Vertical members stay comparatively light. Their cast shadows are faint.
-
-   The horizontal head is darker, has a dark lower lip, and casts a stronger
-   downward shadow. Its mitred shape is retained.
+   Each side remains one physical casing element. The horizontal head is
+   darker and casts a stronger shadow than either vertical member.
    ========================================================================= */
 
 .mu-door-casing {
@@ -424,19 +423,18 @@
 }
 
 /* Left casing:
-   - first layer adds short head-shadow bleed at the top
-   - second layer describes the profile across its width
-   - outer wall edge is on the left; opening edge is on the right */
+   - first layer is short head-shadow bleed
+   - second layer describes the profile across its width */
 
 .mu-door-casing-left {
   background-image:
     linear-gradient(
       180deg,
-      rgba(48, 45, 41, 0.24) 0,
-      rgba(48, 45, 41, 0.16) 8px,
-      rgba(48, 45, 41, 0.08) 19px,
-      rgba(48, 45, 41, 0.03) 31px,
-      rgba(48, 45, 41, 0) 45px
+      rgba(45, 42, 39, 0.30) 0,
+      rgba(45, 42, 39, 0.20) 8px,
+      rgba(45, 42, 39, 0.10) 19px,
+      rgba(45, 42, 39, 0.04) 31px,
+      rgba(45, 42, 39, 0) 46px
     ),
     linear-gradient(
       90deg,
@@ -472,7 +470,6 @@
       var(--mu-door-edge-dark) 100%
     );
 
-  /* The top end is mitred from the outer corner to the opening corner. */
   clip-path:
     polygon(
       0 0,
@@ -481,23 +478,22 @@
       0 100%
     );
 
-  /* Keep vertical cast shadows substantially lighter than the head shadow. */
   filter:
     drop-shadow(1px 0 rgba(255, 255, 255, 0.055))
     drop-shadow(2px 3px 2px rgba(38, 34, 30, 0.075));
 }
 
-/* Right casing mirrors the left profile and mitre. */
+/* Right casing */
 
 .mu-door-casing-right {
   background-image:
     linear-gradient(
       180deg,
-      rgba(48, 45, 41, 0.24) 0,
-      rgba(48, 45, 41, 0.16) 8px,
-      rgba(48, 45, 41, 0.08) 19px,
-      rgba(48, 45, 41, 0.03) 31px,
-      rgba(48, 45, 41, 0) 45px
+      rgba(45, 42, 39, 0.30) 0,
+      rgba(45, 42, 39, 0.20) 8px,
+      rgba(45, 42, 39, 0.10) 19px,
+      rgba(45, 42, 39, 0.04) 31px,
+      rgba(45, 42, 39, 0) 46px
     ),
     linear-gradient(
       270deg,
@@ -546,15 +542,10 @@
     drop-shadow(-2px 3px 2px rgba(38, 34, 30, 0.075));
 }
 
-/* The head casing is intentionally darker than the vertical casing.
+/* Horizontal head casing
 
-   The broad face transitions into a distinctly dark lower lip. Two
-   drop-shadows create:
-   - a narrow, dark contact shadow directly under the trim
-   - a broader, lower-opacity penumbra beneath it
-
-   Because filter follows the clipped silhouette, both shadows respect the
-   mitred ends. */
+   The lower lip is much darker than the vertical casing. Its two shadows
+   create a narrow contact line and a broader soft penumbra. */
 
 .mu-door-casing-head {
   background-color: var(--mu-head-face);
@@ -579,15 +570,15 @@
       #97948e 22%,
 
       var(--mu-head-face) 22%,
-      var(--mu-head-face) 54%,
+      var(--mu-head-face) 52%,
 
-      #85827c 54%,
-      #85827c 70%,
+      #83807a 52%,
+      #83807a 69%,
 
-      #797670 70%,
-      #797670 82%,
+      #74716b 69%,
+      #74716b 81%,
 
-      var(--mu-head-lower) 82%,
+      var(--mu-head-lower) 81%,
       var(--mu-head-lower) calc(100% - 4px),
 
       var(--mu-head-underside) calc(100% - 4px),
@@ -603,17 +594,14 @@
     );
 
   filter:
-    drop-shadow(0 1px rgba(255, 255, 255, 0.045))
-    drop-shadow(0 3px 2px rgba(34, 31, 28, 0.25))
-    drop-shadow(0 8px 5px rgba(34, 31, 28, 0.15));
+    drop-shadow(0 1px rgba(255, 255, 255, 0.04))
+    drop-shadow(0 3px 2px rgba(31, 28, 25, 0.30))
+    drop-shadow(0 9px 6px rgba(31, 28, 25, 0.18));
 }
 
 /* =========================================================================
    DOORWAY PLINTHS
    ========================================================================= */
-
-/* The plinth is only a quiet termination at floor level. It should not look
-   like a separate pedestal or a fourth decorative casing component. */
 
 .mu-door-plinth {
   background-color: #a4a19b;
@@ -650,11 +638,8 @@
 
 .mu-door-leaf {
   overflow: hidden;
-
   background-color: #77736d;
 
-  /* The first layer adds overhead occlusion immediately behind the head
-     reveal. The remaining layers describe the door face. */
   background-image:
     linear-gradient(
       180deg,
@@ -682,8 +667,6 @@
     inset 8px 0 12px -12px rgba(255, 255, 255, 0.16),
     inset -8px 0 12px -12px rgba(36, 32, 28, 0.22);
 }
-
-/* Restrained recessed panels for ordinary closed doors. */
 
 .mu-door-panel {
   left: 16px;
@@ -718,8 +701,6 @@
   bottom: 18px;
 }
 
-/* Small, subdued brass handle. */
-
 .mu-door-handle {
   right: 17px;
   top: 130px;
@@ -744,8 +725,7 @@
   transform: translateZ(1px);
 }
 
-/* Photographed front door. Preserve the photograph while adding a short
-   shadow beneath the head reveal. */
+/* Photographed front door with short overhead occlusion. */
 
 .mu-door-leaf.mu-entry-door {
   background:
@@ -765,8 +745,7 @@
     inset 0 0 0 2px rgba(31, 26, 21, 0.30);
 }
 
-/* Backward compatibility if an older front-door element still uses
-   .mu-front instead of .mu-door-leaf.mu-entry-door. */
+/* Backward compatibility for older front-door markup. */
 
 .mu-front {
   background:
@@ -790,10 +769,6 @@
 .mu-trim {
   background-color: var(--mu-trim-face);
 }
-
-/* Flat, restrained museum baseboard. The darkest line is confined to the
-   floor contact. The actual bleed onto the parquet comes from the separate
-   .mu-floor-shadow geometry. */
 
 .mu-trim.mu-base {
   background-color: var(--mu-trim-face);
@@ -826,12 +801,8 @@
 /* =========================================================================
    CROWN MOULDING
 
-   The crown is another horizontal architectural member. Its lower profile
-   and wall shadow are therefore appreciably darker than the shadows beside
-   vertical doorway casing.
-
-   Two shadows create a dark contact immediately below the crown and a soft
-   secondary bleed farther down the wall.
+   The crown is horizontal, so its lower profile and wall shadow are darker
+   than the shadows beside vertical doorway casing.
    ========================================================================= */
 
 .mu-trim.mu-crown {
@@ -854,20 +825,13 @@
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.10),
     inset 0 -2px 2px rgba(35, 32, 29, 0.24),
-
-    /* Dark contact directly below the horizontal trim. */
     0 4px 5px -3px rgba(35, 32, 29, 0.28),
-
-    /* Broader penumbra from the large overhead source. */
     0 12px 18px -11px rgba(35, 32, 29, 0.34);
 }
 
 /* =========================================================================
    PICTURE FRAMES
    ========================================================================= */
-
-/* The element itself forms the frame. The transparent center of the frame
-   image exposes the child artwork. */
 
 .mu-art {
   border: solid transparent;
