@@ -1,18 +1,20 @@
 /* MUSEUM — PHYSICAL RENDERING
-   Every surface of the walkable rooms: floors, ceiling, walls, doorway
-   assemblies, the front door, and the picture frames. The walk's chrome,
-   placards and the arrange screen stay in museum.css; this file is only the
-   fabric of the building. One CSS pixel is one centimetre of museum.
+   Every visible architectural surface in the walkable rooms.
 
-   There is no lighting model, so the light — a large, diffused skylight —
-   is painted: orientation-specific profiles (jambs lit across their width,
-   heads lit top-to-bottom), narrow bevel highlights rather than glossy
-   gradients, broad low-opacity shadows cast mostly downward, and floor
-   contact rendered as real horizontal geometry (.mu-floor-shadow), because
-   a box-shadow on a vertical board cannot turn the corner onto the floor. */
+   One CSS pixel represents one centimetre.
 
-/* Every plane: centred on its own origin (negative margins), placed by
-   translate3d + rotate. */
+   Lighting is painted for a large, soft overhead source:
+   - broad, low-contrast wall illumination
+   - orientation-specific casing profiles
+   - darker doorway reveals
+   - restrained downward shadows
+   - separate horizontal floor-contact shadows
+*/
+
+/* =========================================================================
+   SHARED POSITIONING AND 3D BEHAVIOR
+   ========================================================================= */
+
 .mu-floor,
 .mu-floor-shadow,
 .mu-ceil,
@@ -29,13 +31,19 @@
   left: 0;
   top: 0;
 }
+
 .mu-door-panel,
 .mu-door-handle {
   position: absolute;
 }
+
+.mu-doorg,
+.mu-simple-doorway,
 .mu-door-leaf {
   transform-style: preserve-3d;
 }
+
+.mu-floor-shadow,
 .mu-jamb-reveal,
 .mu-door-leaf,
 .mu-door-casing,
@@ -46,383 +54,633 @@
   backface-visibility: hidden;
 }
 
-/* Herringbone oak parquet — real planks harvested from a photograph and
-   relaid on an exact lattice so the tile repeats without a seam. 10 × 30 cm
-   planks, 180 cm to the repeat. Broad ambient reduction only: the local trim
-   contact shadows are rendered by .mu-floor-shadow elements. */
-.mu-floor {
-  background: #eab069 url("../img/parquet.png") repeat;
-  background-size: 180px 180px;
-  box-shadow: inset 0 0 24px 2px rgba(62, 47, 34, .13);
+/* =========================================================================
+   ARCHITECTURAL PALETTE
+   ========================================================================= */
+
+:root {
+  --mu-wall-front-top: #b8b5ae;
+  --mu-wall-front-mid: #afaca6;
+  --mu-wall-front-bottom: #aaa7a1;
+
+  --mu-wall-side-top: #aeaba5;
+  --mu-wall-side-mid: #a6a39d;
+  --mu-wall-side-bottom: #a19e98;
+
+  --mu-door-face: #aaa8a2;
+  --mu-door-edge-dark: #77736d;
+
+  --mu-reveal-front: #a09d97;
+  --mu-reveal-middle: #908d87;
+  --mu-reveal-back: #77736d;
+
+  --mu-trim-face: #aaa8a2;
+
+  --mu-shadow-rgb: 45, 38, 32;
 }
 
-/* -------------------------------------------------------------------------
-   FLOOR CONTACT SHADOWS
+/* =========================================================================
+   FLOOR
+   ========================================================================= */
 
-   Separate horizontal planes positioned just above the parquet — the small
-   ambient occlusion beneath the front edge of baseboards and plinths. The
-   wall variants pick which edge is darkest and which way the fade runs.
-   No filter: blur() here — a gradient is predictable in a transformed 3D
-   scene and will not bleed through neighbouring geometry.
-   ------------------------------------------------------------------------- */
+/* Herringbone oak parquet. The broad inset shadow supplies only a slight
+   room-scale reduction. Local wall and trim contact shadows are separate
+   horizontal planes rendered by .mu-floor-shadow elements. */
+
+.mu-floor {
+  background:
+    #eab069
+    url("../img/parquet.png")
+    repeat;
+
+  background-size: 180px 180px;
+
+  box-shadow:
+    inset 0 0 24px 2px rgba(62, 47, 34, 0.10);
+}
+
+/* =========================================================================
+   FLOOR-CONTACT SHADOW PLANES
+
+   These elements lie horizontally, slightly above the parquet. They allow
+   the shadow beneath baseboards and plinths to bleed onto the floor instead
+   of appearing attached to a vertical surface.
+
+   Shadow planes should be raised approximately 0.1–0.2 px above the floor
+   in their inline transforms to prevent z-fighting.
+   ========================================================================= */
 
 .mu-floor-shadow {
   pointer-events: none;
-  backface-visibility: hidden;
   background-color: transparent;
   transform-style: preserve-3d;
 }
 
-/* North wall: local top edge is nearest the wall — dark, fading downward. */
+/* North wall: darkest at the north edge, fading south into the room. */
+
 .mu-floor-shadow-north {
   background-image:
     linear-gradient(
       180deg,
-      rgba(45, 34, 25, .26) 0px,
-      rgba(45, 34, 25, .20) 1px,
-      rgba(45, 34, 25, .12) 3px,
-      rgba(45, 34, 25, .055) 6px,
-      rgba(45, 34, 25, .018) 8px,
-      rgba(45, 34, 25, 0) 10px
+      rgba(var(--mu-shadow-rgb), 0.16) 0,
+      rgba(var(--mu-shadow-rgb), 0.10) 2px,
+      rgba(var(--mu-shadow-rgb), 0.045) 5px,
+      rgba(var(--mu-shadow-rgb), 0) 9px
     );
 }
 
-/* South wall: the room lies on the opposite side. */
+/* South wall: darkest at the south edge, fading north into the room. */
+
 .mu-floor-shadow-south {
   background-image:
     linear-gradient(
       0deg,
-      rgba(45, 34, 25, .26) 0px,
-      rgba(45, 34, 25, .20) 1px,
-      rgba(45, 34, 25, .12) 3px,
-      rgba(45, 34, 25, .055) 6px,
-      rgba(45, 34, 25, .018) 8px,
-      rgba(45, 34, 25, 0) 10px
+      rgba(var(--mu-shadow-rgb), 0.16) 0,
+      rgba(var(--mu-shadow-rgb), 0.10) 2px,
+      rgba(var(--mu-shadow-rgb), 0.045) 5px,
+      rgba(var(--mu-shadow-rgb), 0) 9px
     );
 }
 
-/* West wall: the room lies to the right of the wall. */
+/* West wall: darkest at the west edge, fading east into the room. */
+
 .mu-floor-shadow-west {
   background-image:
     linear-gradient(
       90deg,
-      rgba(45, 34, 25, .26) 0px,
-      rgba(45, 34, 25, .20) 1px,
-      rgba(45, 34, 25, .12) 3px,
-      rgba(45, 34, 25, .055) 6px,
-      rgba(45, 34, 25, .018) 8px,
-      rgba(45, 34, 25, 0) 10px
+      rgba(var(--mu-shadow-rgb), 0.16) 0,
+      rgba(var(--mu-shadow-rgb), 0.10) 2px,
+      rgba(var(--mu-shadow-rgb), 0.045) 5px,
+      rgba(var(--mu-shadow-rgb), 0) 9px
     );
 }
 
-/* East wall: the room lies to the left of the wall. */
+/* East wall: darkest at the east edge, fading west into the room. */
+
 .mu-floor-shadow-east {
   background-image:
     linear-gradient(
       270deg,
-      rgba(45, 34, 25, .26) 0px,
-      rgba(45, 34, 25, .20) 1px,
-      rgba(45, 34, 25, .12) 3px,
-      rgba(45, 34, 25, .055) 6px,
-      rgba(45, 34, 25, .018) 8px,
-      rgba(45, 34, 25, 0) 10px
+      rgba(var(--mu-shadow-rgb), 0.16) 0,
+      rgba(var(--mu-shadow-rgb), 0.10) 2px,
+      rgba(var(--mu-shadow-rgb), 0.045) 5px,
+      rgba(var(--mu-shadow-rgb), 0) 9px
     );
 }
 
-/* Plinth shadows: soften the ends so they don't stop in square lines, and
-   run a touch lighter where they'd meet a baseboard shadow. */
+/* Plinth shadows are localized. Fade their ends so they do not terminate
+   with visible rectangular edges. */
+
 .mu-plinth-floor-shadow {
   -webkit-mask-image:
-    linear-gradient(90deg, transparent 0, #000 8%, #000 92%, transparent 100%);
+    linear-gradient(
+      90deg,
+      transparent 0,
+      #000 8%,
+      #000 92%,
+      transparent 100%
+    );
+
   mask-image:
-    linear-gradient(90deg, transparent 0, #000 8%, #000 92%, transparent 100%);
+    linear-gradient(
+      90deg,
+      transparent 0,
+      #000 8%,
+      #000 92%,
+      transparent 100%
+    );
 }
+
 .mu-plinth-floor-shadow.mu-floor-shadow-north {
   background-image:
     linear-gradient(
       180deg,
-      rgba(45, 34, 25, .20) 0px,
-      rgba(45, 34, 25, .14) 2px,
-      rgba(45, 34, 25, .07) 5px,
-      rgba(45, 34, 25, .025) 8px,
-      rgba(45, 34, 25, 0) 12px
+      rgba(48, 42, 36, 0.15) 0,
+      rgba(48, 42, 36, 0.09) 2px,
+      rgba(48, 42, 36, 0.035) 5px,
+      rgba(48, 42, 36, 0) 9px
     );
 }
+
 .mu-plinth-floor-shadow.mu-floor-shadow-south {
   background-image:
     linear-gradient(
       0deg,
-      rgba(45, 34, 25, .20) 0px,
-      rgba(45, 34, 25, .14) 2px,
-      rgba(45, 34, 25, .07) 5px,
-      rgba(45, 34, 25, .025) 8px,
-      rgba(45, 34, 25, 0) 12px
+      rgba(48, 42, 36, 0.15) 0,
+      rgba(48, 42, 36, 0.09) 2px,
+      rgba(48, 42, 36, 0.035) 5px,
+      rgba(48, 42, 36, 0) 9px
     );
 }
 
-/* A frosted-glass skylight: luminous panes in a mullion grid, set in a
-   plaster margin (the border). The glass is the room's light source, so it
-   stays the brightest surface in the museum. */
+.mu-plinth-floor-shadow.mu-floor-shadow-west {
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(48, 42, 36, 0.15) 0,
+      rgba(48, 42, 36, 0.09) 2px,
+      rgba(48, 42, 36, 0.035) 5px,
+      rgba(48, 42, 36, 0) 9px
+    );
+}
+
+.mu-plinth-floor-shadow.mu-floor-shadow-east {
+  background-image:
+    linear-gradient(
+      270deg,
+      rgba(48, 42, 36, 0.15) 0,
+      rgba(48, 42, 36, 0.09) 2px,
+      rgba(48, 42, 36, 0.035) 5px,
+      rgba(48, 42, 36, 0) 9px
+    );
+}
+
+/* =========================================================================
+   CEILING AND SKYLIGHT
+   ========================================================================= */
+
 .mu-ceil {
   background:
-    repeating-linear-gradient(90deg, #c6bfae 0 5px, transparent 5px 95px),
-    repeating-linear-gradient(0deg, #c6bfae 0 5px, transparent 5px 95px),
-    linear-gradient(90deg, #faf8f0, #f2efe3);
+    repeating-linear-gradient(
+      90deg,
+      #c6bfae 0 5px,
+      transparent 5px 95px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      #c6bfae 0 5px,
+      transparent 5px 95px
+    ),
+    linear-gradient(
+      90deg,
+      #faf8f0,
+      #f2efe3
+    );
+
   border: 60px solid #e9e4d6;
-  /* the glass sits recessed in its plaster margin — shadow the well's edge */
-  box-shadow: inset 0 0 26px 4px rgba(112, 104, 90, .38);
+
+  box-shadow:
+    inset 0 0 26px 4px rgba(112, 104, 90, 0.38);
 }
 
-/* Walls in a warm light charcoal, sampled from the reference doorway photo;
-   side walls a shade deeper. A large skylight is an area source, so the
-   falloff is broad and subtle, not a directional wash. Pixel stops, not
-   percents: every wall piece's top edge sits at the ceiling whatever its
-   height, so the pieces always agree. */
+/* =========================================================================
+   WALLS
+   ========================================================================= */
+
+/* The reference architecture uses a restrained warm gray. The vertical
+   change is broad and subtle, consistent with diffuse overhead illumination. */
+
 .mu-wall {
-  background:
+  background-color: var(--mu-wall-front-mid);
+
+  background-image:
     linear-gradient(
       180deg,
-      #aaa19a 0,
-      #a59c95 95px,
-      #a09790 240px,
-      #9d948d 100%
+      var(--mu-wall-front-top) 0,
+      #b3b0aa 110px,
+      var(--mu-wall-front-mid) 270px,
+      var(--mu-wall-front-bottom) 100%
     );
 }
+
+/* Side walls receive slightly less indirect light. */
+
 .mu-wall.mu-w-ew {
-  background:
+  background-color: var(--mu-wall-side-mid);
+
+  background-image:
     linear-gradient(
       180deg,
-      #a19891 0,
-      #9d948d 95px,
-      #978e87 240px,
-      #958c85 100%
+      var(--mu-wall-side-top) 0,
+      #aaa7a1 110px,
+      var(--mu-wall-side-mid) 270px,
+      var(--mu-wall-side-bottom) 100%
     );
 }
 
-/* -------------------------------------------------------------------------
-   THE DOORWAY ASSEMBLY
+/* =========================================================================
+   DOORWAY REVEALS
 
-   One constructed object: deep reveals describing the wall's thickness, ONE
-   continuous casing piece per side, one head casing between square corner
-   blocks, a shallow plinth at each casing foot — and, when the doorway is
-   closed, a leaf behind the jamb. No stacked bands, no repeated shadows:
-   only the head casing and the projecting blocks cast noticeably downward.
-   ------------------------------------------------------------------------- */
-
-/* Deep museum jamb: painted surfaces inside the opening — slightly darker
-   than the wall (less skylight, more occlusion), not decorative moulding. */
+   Reveals describe the thickness of the wall. They are not decorative
+   moulding and therefore receive no raised casing shadow.
+   ========================================================================= */
 
 .mu-jamb-reveal {
-  background-color: #89817a;
+  background-color: var(--mu-reveal-middle);
   box-shadow: none;
 }
 
-/* Left and right reveal profiles run into the wall depth, mirrored so both
-   sides darken toward the rear of the opening. */
+/* The front of the left reveal is lighter. It becomes darker toward the
+   rear of the opening. */
+
 .mu-jamb-reveal-left {
   background-image:
     linear-gradient(
       90deg,
-      #9a928b 0%,
-      #928a83 16%,
-      #89817a 48%,
-      #7e766f 78%,
-      #716a63 100%
+      var(--mu-reveal-front) 0%,
+      #9c9993 15%,
+      var(--mu-reveal-middle) 58%,
+      #85827c 82%,
+      var(--mu-reveal-back) 100%
     );
-  box-shadow: inset 0 0 4px rgba(39, 32, 27, .14);
+
+  box-shadow:
+    inset 1px 0 rgba(255, 255, 255, 0.10),
+    inset -2px 0 3px rgba(48, 44, 40, 0.16);
 }
+
+/* Mirror the reveal profile on the right. */
+
 .mu-jamb-reveal-right {
   background-image:
     linear-gradient(
       270deg,
-      #9a928b 0%,
-      #928a83 16%,
-      #89817a 48%,
-      #7e766f 78%,
-      #716a63 100%
+      var(--mu-reveal-front) 0%,
+      #9c9993 15%,
+      var(--mu-reveal-middle) 58%,
+      #85827c 82%,
+      var(--mu-reveal-back) 100%
     );
-  box-shadow: inset 0 0 4px rgba(39, 32, 27, .14);
+
+  box-shadow:
+    inset -1px 0 rgba(255, 255, 255, 0.10),
+    inset 2px 0 3px rgba(48, 44, 40, 0.16);
 }
 
-/* The soffit faces downward, away from the skylight: darker than the wall,
-   but not dramatically black. */
+/* The head reveal faces downward and therefore receives less skylight. */
+
 .mu-jamb-reveal-head {
-  background-color: #817972;
+  background-color: #8d8a84;
+
   background-image:
     linear-gradient(
       180deg,
-      rgba(255, 252, 246, .08) 0%,
-      rgba(255, 252, 246, .02) 22%,
-      rgba(47, 39, 33, .08) 66%,
-      rgba(40, 33, 28, .15) 100%
+      #a19e98 0%,
+      #999690 18%,
+      #908d87 58%,
+      #817e78 84%,
+      #74716b 100%
     );
-  box-shadow: inset 0 2px 4px rgba(35, 29, 24, .16);
+
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 -2px 3px rgba(43, 39, 35, 0.18);
 }
 
-/* Single-piece side casing: lit across its width, not top to bottom — a
-   strong vertical gradient would read cylindrical, like a second frame. */
+/* =========================================================================
+   DOORWAY CASING
+
+   Each side is one physical casing element. Narrow color changes inside
+   that element suggest a restrained, square-stepped profile without
+   creating multiple stacked frames.
+   ========================================================================= */
 
 .mu-door-casing {
-  background-color: #9a9289;
+  background-color: var(--mu-door-face);
+  background-repeat: no-repeat;
 }
+
+/* Left casing:
+   outer wall edge on the left; opening edge on the right. */
 
 .mu-door-casing-left {
   background-image:
     linear-gradient(
       90deg,
-      #7f776f 0%,
-      #928a82 8%,
-      #a69e95 18%,
-      #a29a91 48%,
-      #989087 78%,
-      #817970 100%
+
+      #85827c 0,
+      #85827c 2px,
+
+      #c0beb8 2px,
+      #c0beb8 3px,
+
+      #a29f99 3px,
+      #a29f99 7px,
+
+      #bab8b2 7px,
+      #bab8b2 8px,
+
+      #aaa8a2 8px,
+      #aaa8a2 18%,
+
+      #b2b0aa 18%,
+      #b2b0aa 20%,
+
+      #a7a59f 20%,
+      #a7a59f 73%,
+
+      #9e9b95 73%,
+      #9e9b95 82%,
+
+      #b5b3ad 82%,
+      #b5b3ad 84%,
+
+      #96938d 84%,
+      #96938d calc(100% - 3px),
+
+      var(--mu-door-edge-dark) calc(100% - 3px),
+      var(--mu-door-edge-dark) 100%
     );
+
   box-shadow:
-    inset 1px 0 rgba(255, 253, 247, .14),
-    inset -1px 0 rgba(44, 36, 30, .15),
-    0 5px 10px -8px rgba(31, 25, 20, .38);
+    1px 0 rgba(255, 255, 255, 0.09),
+    4px 5px 8px -7px rgba(38, 34, 30, 0.26);
 }
+
+/* Right casing mirrors the left. */
+
 .mu-door-casing-right {
   background-image:
     linear-gradient(
       270deg,
-      #7f776f 0%,
-      #928a82 8%,
-      #a69e95 18%,
-      #a29a91 48%,
-      #989087 78%,
-      #817970 100%
+
+      #85827c 0,
+      #85827c 2px,
+
+      #c0beb8 2px,
+      #c0beb8 3px,
+
+      #a29f99 3px,
+      #a29f99 7px,
+
+      #bab8b2 7px,
+      #bab8b2 8px,
+
+      #aaa8a2 8px,
+      #aaa8a2 18%,
+
+      #b2b0aa 18%,
+      #b2b0aa 20%,
+
+      #a7a59f 20%,
+      #a7a59f 73%,
+
+      #9e9b95 73%,
+      #9e9b95 82%,
+
+      #b5b3ad 82%,
+      #b5b3ad 84%,
+
+      #96938d 84%,
+      #96938d calc(100% - 3px),
+
+      var(--mu-door-edge-dark) calc(100% - 3px),
+      var(--mu-door-edge-dark) 100%
     );
+
   box-shadow:
-    inset -1px 0 rgba(255, 253, 247, .14),
-    inset 1px 0 rgba(44, 36, 30, .15),
-    0 5px 10px -8px rgba(31, 25, 20, .38);
+    -1px 0 rgba(255, 255, 255, 0.09),
+    -4px 5px 8px -7px rgba(38, 34, 30, 0.26);
 }
 
-/* The head casing is horizontal: top edge toward the skylight, darker to
-   its underside — and one soft downward shadow. */
+/* The head casing uses the same square profile in the horizontal direction.
+   Its lower edge is darker, and it casts one restrained downward shadow. */
+
 .mu-door-casing-head {
-  background-color: #999188;
+  background-color: var(--mu-door-face);
+
   background-image:
     linear-gradient(
       180deg,
-      #afa79e 0%,
-      #aaa299 10%,
-      #a09990 34%,
-      #958d84 68%,
-      #7c746c 91%,
-      #6c645d 100%
+
+      #85827c 0,
+      #85827c 2px,
+
+      #c1bfb9 2px,
+      #c1bfb9 3px,
+
+      #a29f99 3px,
+      #a29f99 7px,
+
+      #bbb9b3 7px,
+      #bbb9b3 8px,
+
+      #aaa8a2 8px,
+      #aaa8a2 18%,
+
+      #b3b1ab 18%,
+      #b3b1ab 20%,
+
+      #a7a59f 20%,
+      #a7a59f 73%,
+
+      #9d9a94 73%,
+      #9d9a94 82%,
+
+      #b3b1ab 82%,
+      #b3b1ab 84%,
+
+      #94918b 84%,
+      #94918b calc(100% - 3px),
+
+      #716e68 calc(100% - 3px),
+      #716e68 100%
     );
+
   box-shadow:
-    inset 0 1px rgba(255, 253, 247, .24),
-    inset 0 -1px rgba(42, 34, 29, .21),
-    0 7px 12px -8px rgba(30, 24, 20, .44);
+    0 1px rgba(255, 255, 255, 0.08),
+    0 5px 8px -7px rgba(37, 33, 29, 0.30);
 }
 
-/* Corner blocks: broad, shallow squares — thicker painted wood, not
-   miniature casing profile. They project farthest, so their soft shadow
-   may read slightly stronger. */
+/* =========================================================================
+   DOORWAY CORNER BLOCKS
+
+   Existing square geometry is retained, but its treatment is integrated
+   with the casing. The blocks should read as thicker joints, not ornaments.
+   ========================================================================= */
+
 .mu-door-corner-block {
-  background-color: #9b938a;
+  background-color: var(--mu-door-face);
+
   background-image:
     linear-gradient(
-      90deg,
-      rgba(58, 48, 40, .13) 0%,
-      rgba(255, 253, 247, .08) 10%,
-      rgba(255, 255, 255, 0) 28%,
-      rgba(255, 255, 255, 0) 72%,
-      rgba(51, 42, 35, .12) 100%
-    ),
-    linear-gradient(
       180deg,
-      #ada59c 0%,
-      #a39b92 13%,
-      #9a9289 58%,
-      #8b837a 86%,
-      #776f67 100%
+
+      #85827c 0,
+      #85827c 2px,
+
+      #c0beb8 2px,
+      #c0beb8 3px,
+
+      #a29f99 3px,
+      #a29f99 7px,
+
+      #bab8b2 7px,
+      #bab8b2 8px,
+
+      #aaa8a2 8px,
+      #aaa8a2 82%,
+
+      #96938d 82%,
+      #96938d calc(100% - 3px),
+
+      var(--mu-door-edge-dark) calc(100% - 3px),
+      var(--mu-door-edge-dark) 100%
     );
+
   box-shadow:
-    inset 1px 1px rgba(255, 253, 247, .20),
-    inset -1px -1px rgba(42, 34, 29, .17),
-    0 6px 11px -8px rgba(29, 23, 19, .46);
+    inset 0 1px rgba(255, 255, 255, 0.08),
+    0 5px 8px -7px rgba(37, 33, 29, 0.28);
 }
 
-/* Shallow plinth blocks terminating the side casing at the floor. */
+.mu-door-corner-block::before,
+.mu-door-corner-block::after {
+  display: none;
+  content: none;
+}
+
+/* =========================================================================
+   DOORWAY PLINTHS
+   ========================================================================= */
+
+/* The plinth is only a quiet termination at floor level. It should not look
+   like a separate pedestal or a fourth decorative casing component. */
+
 .mu-door-plinth {
-  background:
+  background-color: #a4a19b;
+
+  background-image:
     linear-gradient(
       180deg,
-      #a59d94 0%,
-      #999188 16%,
-      #918980 70%,
-      #746c64 100%
+
+      #b8b6b0 0,
+      #b8b6b0 1px,
+
+      #a9a7a1 1px,
+      #a9a7a1 18%,
+
+      #a3a09a 18%,
+      #a3a09a 82%,
+
+      #918e88 82%,
+      #918e88 calc(100% - 2px),
+
+      #77746e calc(100% - 2px),
+      #77746e 100%
     );
+
   box-shadow:
-    inset 1px 1px rgba(255, 253, 247, .18),
-    inset -1px -1px rgba(42, 34, 29, .18),
-    0 4px 8px -6px rgba(29, 23, 19, .42);
+    inset 1px 0 rgba(255, 255, 255, 0.08),
+    inset -1px 0 rgba(53, 49, 45, 0.08),
+    0 3px 5px -5px rgba(36, 32, 28, 0.25);
 }
 
-/* -------------------------------------------------------------------------
-   DOOR LEAF
-
-   The leaf sits behind the jamb, near the rear of the opening; its lower
-   light level establishes the doorway's depth. The museum's front door uses
-   the photographed gilded leaves instead of the painted panels.
-   ------------------------------------------------------------------------- */
+/* =========================================================================
+   CLOSED DOOR LEAVES
+   ========================================================================= */
 
 .mu-door-leaf {
   overflow: hidden;
-  background-color: #554a40;
+
+  background-color: #77736d;
+
   background-image:
     linear-gradient(
       90deg,
-      rgba(255, 249, 238, .08) 0%,
-      transparent 8%,
-      transparent 91%,
-      rgba(24, 19, 15, .18) 100%
+      rgba(255, 255, 255, 0.07) 0,
+      transparent 10%,
+      transparent 90%,
+      rgba(45, 40, 36, 0.12) 100%
     ),
     linear-gradient(
       180deg,
-      #62574c 0%,
-      #5b5046 42%,
-      #50463d 100%
+      #85817b 0,
+      #7e7a74 44%,
+      #74706a 100%
     );
+
   box-shadow:
-    inset 0 0 0 2px rgba(35, 28, 23, .44),
-    inset 10px 0 16px -14px rgba(255, 248, 235, .24),
-    inset -10px 0 16px -14px rgba(25, 20, 16, .36),
-    inset 0 12px 18px -16px rgba(255, 248, 235, .18);
+    inset 0 0 0 2px rgba(47, 42, 38, 0.24),
+    inset 8px 0 12px -12px rgba(255, 255, 255, 0.16),
+    inset -8px 0 12px -12px rgba(36, 32, 28, 0.22);
 }
+
+/* Restrained recessed panels for ordinary closed doors. */
 
 .mu-door-panel {
   left: 16px;
   width: calc(100% - 32px);
-  background-color: #52483f;
+
+  background-color: #79756f;
+
   background-image:
     linear-gradient(
       180deg,
-      rgba(255, 249, 238, .09),
-      rgba(255, 255, 255, 0) 28%,
-      rgba(29, 23, 19, .10) 100%
+      rgba(255, 255, 255, 0.06),
+      transparent 30%,
+      rgba(43, 39, 35, 0.07) 100%
     );
-  border: 3px solid rgba(40, 32, 26, .34);
+
+  border: 3px solid rgba(48, 43, 39, 0.22);
+
   box-shadow:
-    inset 0 3px 5px rgba(28, 22, 18, .26),
-    inset 2px 0 3px rgba(28, 22, 18, .18),
-    inset -2px 0 3px rgba(255, 248, 236, .05),
-    0 1px rgba(255, 250, 240, .07);
-  transform: translateZ(.4px);
+    inset 0 2px 3px rgba(42, 38, 34, 0.16),
+    0 1px rgba(255, 255, 255, 0.06);
+
+  transform: translateZ(0.4px);
 }
-.mu-door-panel-upper { top: 18px; height: 128px; }
-.mu-door-panel-lower { top: 160px; bottom: 18px; }
+
+.mu-door-panel-upper {
+  top: 18px;
+  height: 128px;
+}
+
+.mu-door-panel-lower {
+  top: 160px;
+  bottom: 18px;
+}
+
+/* Small, subdued brass handle. */
 
 .mu-door-handle {
   right: 17px;
   top: 130px;
+
   width: 7px;
   height: 7px;
+
   border-radius: 50%;
+
   background:
     radial-gradient(
       circle at 35% 30%,
@@ -431,96 +689,146 @@
       #5e431d 72%,
       #2f2110 100%
     );
-  box-shadow: 0 2px 3px rgba(25, 19, 14, .36);
+
+  box-shadow:
+    0 2px 3px rgba(25, 19, 14, 0.36);
+
   transform: translateZ(1px);
 }
 
-/* The front door: the gilded leaves, closed for good, behind room 1's
-   south-wall jamb. */
+/* Photographed front door. This rule must follow the ordinary door-leaf
+   styling so the photograph replaces all generated gradients. */
+
 .mu-door-leaf.mu-entry-door {
-  background: #2a2118 url("../img/entry-door.jpg") center / cover no-repeat;
+  background:
+    #2a2118
+    url("../img/entry-door.jpg")
+    center / cover
+    no-repeat;
 }
 
-/* -------------------------------------------------------------------------
-   BASEBOARD / CROWN
+/* Backward compatibility if an older front-door element still uses
+   .mu-front instead of .mu-door-leaf.mu-entry-door. */
 
-   The baseboard describes only its own moulding profile plus a small shadow
-   beneath its face; the floor bleed belongs to .mu-floor-shadow geometry.
-   ------------------------------------------------------------------------- */
+.mu-front {
+  background:
+    #2a2118
+    url("../img/entry-door.jpg")
+    center / cover
+    no-repeat;
+}
 
-/* Layout-neutral default; the real treatments are per member below. */
+/* =========================================================================
+   BASEBOARDS
+   ========================================================================= */
+
 .mu-trim {
-  background-color: #8d847a;
+  background-color: var(--mu-trim-face);
 }
+
+/* Flat, restrained museum baseboard. The darkest line is confined to the
+   floor contact. The actual bleed onto the parquet comes from the separate
+   .mu-floor-shadow geometry. */
 
 .mu-trim.mu-base {
-  background-color: #8d847a;
+  background-color: var(--mu-trim-face);
+
   background-image:
     linear-gradient(
       180deg,
-      #aaa197 0%,
-      #b0a79d 5%,
-      #9c9389 12%,
-      #8f867d 23%,
-      #938a81 55%,
-      #877e75 72%,
-      #71685f 89%,
-      #595149 100%
+
+      #bebcb6 0,
+      #bebcb6 1px,
+
+      #aeaca6 1px,
+      #aeaca6 13%,
+
+      #a7a59f 13%,
+      #a7a59f 78%,
+
+      #999690 78%,
+      #999690 calc(100% - 2px),
+
+      #807d77 calc(100% - 2px),
+      #807d77 100%
     );
+
   box-shadow:
-    inset 0 1px 0 rgba(255, 253, 247, .34),
-    inset 0 -2px 2px rgba(39, 32, 27, .24),
-    0 2px 4px -3px rgba(31, 25, 20, .30);
+    inset 0 1px rgba(255, 255, 255, 0.14),
+    0 2px 4px -4px rgba(38, 34, 30, 0.24);
 }
 
-/* The crown's upper edge is slightly occluded by the ceiling; below it a
-   soft skylight highlight, then a darker lower cove. Its wall shadow is
-   broad but low contrast — the skylight is a large area source. */
+/* =========================================================================
+   CROWN MOULDING
+   ========================================================================= */
+
+/* The crown remains slightly darker at the ceiling contact and underside.
+   Its wall shadow is broad and low contrast because the overhead source is
+   large and diffuse. */
+
 .mu-trim.mu-crown {
-  background-color: #978e84;
+  background-color: #aaa8a2;
+
   background-image:
     linear-gradient(
       180deg,
-      #817970 0%,
-      #a49c92 9%,
-      #b8b0a6 21%,
-      #aaa298 35%,
-      #989087 51%,
-      #8c837a 67%,
-      #756d64 84%,
-      #5d554d 100%
+
+      #8e8b85 0%,
+      #aaa8a2 8%,
+      #bbb9b3 20%,
+      #b2b0aa 34%,
+      #a6a39d 52%,
+      #999690 69%,
+      #85827c 85%,
+      #716e68 100%
     );
+
   box-shadow:
-    inset 0 1px rgba(255, 253, 247, .22),
-    inset 0 -1px rgba(38, 31, 26, .24),
-    0 10px 18px -10px rgba(29, 23, 19, .40);
+    inset 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 -1px rgba(38, 34, 30, 0.18),
+    0 9px 16px -11px rgba(35, 31, 27, 0.30);
 }
 
-/* -------------------------------------------------------------------------
+/* =========================================================================
    PICTURE FRAMES
+   ========================================================================= */
 
-   A painting: the div is the frame — a real gilded frame, photographed with
-   a transparent window (img/frame*.png), worn as a border-image: the corner
-   carving stays at the corners, the rails stretch to fit any canvas. The
-   border width (the frame's width) is set inline and must stay in step with
-   MU_FRAME in app.js (9 cm). The slice numbers are each frame's measured
-   moulding, in source pixels: top right bottom left. Shadow is drop-shadow,
-   not box-shadow, so it hugs the carving's silhouette instead of boxing it.
-   Which work wears which frame is hashed from its id in muArtEl.
-   ------------------------------------------------------------------------- */
+/* The element itself forms the frame. The transparent center of the frame
+   image exposes the child artwork. */
 
 .mu-art {
   border: solid transparent;
-  border-image: url("../img/frame1.png") 62 64 62 66 stretch;
-  filter: drop-shadow(0 10px 20px rgba(20, 15, 8, .38))
-          drop-shadow(0 3px 7px rgba(20, 15, 8, .25));
+
+  border-image:
+    url("../img/frame1.png")
+    62 64 62 66
+    stretch;
+
+  filter:
+    drop-shadow(0 10px 20px rgba(20, 15, 8, 0.38))
+    drop-shadow(0 3px 7px rgba(20, 15, 8, 0.25));
+
   backface-visibility: hidden;
   cursor: pointer;
 }
-.mu-art.mu-f2 { border-image: url("../img/frame2.png") 114 111 110 113 stretch; }
+
+.mu-art.mu-f2 {
+  border-image:
+    url("../img/frame2.png")
+    114 111 110 113
+    stretch;
+}
+
 .mu-art img {
-  width: 100%; height: 100%; object-fit: fill; display: block;
+  display: block;
+
+  width: 100%;
+  height: 100%;
+
+  object-fit: fill;
   background: #2a2622;
-  -webkit-user-drag: none; user-select: none;
+
+  -webkit-user-drag: none;
+  user-select: none;
   pointer-events: none;
 }
