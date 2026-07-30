@@ -96,11 +96,19 @@ def _display(field, old, new):
 
 
 def _parse(text):
-    try:
-        data = json.loads(text or "")
-    except ValueError:
-        raise ValueError("That isn't valid JSON. Paste a list like the empty "
+    if not (text or "").strip():
+        raise ValueError("Nothing to read. Paste a list like the empty "
                          "template: [ { … }, { … } ].")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        # Say WHERE. The line numbers match the pasted text (and the file it
+        # was loaded from), and the classic slip — a missing comma — always
+        # trips the parser at the start of the NEXT line, so point there too.
+        hint = (" — often a missing comma at the end of line %d" % (e.lineno - 1)
+                if "delimiter" in e.msg and e.lineno > 1 else "")
+        raise ValueError("That isn't valid JSON: %s at line %d, column %d%s."
+                         % (e.msg, e.lineno, e.colno, hint))
     # Forgive the obvious wrapper: {"artists": [ … ]} means its list.
     if isinstance(data, dict) and len(data) == 1 and isinstance(next(iter(data.values())), list):
         data = next(iter(data.values()))
