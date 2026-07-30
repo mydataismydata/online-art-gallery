@@ -94,7 +94,10 @@
   --mu-wall-side-bottom: #a19e98;
 
   --mu-door-face: #aaa8a2;
-  --mu-door-edge-dark: #817e78;
+  /* The trim's innermost edge: the darkest thing on the door except the
+     soffit under the head jamb (--mu-reveal-head-*). Darker than the side
+     reveals' deepest tone (--mu-reveal-back). */
+  --mu-door-edge-dark: #68655f;
 
   --mu-reveal-front: #a09d97;
   --mu-reveal-middle: #908d87;
@@ -418,8 +421,9 @@
    The outermost step is the lightest band, near enough the wall colour to
    melt into it; its own cast shadow sits just inward of it (below on the
    head, toward the opening on the sides). Under the overhead light the
-   head's under-shadow is darker than anything down the sides — the sides
-   get only a faint feathered shade on the wall (.mu-door-wallshade).
+   head's under-shadow is darker than anything down the sides — the wall
+   around the trim carries only a faint ring of shade (.mu-door-wallshade),
+   and the trim's innermost edge is the darkest thing here save the soffit.
    ========================================================================= */
 
 .mu-door-casing {
@@ -561,13 +565,44 @@
     drop-shadow(0 9px 6px rgba(31, 28, 25, 0.18));
 }
 
-/* The faint feathered shade the side casings lay on the wall itself:
-   darkest against the trim, feathering away from it, strongest near the
-   floor and gone well before the top — far lighter than the head's
+/* The faint feathered shade the trim lays on the wall around it: darkest
+   against the trim, feathering away from it. Down the sides it is strongest
+   near the floor and thins on the way up — but never to nothing: at the top
+   it settles to exactly the very faint level of the shade above the head,
+   so the whole ring reads as one light. Far lighter than the head's
    under-shadow. Sized and placed by muDoorway. */
 
 .mu-door-wallshade {
   pointer-events: none;
+}
+
+/* Above the head: the faintest member, feathering upward and out at its
+   ends. Its bottom-edge strength (0.035) is the level the side shades hold
+   when they arrive at the top. */
+
+.mu-door-wallshade-top {
+  background-image:
+    linear-gradient(
+      0deg,
+      rgba(40, 36, 32, 0.035) 0,
+      rgba(40, 36, 32, 0) 100%
+    );
+  -webkit-mask-image:
+    linear-gradient(
+      90deg,
+      transparent 0,
+      #000 26px,
+      #000 calc(100% - 26px),
+      transparent 100%
+    );
+  mask-image:
+    linear-gradient(
+      90deg,
+      transparent 0,
+      #000 26px,
+      #000 calc(100% - 26px),
+      transparent 100%
+    );
 }
 
 .mu-door-wallshade-left {
@@ -590,22 +625,24 @@
     );
 }
 
+/* 0.35 at the top × the 0.10 gradient = 0.035 — the top shade's level. */
+
 .mu-door-wallshade-left,
 .mu-door-wallshade-right {
   -webkit-mask-image:
     linear-gradient(
       180deg,
-      transparent 0,
-      rgba(0, 0, 0, 0.3) 45%,
-      rgba(0, 0, 0, 0.85) 80%,
+      rgba(0, 0, 0, 0.35) 0,
+      rgba(0, 0, 0, 0.45) 35%,
+      rgba(0, 0, 0, 0.7) 65%,
       #000 100%
     );
   mask-image:
     linear-gradient(
       180deg,
-      transparent 0,
-      rgba(0, 0, 0, 0.3) 45%,
-      rgba(0, 0, 0, 0.85) 80%,
+      rgba(0, 0, 0, 0.35) 0,
+      rgba(0, 0, 0, 0.45) 35%,
+      rgba(0, 0, 0, 0.7) 65%,
       #000 100%
     );
 }

@@ -3774,12 +3774,17 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, H, wallCls) {
       MU_CASE_W, oh + MU_CASE_W, muT(cx2, -(oh + MU_CASE_W) / 2, FZ + 2, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-head",
       ow + 2 * MU_CASE_W, MU_CASE_W, muT(0, -(oh + MU_CASE_W / 2), FZ + 2, "")));
-    // The casing's shade on the wall beside it, between wall and casing
-    // planes: abuts each outer edge, fades upward (museum-room.css).
+    // The casing's shade on the wall around it, between wall and casing
+    // planes: a strip abutting each outer edge, and the faintest one above
+    // the head — wide enough to cap the side strips, whose upward fade
+    // arrives at exactly its level (museum-room.css).
     f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-left", 26, oh + MU_CASE_W,
       muT(-(ow / 2 + MU_CASE_W + 13), -(oh + MU_CASE_W) / 2, FZ + 1, "")));
     f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-right", 26, oh + MU_CASE_W,
       muT(ow / 2 + MU_CASE_W + 13, -(oh + MU_CASE_W) / 2, FZ + 1, "")));
+    f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-top",
+      ow + 2 * MU_CASE_W + 52, 22,
+      muT(0, -(oh + MU_CASE_W + 11), FZ + 1, "")));
     f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(-cx2, -15, FZ + 3, "")));
     f.appendChild(muEl("mu-door-plinth", MU_CORNER, 30, muT(cx2, -15, FZ + 3, "")));
     // floor contact under each plinth: a horizontal fade, wall at local -z
