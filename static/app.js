@@ -3683,14 +3683,17 @@ function muBuildRoom(g, i, geoms, world) {
       room.appendChild(muEl("mu-wall " + w.cls, w.len, H, muT(w.cx, -H / 2, w.cz, rot)));
       return;
     }
-    // A doored wall: the exit passage, or room 1's closed front door. The
-    // shared exit wall spans the wider of the two rooms it separates. A
+    // A doored wall: the exit passage, or room 1's closed front door. A
     // doored wall has real thickness — its faces sit at the reveal's edges,
     // so the reveal ends flush with them instead of finning into the room.
+    // Each face spans ITS room's wall, not the wider of the two: a shared
+    // span would overhang the narrower room's corners on both faces, and the
+    // overhang can knife straight through whatever third room the plan has
+    // put beyond that corner.
     const ow = front ? MU_FRONT_W : MU_DOOR_W;
     const oh = front ? MU_FRONT_H : MU_DOOR_H;
-    const span = front ? w.len : Math.max(w.len,
-      w.id === "e" || w.id === "w" ? geoms[i + 1].D : geoms[i + 1].W);
+    const nlen = front ? 0 :
+      (w.id === "e" || w.id === "w" ? geoms[i + 1].D : geoms[i + 1].W);
     const wrap = document.createElement("div");
     wrap.className = "mu-doorg";
     wrap.style.transform =
@@ -3698,7 +3701,7 @@ function muBuildRoom(g, i, geoms, world) {
     // The front door faces the room alone (its far side is the outside
     // world); a passage is dressed on both faces.
     muDoorway(wrap, ow, oh, front ? [0] : [0, 180], front ? "mu-entry-door" : null,
-      span, H, w.cls);
+      front ? [w.len] : [w.len, nlen], H, w.cls);
     room.appendChild(wrap);
   });
   muTrimRoom(room, i, g);
@@ -3714,7 +3717,7 @@ function muBuildRoom(g, i, geoms, world) {
    so the same assembly serves every wall and both sides of it. A closed
    doorway gets a leaf at the back of the reveal (the front door's gilded
    leaves ride in as a class). */
-function muDoorway(wrap, ow, oh, faces, leafCls, span, H, wallCls) {
+function muDoorway(wrap, ow, oh, faces, leafCls, spans, H, wallCls) {
   const cx2 = ow / 2 + MU_CASE_W / 2;      // casing / block / plinth centreline
   const FZ = MU_REVEAL / 2;                // each face sits at the reveal's edge
   wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-left", MU_REVEAL, oh,
@@ -3727,8 +3730,8 @@ function muDoorway(wrap, ow, oh, faces, leafCls, span, H, wallCls) {
     wrap.appendChild(muEl("mu-door-leaf " + leafCls, ow - 4, oh - 4,
       muT(0, -(oh - 4) / 2, -(FZ + 0.2), "")));
   }
-  const side = (span - ow) / 2, scx = ow / 2 + side / 2;
-  faces.forEach((deg) => {
+  faces.forEach((deg, fi) => {
+    const side = (spans[fi] - ow) / 2, scx = ow / 2 + side / 2;
     const f = document.createElement("div");
     f.className = "mu-doorg";
     f.style.transform = "rotateY(" + deg + "deg)";
