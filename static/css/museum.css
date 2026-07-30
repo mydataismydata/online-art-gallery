@@ -31,8 +31,10 @@ body.mu-open { overflow: hidden; }
 .mu-roomg { position: absolute; transform-style: preserve-3d; }
 .mu-roomg.mu-hidden { display: none; }
 /* An exit wall and its doorway, built once and turned to whichever wall the
-   next room opens from. */
+   next room opens from. It lives at stage level — the wall belongs to two
+   rooms at once — and culls on its own (see muCull). */
 .mu-doorg { position: absolute; transform-style: preserve-3d; }
+.mu-doorg.mu-hidden { display: none; }
 
 /* The building itself — floors, ceiling, walls, doorway trim, the front door
    and the picture frames — lives in museum-room.css. This file keeps the

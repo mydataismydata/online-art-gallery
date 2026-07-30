@@ -3527,12 +3527,18 @@ function muRoomSegs(g) {
       return;
     }
     const ow = front ? MU_FRONT_W : MU_DOOR_W;
-    const sl = (w.len - ow) / 2, o = (ow + sl) / 2;
     const [ax, az] = muWallAxis(w.rot);
-    [-1, 1].forEach((s) => segs.push({
-      wall: w.id, len: sl, cap: sl - 2 * MU_MARGIN, rot: w.rot,
-      cx: w.cx + s * ax * o, cz: w.cz + s * az * o, off: off,
-    }));
+    // The entry doorway sits wherever the room's dodge left it (the exit and
+    // the front door are always the room's own centre): shoulders differ.
+    const dt = w.id === g.entry ? (g.entryOff || 0) * (ax + az) : 0;
+    [[-w.len / 2, dt - ow / 2], [dt + ow / 2, w.len / 2]].forEach(([t0, t1]) => {
+      const sl = t1 - t0, o = (t0 + t1) / 2;
+      if (sl <= 0) return;
+      segs.push({
+        wall: w.id, len: sl, cap: sl - 2 * MU_MARGIN, rot: w.rot,
+        cx: w.cx + ax * o, cz: w.cz + az * o, off: off,
+      });
+    });
   });
   return segs;
 }
@@ -3694,15 +3700,24 @@ function muBuildRoom(g, i, geoms, world) {
     const oh = front ? MU_FRONT_H : MU_DOOR_H;
     const nlen = front ? 0 :
       (w.id === "e" || w.id === "w" ? geoms[i + 1].D : geoms[i + 1].W);
+    // Where the next room's centre sits along this wall, in the wrap's own x
+    // (the face turned to that room flips x, so its span flips with it) — a
+    // room slid to dodge an earlier one carries its wall along.
+    const [ax, az] = muWallAxis(w.rot);
+    const eo = front ? 0 : (geoms[i + 1].entryOff || 0) * (ax + az);
     const wrap = document.createElement("div");
     wrap.className = "mu-doorg";
+    // The wrap lives at stage level, not in the room: the wall it draws is
+    // two rooms' wall at once, and it must survive either room's culling.
     wrap.style.transform =
-      "translate3d(" + w.cx + "px,0px," + w.cz + "px) rotateY(" + w.rot + "deg)";
+      "translate3d(" + (g.cx + w.cx) + "px,0px," + (g.cz + w.cz) + "px) rotateY(" +
+      w.rot + "deg)";
     // The front door faces the room alone (its far side is the outside
     // world); a passage is dressed on both faces.
     muDoorway(wrap, ow, oh, front ? [0] : [0, 180], front ? "mu-entry-door" : null,
-      front ? [w.len] : [w.len, nlen], H, w.cls);
-    room.appendChild(wrap);
+      front ? [w.len] : [w.len, nlen], front ? [0] : [0, eo], H, w.cls);
+    world.appendChild(wrap);
+    MU.wraps.push({ el: wrap, a: i, b: front ? i : i + 1 });
   });
   muTrimRoom(room, i, g);
   world.appendChild(room);
@@ -3717,7 +3732,7 @@ function muBuildRoom(g, i, geoms, world) {
    so the same assembly serves every wall and both sides of it. A closed
    doorway gets a leaf at the back of the reveal (the front door's gilded
    leaves ride in as a class). */
-function muDoorway(wrap, ow, oh, faces, leafCls, spans, H, wallCls) {
+function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, H, wallCls) {
   const cx2 = ow / 2 + MU_CASE_W / 2;      // casing / block / plinth centreline
   const FZ = MU_REVEAL / 2;                // each face sits at the reveal's edge
   wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-left", MU_REVEAL, oh,
@@ -3731,13 +3746,21 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, H, wallCls) {
       muT(0, -(oh - 4) / 2, -(FZ + 0.2), "")));
   }
   faces.forEach((deg, fi) => {
-    const side = (spans[fi] - ow) / 2, scx = ow / 2 + side / 2;
+    // This face's wall runs [off − span/2, off + span/2] in face-local x —
+    // off is where its room's centre sits when the room slid off the door.
+    const off = offs[fi] || 0;
+    const sw = spans[fi] / 2 - ow / 2;
+    const L = sw - off, R = sw + off;    // shoulder widths, door to wall end
     const f = document.createElement("div");
     f.className = "mu-doorg";
     f.style.transform = "rotateY(" + deg + "deg)";
     // this face's wall, flush with the reveal's edge
-    f.appendChild(muEl("mu-wall " + wallCls, side, H, muT(-scx, -H / 2, FZ, "")));
-    f.appendChild(muEl("mu-wall " + wallCls, side, H, muT(scx, -H / 2, FZ, "")));
+    if (L > 0)
+      f.appendChild(muEl("mu-wall " + wallCls, L, H,
+        muT(-(ow / 2 + L / 2), -H / 2, FZ, "")));
+    if (R > 0)
+      f.appendChild(muEl("mu-wall " + wallCls, R, H,
+        muT(ow / 2 + R / 2, -H / 2, FZ, "")));
     // A hair wider than the opening: it laps the side pieces so their meeting
     // line can't show as a seam (same colour, so the overlap is invisible).
     f.appendChild(muEl("mu-wall " + wallCls, ow + 4, H - oh,
@@ -3796,11 +3819,16 @@ function muTrimRoom(room, i, g) {
       return;
     }
     const ow = front ? MU_FRONT_W : MU_DOOR_W;
-    const sl = (w.len - ow) / 2 - MU_PLINTH;
-    if (sl <= 0) return;
-    const o = ow / 2 + MU_PLINTH + sl / 2;
     const [ax, az] = muWallAxis(w.rot);
-    [-1, 1].forEach((s) => base(sl, cx + s * ax * o, cz + s * az * o));
+    // baseboards break where the casing lands — around the doorway wherever
+    // the room's dodge left it (only an entry door ever sits off-centre)
+    const dt = w.id === g.entry ? (g.entryOff || 0) * (ax + az) : 0;
+    [[-w.len / 2, dt - ow / 2 - MU_PLINTH],
+     [dt + ow / 2 + MU_PLINTH, w.len / 2]].forEach(([t0, t1]) => {
+      const sl = t1 - t0, o = (t0 + t1) / 2;
+      if (sl <= 0) return;
+      base(sl, cx + ax * o, cz + az * o);
+    });
   });
 }
 
@@ -3864,6 +3892,7 @@ function muBuild(museum) {
   MU.world.appendChild(stage);
   MU.stage = stage;
   MU.rooms = [];
+  MU.wraps = [];
   MU.arts = [];
   const rooms = museum.rooms.filter((r) => r.works.length);
   // Each room's works, in hang order — the walk a room hands the viewer when a
@@ -3900,29 +3929,55 @@ function muBuild(museum) {
     geoms.push(g);
   });
   // Chain the rooms through their doorways: each room sits beyond whichever
-  // wall of the previous one holds the door, centred on it. Every room's
-  // planes are built about its own centre; the group transform places it.
+  // wall of the previous one holds the door, centred on it — unless sitting
+  // centred would run it into a room already placed (a deep room can spill
+  // back across an earlier boundary). Then it slides along the shared wall
+  // until it clears, and carries the doorway off-centre in its entry wall
+  // (g.entryOff, door minus room centre) for everything built against it.
+  // Placement runs first for the whole chain: a doored wall is dressed on
+  // both faces, so building room i needs room i+1's slide already known.
   const DIRW = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
   let cx = 0, cz = 0;
   geoms.forEach((g, i) => {
-    let door = null;
+    g.entryOff = 0;
     if (i > 0) {
       const p = geoms[i - 1];
       const u = DIRW[p.exit];
       const ePrev = (u[0] ? p.W : p.D) / 2;
       const eThis = (u[0] ? g.W : g.D) / 2;
-      door = { x: cx + u[0] * ePrev, z: cz + u[1] * ePrev, u: u };
-      cx = door.x + u[0] * eThis;
-      cz = door.z + u[1] * eThis;
+      g.door = { x: cx + u[0] * ePrev, z: cz + u[1] * ePrev, u: u };
+      cx = g.door.x + u[0] * eThis;
+      cz = g.door.z + u[1] * eThis;
+      const latX = !u[0];                // travelling n/s, the slide is east-west
+      const lim = (latX ? g.W : g.D) / 2 -
+                  (MU_DOOR_W / 2 + MU_PLINTH + MU_CORNER + 20);
+      const hits = (s) => geoms.slice(0, i).some((o) =>
+        Math.abs((latX ? cx + s : cx) - o.cx) < g.W / 2 + o.W / 2 - 1 &&
+        Math.abs((latX ? cz : cz + s) - o.cz) < g.D / 2 + o.D / 2 - 1);
+      let s = 0;
+      if (lim > 0 && hits(0)) {
+        for (let step = 20; step <= lim; step += 20) {
+          if (!hits(step)) { s = step; break; }
+          if (!hits(-step)) { s = -step; break; }
+        }
+      }
+      if (s) {
+        if (latX) cx += s; else cz += s;
+        g.entryOff = -s;
+      }
     }
+    g.cx = cx; g.cz = cz;
+  });
+  geoms.forEach((g, i) => {
     const el = muBuildRoom(g, i, geoms, MU.stage);
-    el.style.transform = "translate3d(" + cx + "px,0px," + cz + "px)";
-    MU.place = { cx: cx, cz: cz };
+    el.style.transform = "translate3d(" + g.cx + "px,0px," + g.cz + "px)";
+    MU.place = { cx: g.cx, cz: g.cz };
     muHangRoom(g, el, i);
     MU.place = null;
-    MU.rooms.push({ cx: cx, cz: cz, hx: g.W / 2, hz: g.D / 2,
+    MU.rooms.push({ cx: g.cx, cz: g.cz, hx: g.W / 2, hz: g.D / 2,
                     doors: [], layout: g.layout, el: el });
-    if (door) {
+    if (g.door) {
+      const door = g.door;
       const edge = Math.abs(door.u[1]) > 0.5 ? "z" : "x";
       const at = edge === "z" ? door.z : door.x;
       const c = edge === "z" ? door.x : door.z;
@@ -3948,6 +4003,10 @@ function muBuild(museum) {
 function muCull() {
   MU.rooms.forEach((r, i) =>
     r.el.classList.toggle("mu-hidden", Math.abs(i - MU.ri) > 1));
+  // A doored wall serves two rooms: it stays up while either is near, or a
+  // visible room's far wall would vanish with its culled neighbour.
+  MU.wraps.forEach((w) =>
+    w.el.classList.toggle("mu-hidden", MU.ri < w.a - 1 || MU.ri > w.b + 1));
 }
 
 function muRoomLabel() {
@@ -4191,6 +4250,7 @@ function muTeardown() {
   MU.vp = MU.world = MU.near = MU.glide = null;
   MU.keys = {};
   MU.rooms = [];
+  MU.wraps = [];
   MU.arts = [];
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (screen.orientation && screen.orientation.unlock) {
