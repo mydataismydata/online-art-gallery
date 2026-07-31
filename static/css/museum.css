@@ -125,32 +125,9 @@ body.mu-open { overflow: hidden; }
 }
 .mu-x:hover { color: var(--display); }
 
-/* The wall label for whatever you've stopped in front of. */
-.mu-placard {
-  position: absolute; left: 50%; bottom: 34px; transform: translate(-50%, 14px);
-  max-width: min(560px, 80vw);
-  padding: 12px 22px 13px;
-  background: rgba(23, 19, 16, .82); border: 1px solid var(--hair);
-  text-align: center;
-  opacity: 0; transition: opacity .3s ease, transform .3s ease;
-  pointer-events: none;
-}
-.mu-placard.show { opacity: 1; transform: translate(-50%, 0); }
-.mu-placard .mu-pl-t {
-  display: block; font: italic 400 17px/1.35 var(--serif); color: var(--display);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.mu-placard .mu-pl-m {
-  display: block; margin-top: 3px;
-  font: 400 11.5px var(--sans); color: var(--dim);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.mu-placard .mu-pl-open {
-  display: none; margin-top: 6px;
-  font: 600 9.5px var(--sans); letter-spacing: .2em; text-transform: uppercase;
-  color: var(--gold);
-}
-.mu-placard .mu-pl-open.on { display: block; }
+/* Nothing runs across the bottom of the walk: a caption there stood over the
+   floor markers, and the painting's own placard says it all once opened. The
+   wall labels beside each piece are the museum's own signage. */
 
 .mu-hint {
   position: absolute; right: 18px; bottom: 16px;

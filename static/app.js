@@ -3439,7 +3439,7 @@ const MU = {
   active: false, raf: 0, rooms: [], arts: [], ri: 0,
   cam: { x: 0, z: 0, yaw: 0, zoom: 1 },
   vel: { f: 0, t: 0 }, keys: {}, glide: null, place: null,
-  vp: null, world: null, baseP: 900, last: 0, nearTs: 0, near: null,
+  vp: null, world: null, baseP: 900, last: 0, nearTs: 0,
   pinch: null, points: new Map(),
   clip: null, drag: null, tap: null, targets: [],
 };
@@ -4126,9 +4126,10 @@ function muApply() {
     "px," + (-cam.z * MU_SS).toFixed(1) + "px)";
 }
 
-/* The wall label for wherever you've stopped: the nearest painting you're
-   actually facing, from its front. Checked a few times a second, not per
-   frame — reading pace, not physics pace. */
+/* Whichever painting you've walked up to and are actually facing, from its
+   front — and once you're close, the full image quietly replaces the thumbnail
+   on the wall. Checked a few times a second, not per frame: nobody crosses a
+   room in a sixtieth of a second. */
 function muNearest(ts) {
   if (ts - MU.nearTs < 160) return;
   MU.nearTs = ts;
@@ -4149,29 +4150,6 @@ function muNearest(ts) {
     best.hi = true;                    // walk up close and the full image loads
     best.img.src = viewSrc(best.work);
   }
-  const el = document.getElementById("mu-placard");
-  if (!el) return;
-  if (best !== MU.near) {
-    MU.near = best;
-    if (!best) { el.classList.remove("show"); }
-    else {
-      const w = best.work;
-      const size = cmDims(w) || (best.est ? "size not recorded" : "");
-      el.innerHTML =
-        '<span class="mu-pl-t">' + esc(w.title || "Untitled") + "</span>" +
-        '<span class="mu-pl-m">' +
-        esc([w.artist, w.date || w.year, w.medium, size].filter(Boolean).join(" · ")) +
-        "</span>" +
-        '<span class="mu-pl-open">' +
-        (MU.touch ? "tap the painting to open it" : "click the painting to open it") +
-        "</span>";
-      el.classList.add("show");
-    }
-  }
-  // The cue only shows once you're actually standing before the piece — the
-  // same test the click uses, so the chip never promises what a click won't do.
-  const cue = el.querySelector(".mu-pl-open");
-  if (cue) cue.classList.toggle("on", !!(best && muStandingBefore(best)));
 }
 
 /* Where the camera stands to look at a painting properly: square-on, at a
@@ -4376,7 +4354,7 @@ function muTeardown() {
   window.removeEventListener("blur", muBlur);
   window.removeEventListener("resize", muResize);
   document.body.classList.remove("mu-open");
-  MU.vp = MU.world = MU.clip = MU.near = MU.glide = null;
+  MU.vp = MU.world = MU.clip = MU.glide = null;
   MU.keys = {};
   MU.drag = MU.tap = MU.pinch = null;
   MU.points.clear();
@@ -4423,9 +4401,8 @@ async function museumView() {
           '<span class="mu-sp"></span>' + arrange +
           '<a class="mu-x" href="#/" aria-label="Leave the museum">✕</a>' +
         "</div>" +
-        // On a phone the caption sat across the bottom of a screen the painting
-        // had barely filled to begin with. The walk is the label there.
-        (touch ? "" : '<div class="mu-placard" id="mu-placard"></div>') +
+        // No caption across the bottom: it sat over the floor markers, and the
+        // placard on the opened painting already says all of it.
         '<div class="mu-hint">drag the room to walk · ↑ ↓ ← → · scroll to zoom · ' +
         "click a painting to approach, again to open</div>" +
       "</div>" +
@@ -4435,7 +4412,6 @@ async function museumView() {
   MU.vp = $("#mu-vp");
   MU.world = $("#mu-world");
   MU.clip = $("#mu-clip");
-  MU.touch = touch;
   MU.active = true;
   document.body.classList.add("mu-open");
   muResize();
