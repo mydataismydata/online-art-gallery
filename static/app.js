@@ -3551,19 +3551,24 @@ function muRoomSegs(g) {
   return segs;
 }
 
-/* Hand the slots to the walls. Pinned slots claim their compass wall first —
-   its segments in walk order, the emptier one when neither has room (the fit
-   loop grows the room until everything holds). The rest divide the remaining
-   wall proportionally, in walk order, never more than a wall can hold;
-   anything a narrow segment must decline falls through to the next wall.
-   Each wall then reads in room order, pins and drifters interleaved. */
+/* Hand the slots to the walls. Works given a wall claim it first, and they
+   spread across the whole of it: a doorway cuts a wall into two shoulders,
+   and naming the wall means the wall, not its left half — each piece goes to
+   whichever shoulder is emptiest for its own size, so an unequal pair fills
+   in proportion. When neither has room the fuller one still takes it (the fit
+   loop then grows the room until everything holds). The rest divide the
+   remaining wall proportionally, in walk order, never more than a wall can
+   hold; anything a narrow segment must decline falls through to the next
+   wall. Each wall then reads in room order, the two kinds interleaved. */
 function muDistribute(slots, segs, gap) {
   segs.forEach((seg) => { seg.slots = []; seg.used = 0; });
   const width = (seg, s) => s.w + (seg.slots.length ? gap : 0);
+  const load = (seg) => seg.used / Math.max(1, seg.cap);
   slots.filter((s) => s.pin).forEach((s) => {
     const wall = segs.filter((g) => g.wall === s.pin);
-    const seg = wall.find((g) => g.used + width(g, s) <= g.cap) ||
-                wall.reduce((a, b) => (a.used <= b.used ? a : b));
+    const room = wall.filter((g) => g.used + width(g, s) <= g.cap);
+    const seg = (room.length ? room : wall).reduce((a, b) =>
+      (load(a) <= load(b) ? a : b));
     seg.used += width(seg, s);
     seg.slots.push(s);
   });
