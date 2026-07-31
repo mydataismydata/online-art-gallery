@@ -17,20 +17,20 @@
   .artist-title h1 { font-size: 38px; }
   .pagehead h1 { font-size: 32px; }
   .vnav { width: 54px; font-size: 34px; }
-  /* The placard used to sit as a card over the lower painting, which on a phone
-     meant it hid most of the work. Full screen instead, but on frosted glass —
-     the painting stays visible as a soft wash behind readable ink. */
-  /* Scoped to #placard, the viewer's own label — the tile "i" opens the same
-     card in a centred modal, which shouldn't go full screen. */
-  #placard { left: 0; right: 0; top: 0; bottom: 0; width: auto; max-width: none; }
+  /* The placard takes the bottom half of the screen, exactly: as a card it hid
+     most of the painting, and full screen it hid all of it. Half leaves the
+     work whole above the reading.
+     Scoped to #placard, the viewer's own label — the tile "i" opens the same
+     card in a centred modal, which shouldn't be pinned to the bottom. */
+  #placard { left: 0; right: 0; top: 50%; bottom: 0; width: auto; max-width: none; }
   #placard .pl-card {
     height: 100%; max-height: none;
-    background: rgba(241, 234, 219, .84);
+    background: rgba(241, 234, 219, .92);
     -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
-    padding: calc(26px + env(safe-area-inset-top, 0px)) 22px
-             calc(24px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -18px 50px rgba(0, 0, 0, .5);
+    padding: 22px 22px calc(20px + env(safe-area-inset-bottom, 0px));
   }
-  #placard .pl-close { top: calc(12px + env(safe-area-inset-top, 0px)); }
+  #placard .pl-close { top: 10px; }
   #plpill { left: 16px; bottom: 16px; }
   #vfilm { display: none; }
 }

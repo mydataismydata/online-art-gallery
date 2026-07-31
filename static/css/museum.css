@@ -13,7 +13,9 @@
 }
 body.mu-open { overflow: hidden; }
 
-.mu-clip { position: absolute; inset: 0; overflow: hidden; }
+/* The scene is the control: take hold of a wall or the floor and drag. */
+.mu-clip { position: absolute; inset: 0; overflow: hidden; cursor: grab; }
+.mu-clip:active { cursor: grabbing; }
 .mu-vp {
   position: absolute; inset: 0;
   perspective: 900px;                            /* rewritten per frame by zoom */
@@ -39,6 +41,40 @@ body.mu-open { overflow: hidden; }
 /* The building itself — floors, ceiling, walls, doorway trim, the front door
    and the picture frames — lives in museum-room.css. This file keeps the
    walk's scaffolding and chrome, the placards, and the arrange screen. */
+
+/* The one destination a tap offers: a disc on the floor before each doorway,
+   chevron pointing through, that carries you to the middle of the room
+   beyond. Everywhere else you walk. Drawn in world centimetres like the
+   doorway itself, and only ever shown in the room it stands in (muCull). */
+.mu-target {
+  position: absolute; left: 0; top: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%,
+      rgba(252, 249, 242, .26) 0 38%,
+      rgba(252, 249, 242, .52) 38% 48%,
+      rgba(252, 249, 242, .20) 48% 58%,
+      rgba(252, 249, 242, 0) 60%);
+  cursor: pointer;
+  /* Pale on a pale floor needs its own edge to be found at all. */
+  filter: drop-shadow(0 0 5px rgba(46, 36, 22, .5));
+  animation: mu-target-beat 3.2s ease-in-out infinite;
+}
+.mu-target.mu-hidden { display: none; }
+.mu-target-arrow {
+  position: absolute; left: 50%; top: 24px;
+  width: 26px; height: 26px; margin-left: -13px;
+  border-top: 6px solid rgba(255, 253, 248, .95);
+  border-left: 6px solid rgba(255, 253, 248, .95);
+  transform: rotate(45deg);
+}
+@keyframes mu-target-beat {
+  0%, 100% { opacity: .62; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mu-target { animation: none; opacity: .85; }
+}
 
 /* The wall placard beside each piece. Laid out ten times life-size and scaled
    (see muLabelEl), so its type stays vector-crisp when you lean in. */
@@ -122,30 +158,11 @@ body.mu-open { overflow: hidden; }
   pointer-events: none;
 }
 
-/* ---------- phones: the D-pad, and landscape only ---------- */
+/* ---------- phones: landscape only ---------- */
 
-/* The 4-way nav toggle: half-seen until touched, exactly the arrow keys. */
-.mu-dpad {
-  display: none;
-  position: absolute; left: 20px; bottom: 20px;
-  width: 168px; height: 168px;
-  opacity: .5; transition: opacity .25s;
-  pointer-events: auto;
-}
-.museum.touch .mu-dpad { display: block; }
+/* The D-pad is gone: a finger on the wall walks the room, and the marker on
+   the floor is the only button a museum needs. */
 .museum.touch .mu-hint { display: none; }
-.mu-dpad:active { opacity: .85; }
-.mu-dpad .dp {
-  position: absolute; width: 52px; height: 52px;
-  background: rgba(23, 19, 16, .78); border: 1px solid var(--hair-strong);
-  color: var(--display2); font: 400 16px var(--sans);
-  touch-action: none; cursor: pointer; padding: 0;
-}
-.mu-dpad .dp:active { background: rgba(194, 160, 97, .38); }
-.mu-dpad .dp-u { left: 58px; top: 0; }
-.mu-dpad .dp-l { left: 0; top: 58px; }
-.mu-dpad .dp-r { left: 116px; top: 58px; }
-.mu-dpad .dp-d { left: 58px; top: 116px; }
 
 /* Portrait is a corridor wall, not a museum: ask for the turn, stop rendering. */
 .mu-rotate {

@@ -3428,12 +3428,20 @@ const MU_KEYSET = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
 // pointers (phones) take a gentler factor.
 const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches) ? 2 : 3;
 
+// Walking by hand: the room follows your pointer — sideways turns you, up and
+// down walks you — on a mouse exactly as on a finger.
+const MU_DRAG_TURN = 0.0026;         // radians turned per pixel dragged across
+const MU_DRAG_WALK = 1.15;           // centimetres walked per pixel dragged down
+const MU_TAP_SLOP = 8;               // a press that travels less than this is a tap
+const MU_TAP_GAP = 400;              // ms allowed between the two taps of a double
+
 const MU = {
   active: false, raf: 0, rooms: [], arts: [], ri: 0,
   cam: { x: 0, z: 0, yaw: 0, zoom: 1 },
   vel: { f: 0, t: 0 }, keys: {}, glide: null, place: null,
   vp: null, world: null, baseP: 900, last: 0, nearTs: 0, near: null,
   pinch: null, points: new Map(),
+  clip: null, drag: null, tap: null, targets: [],
 };
 
 /* The canvas in cm. A work with no recorded size hangs at an assumed one that
@@ -3904,6 +3912,7 @@ function muBuild(museum) {
   MU.rooms = [];
   MU.wraps = [];
   MU.arts = [];
+  MU.targets = [];
   const rooms = museum.rooms.filter((r) => r.works.length);
   // Each room's works, in hang order — the walk a room hands the viewer when a
   // painting is opened: the room browses like a collection.
@@ -3995,6 +4004,11 @@ function muBuild(museum) {
         edge: edge, at: at, c: c, to: i - 1 + (1 - k),
         side: (edge === "z" ? at > r.cz : at > r.cx) ? 1 : -1,
       }));
+      // A marker on the floor each side of the opening: the one place a tap
+      // can take you. Every other step across a room is walked.
+      const u = door.u;
+      muTargetEl(i - 1, i, door.x - u[0] * 62, door.z - u[1] * 62, door, u);
+      muTargetEl(i, i - 1, door.x + u[0] * 62, door.z + u[1] * 62, door, [-u[0], -u[1]]);
     }
   });
   // Spawn just inside the front door, facing north into the museum.
@@ -4008,6 +4022,41 @@ function muBuild(museum) {
   muCull();
 }
 
+/* A marker lying on the floor before a doorway — the walk's one destination,
+   the way a street view offers the next stop and nothing else. It lives at
+   stage level in world centimetres, like the doorway it belongs to, and shows
+   only while you're standing in its own room (muCull).
+   The disc is drawn flat (rotateX) and turned so its chevron points the way
+   through (rotateY): the element's own up, -z after the flattening, is swung
+   onto u. */
+function muTargetEl(ri, to, x, z, door, u) {
+  const rot = " rotateY(" + Math.atan2(-u[0], -u[1]).toFixed(4) + "rad) rotateX(90deg)";
+  const el = muEl("mu-target", 90, 90, muT(x, -0.6, z, rot));
+  el.dataset.to = to;
+  el.setAttribute("aria-hidden", "true");
+  el.innerHTML = '<span class="mu-target-arrow"></span>';
+  MU.stage.appendChild(el);
+  MU.targets.push({ el: el, ri: ri, to: to, dx: door.x, dz: door.z, u: u });
+}
+
+/* Tapping that marker: out to the opening, then straight on to the middle of
+   the next room. Two legs, so the walk goes through the doorway rather than
+   diagonally through the wall beside it. */
+function muTravel(to) {
+  const r = MU.rooms[to];
+  const mark = MU.targets.find((t) => t.ri === MU.ri && t.to === to);
+  if (!r || !mark) return;
+  const from = { x: MU.cam.x, z: MU.cam.z, yaw: MU.cam.yaw };
+  let dy = Math.atan2(mark.u[0], -mark.u[1]) - from.yaw;   // face the way you go
+  while (dy > Math.PI) dy -= 2 * Math.PI;
+  while (dy < -Math.PI) dy += 2 * Math.PI;
+  const mid = { x: mark.dx, z: mark.dz };
+  const dist = Math.hypot(mid.x - from.x, mid.z - from.z) +
+               Math.hypot(r.cx - mid.x, r.cz - mid.z);
+  MU.glide = { from: from, mid: mid, to: { x: r.cx, z: r.cz, yaw: from.yaw + dy },
+               t0: null, dur: Math.max(800, Math.min(2200, dist * 1.5)) };
+}
+
 /* Only the room you're in and its neighbours render; a museum of twenty rooms
    is still only ever three rooms of planes for the compositor. */
 function muCull() {
@@ -4017,6 +4066,8 @@ function muCull() {
   // visible room's far wall would vanish with its culled neighbour.
   MU.wraps.forEach((w) =>
     w.el.classList.toggle("mu-hidden", MU.ri < w.a - 1 || MU.ri > w.b + 1));
+  // A destination you can't walk to from here isn't offered.
+  MU.targets.forEach((t) => t.el.classList.toggle("mu-hidden", t.ri !== MU.ri));
 }
 
 function muRoomLabel() {
@@ -4170,8 +4221,18 @@ function muFrame(ts) {
     if (gl.t0 == null) gl.t0 = ts;
     const p = Math.max(0, Math.min(1, (ts - gl.t0) / gl.dur));
     const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
-    MU.cam.x = gl.from.x + (gl.to.x - gl.from.x) * e;
-    MU.cam.z = gl.from.z + (gl.to.z - gl.from.z) * e;
+    // A travelling glide bends at the doorway. The legs share one pace — the
+    // turn is spread across the whole walk, so it reads as one movement.
+    let a = gl.from, b = gl.to, t = e;
+    if (gl.mid) {
+      const d1 = Math.hypot(gl.mid.x - gl.from.x, gl.mid.z - gl.from.z);
+      const d2 = Math.hypot(gl.to.x - gl.mid.x, gl.to.z - gl.mid.z);
+      const split = d1 / (d1 + d2 || 1);
+      if (e < split) { b = gl.mid; t = e / split; }
+      else { a = gl.mid; t = split < 1 ? (e - split) / (1 - split) : 1; }
+    }
+    MU.cam.x = a.x + (b.x - a.x) * t;
+    MU.cam.z = a.z + (b.z - a.z) * t;
     MU.cam.yaw = gl.from.yaw + (gl.to.yaw - gl.from.yaw) * e;
     // Keep the room index honest while flying (label, culling, collisions after).
     muMove(0, 0);
@@ -4221,15 +4282,25 @@ function muWheel(e) {
   muApply();
 }
 
-/* Touch: the D-pad drives the same four keys the keyboard does, and a pinch is
-   the scroll wheel. Nothing else — a museum is walked, not flung. */
+/* Take hold of a wall or the floor and the room comes with your hand: across
+   turns you, down walks you forward, at the same rate whatever the zoom. A
+   press that goes nowhere is a tap instead — the floor marker travels, and a
+   painting steps up to meet you. Two fingers are still the scroll wheel.
+   A museum is walked, not flung: nothing coasts after you let go. */
 function muPointerDown(e) {
-  if (e.pointerType === "mouse") return;
+  if (e.button > 0) return;                 // a right-click is not a walk
+  if (e.pointerType === "mouse") e.preventDefault();   // no image-dragging, no selection
   MU.points.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (MU.clip && MU.clip.setPointerCapture) {
+    try { MU.clip.setPointerCapture(e.pointerId); } catch (err) { /* gone already */ }
+  }
   if (MU.points.size === 2) {
     const [a, b] = [...MU.points.values()];
     MU.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: MU.cam.zoom };
+    MU.drag = null;                         // a pinch is not a stroll
+    return;
   }
+  MU.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, el: e.target };
 }
 function muPointerMove(e) {
   if (!MU.points.has(e.pointerId)) return;
@@ -4241,11 +4312,59 @@ function muPointerMove(e) {
       MU.cam.zoom = Math.max(0.55, Math.min(3.2, MU.pinch.zoom * (d / MU.pinch.d)));
       muApply();
     }
+    return;
   }
+  const g = MU.drag;
+  if (!g || g.id !== e.pointerId) return;
+  const dx = e.clientX - g.x, dy = e.clientY - g.y;
+  g.x = e.clientX; g.y = e.clientY;
+  g.moved += Math.hypot(dx, dy);
+  if (g.moved < MU_TAP_SLOP) return;        // hold the view still for a tap
+  MU.glide = null;                          // your hand outranks any stroll
+  const z = MU.cam.zoom || 1;
+  MU.cam.yaw -= dx * MU_DRAG_TURN / z;
+  const f = dy * MU_DRAG_WALK / z;
+  if (f) muMove(Math.sin(MU.cam.yaw) * f, -Math.cos(MU.cam.yaw) * f);
+  muApply();
 }
 function muPointerUp(e) {
   MU.points.delete(e.pointerId);
   if (MU.points.size < 2) MU.pinch = null;
+  const g = MU.drag;
+  if (!g || g.id !== e.pointerId) return;
+  MU.drag = null;
+  if (g.moved > MU_TAP_SLOP) return;        // that was a walk, not a tap
+  muTap(g.el, e.timeStamp, e.pointerType !== "mouse");
+}
+
+/* What a tap means. The floor marker takes you to the next room. A painting
+   comes closer, and once you're standing before it, opens — but a finger has
+   to ask twice: on a phone the whole room is the walking surface, and one
+   stray touch shouldn't march you across the gallery. */
+function muTap(el, ts, isTouch) {
+  if (!el || !el.closest) return;
+  const mark = el.closest(".mu-target");
+  if (mark) { MU.tap = null; muTravel(+mark.dataset.to); return; }
+  const hit = el.closest(".mu-art");
+  if (!hit) { MU.tap = null; return; }
+  if (isTouch) {
+    const first = MU.tap;
+    MU.tap = { el: hit, t: ts };
+    if (!first || first.el !== hit || ts - first.t > MU_TAP_GAP) return;
+    MU.tap = null;
+  }
+  const art = MU.arts.find((a) => a.el === hit);
+  if (!art) return;
+  // Standing there already? Then this means "open it" — the same viewer a
+  // gallery or collection opens, with this room as the walk, so ← → browse
+  // the room's other pieces.
+  if (muStandingBefore(art)) {
+    const works = MU.roomWorks[art.ri] || [art.work];
+    const i = works.findIndex((w) => w.id === art.work.id);
+    openViewer(works, Math.max(0, i));
+  } else {
+    muGlideTo(art);
+  }
 }
 
 function muTeardown() {
@@ -4257,11 +4376,14 @@ function muTeardown() {
   window.removeEventListener("blur", muBlur);
   window.removeEventListener("resize", muResize);
   document.body.classList.remove("mu-open");
-  MU.vp = MU.world = MU.near = MU.glide = null;
+  MU.vp = MU.world = MU.clip = MU.near = MU.glide = null;
   MU.keys = {};
+  MU.drag = MU.tap = MU.pinch = null;
+  MU.points.clear();
   MU.rooms = [];
   MU.wraps = [];
   MU.arts = [];
+  MU.targets = [];
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (screen.orientation && screen.orientation.unlock) {
     try { screen.orientation.unlock(); } catch (err) { /* not locked */ }
@@ -4292,7 +4414,7 @@ async function museumView() {
   const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
   app.innerHTML =
     '<div id="museum" class="museum' + (touch ? " touch" : "") + '">' +
-      '<div class="mu-clip"><div class="mu-vp" id="mu-vp">' +
+      '<div class="mu-clip" id="mu-clip"><div class="mu-vp" id="mu-vp">' +
       '<div class="mu-world" id="mu-world"></div></div></div>' +
       '<div class="mu-hud">' +
         '<div class="mu-top">' +
@@ -4301,20 +4423,18 @@ async function museumView() {
           '<span class="mu-sp"></span>' + arrange +
           '<a class="mu-x" href="#/" aria-label="Leave the museum">✕</a>' +
         "</div>" +
-        '<div class="mu-placard" id="mu-placard"></div>' +
-        '<div class="mu-dpad" id="mu-dpad" aria-hidden="' + (touch ? "false" : "true") + '">' +
-          '<button class="dp dp-u" data-k="ArrowUp" aria-label="Walk forward">▲</button>' +
-          '<button class="dp dp-l" data-k="ArrowLeft" aria-label="Turn left">◀</button>' +
-          '<button class="dp dp-r" data-k="ArrowRight" aria-label="Turn right">▶</button>' +
-          '<button class="dp dp-d" data-k="ArrowDown" aria-label="Walk back">▼</button>' +
-        "</div>" +
-        '<div class="mu-hint">↑ ↓ walk · ← → turn · scroll to zoom · click a painting to approach, again to open</div>' +
+        // On a phone the caption sat across the bottom of a screen the painting
+        // had barely filled to begin with. The walk is the label there.
+        (touch ? "" : '<div class="mu-placard" id="mu-placard"></div>') +
+        '<div class="mu-hint">drag the room to walk · ↑ ↓ ← → · scroll to zoom · ' +
+        "click a painting to approach, again to open</div>" +
       "</div>" +
       '<div class="mu-rotate">⟳&nbsp; Turn your phone sideways — the museum is a landscape.</div>' +
     "</div>";
 
   MU.vp = $("#mu-vp");
   MU.world = $("#mu-world");
+  MU.clip = $("#mu-clip");
   MU.touch = touch;
   MU.active = true;
   document.body.classList.add("mu-open");
@@ -4330,39 +4450,14 @@ async function museumView() {
   window.addEventListener("resize", muResize);
   const el = $("#museum");
   el.addEventListener("wheel", muWheel, { passive: false });
-  el.addEventListener("pointerdown", muPointerDown);
-  el.addEventListener("pointermove", muPointerMove);
-  el.addEventListener("pointerup", muPointerUp);
-  el.addEventListener("pointercancel", muPointerUp);
-  MU.vp.addEventListener("click", (e) => {
-    const hit = e.target.closest(".mu-art");
-    if (!hit || MU.pinch) return;
-    const art = MU.arts.find((a) => a.el === hit);
-    if (!art) return;
-    // First click strolls you over; a click once you're standing there opens
-    // the piece properly — the same viewer a gallery or collection opens, with
-    // this room as the walk, so ← → browse the room's other pieces.
-    if (muStandingBefore(art)) {
-      const works = MU.roomWorks[art.ri] || [art.work];
-      const i = works.findIndex((w) => w.id === art.work.id);
-      openViewer(works, Math.max(0, i));
-    } else {
-      muGlideTo(art);
-    }
-  });
-
-  // The D-pad presses the same keys the keyboard does.
-  const dpad = $("#mu-dpad");
-  dpad.querySelectorAll(".dp").forEach((b) => {
-    const k = b.dataset.k;
-    const on = (ev) => { ev.preventDefault(); MU.keys[k] = true; MU.glide = null; };
-    const off = () => { MU.keys[k] = false; };
-    b.addEventListener("pointerdown", on);
-    b.addEventListener("pointerup", off);
-    b.addEventListener("pointercancel", off);
-    b.addEventListener("pointerleave", off);
-    b.addEventListener("contextmenu", (ev) => ev.preventDefault());
-  });
+  // The scene, not the whole screen: the top bar's own buttons are never a
+  // handful of wall. The clip captures each pointer, so a drag that runs off
+  // the edge keeps walking.
+  MU.clip.addEventListener("pointerdown", muPointerDown);
+  MU.clip.addEventListener("pointermove", muPointerMove);
+  MU.clip.addEventListener("pointerup", muPointerUp);
+  MU.clip.addEventListener("pointercancel", muPointerUp);
+  MU.clip.addEventListener("contextmenu", (ev) => ev.preventDefault());
 
   // Phones: take the whole screen and ask to lie down. Where fullscreen or the
   // lock isn't offered (iPhones), the fixed panel and the rotate veil stand in.
