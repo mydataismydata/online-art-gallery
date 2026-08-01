@@ -212,8 +212,14 @@ body.mu-open { overflow: hidden; }
 .mroom-merge { font-size: 12px; }
 .mroom-via-l { margin-left: 10px; white-space: nowrap; }
 
-/* Row extras the collections list doesn't have: the wall picker, a step up or
-   down, cut here, and take down. */
+/* Row extras the collections list doesn't have: the movers riding just after
+   the drag handle (↑ ⇈ over ↓ ⇊), then on the right the wall picker, cut
+   here, and take down. */
+.arow-move {
+  display: grid; grid-template-columns: 24px 24px;
+  flex: 0 0 auto; margin-right: 2px;
+}
+.arow-move .arow-btn { width: 24px; height: 22px; font-size: 12px; }
 .arow-btns { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
 .awall {
   height: 34px; padding: 0 8px; cursor: pointer;

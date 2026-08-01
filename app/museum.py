@@ -2,8 +2,10 @@
 
 One hang per box, stored in data/museum.json: an ordered list of rooms, each an
 ordered list of work ids plus a layout — "tight" (small padding, small pieces
-may stack two high) or "spacious" (one generous horizontal line). The rooms are
-the walk: room 1's door is the entrance, each further room opens off the last.
+may stack two high), "spacious" (one generous horizontal line) or "breezeway"
+(a passthrough hall: doors fixed on opposite walls, works on the two sides
+only). The rooms are the walk: room 1's door is the entrance, each further
+room opens off the last.
 
 Membership is by work id, like a collection, and with the same manners: a work
 whose file has gone simply drops off the wall (resolve skips it), and an artist
@@ -20,7 +22,7 @@ from . import config, library
 
 _lock = threading.RLock()
 
-LAYOUTS = ("tight", "spacious")
+LAYOUTS = ("tight", "spacious", "breezeway")
 DEFAULT_LAYOUT = "spacious"
 
 # Compass walls, as the walk reads them: you enter heading north, so "n" is the
@@ -39,11 +41,15 @@ DEFAULT_EXIT = "n"
 def _norm_exits(rooms):
     """Chain-normalise exits in place: each room's exit must be a wall and not
     the room's own entry (the opposite of the previous room's exit). Room one
-    starts with its entry on the south wall — the museum's front door."""
+    starts with its entry on the south wall — the museum's front door. A
+    breezeway passes straight through: its exit is always opposite its entry,
+    whatever the client sent."""
     entry = "s"
     for r in rooms:
         x = r.get("exit")
-        if x not in WALLS or x == entry:
+        if r.get("layout") == "breezeway":
+            x = OPPOSITE[entry]
+        elif x not in WALLS or x == entry:
             x = next(w for w in ("n", "e", "s", "w") if w != entry)
         r["exit"] = x
         entry = OPPOSITE[x]

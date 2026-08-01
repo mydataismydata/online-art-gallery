@@ -3095,7 +3095,7 @@ function editCollectionDialog(c, onDone) {
    (#/museum/arrange), where the owner drags the order, cuts rooms, and picks
    each room's fit. Works arrive via "h" in the fullscreen viewer. */
 
-const MU_LAYOUTS = [["tight", "Tight"], ["spacious", "Spacious"]];
+const MU_LAYOUTS = [["tight", "Tight"], ["spacious", "Spacious"], ["breezeway", "Breezeway"]];
 
 async function saveMuseum(rooms) {
   const r = await api("/api/museum", {
@@ -3109,18 +3109,27 @@ async function saveMuseum(rooms) {
 
 const MU_WALLS = [["", "auto"], ["n", "N"], ["s", "S"], ["e", "E"], ["w", "W"]];
 
-function muRow(w, wall) {
+function muRow(w, wall, wallOpts) {
   const meta = [w.artist, w.date || w.year, cmDims(w)].filter(Boolean).join(" · ");
   // A work with no recorded size still hangs — at an assumed size — but the
   // owner arranging rooms is exactly the person who can fix it, so say so.
   const est = cmDims(w) ? "" :
     '<span class="mu-est" title="No recorded size — hangs at an assumed size until height and length are set on its placard">est. size</span>';
-  const opts = MU_WALLS.map(([v, label]) =>
+  // A breezeway's rows offer only its two hanging walls; a pin to a wall no
+  // longer on offer shows as auto (and the walk treats it so).
+  const opts = (wallOpts || MU_WALLS).map(([v, label]) =>
     '<option value="' + v + '"' + ((wall || "") === v ? " selected" : "") + ">" +
     label + "</option>").join("");
   return (
     '<li class="arow" data-id="' + esc(w.id) + '">' +
       '<span class="agrip" aria-hidden="true" title="Drag to move"></span>' +
+      // The movers ride between the handle and the number: ↑ ⇈ over ↓ ⇊.
+      '<span class="arow-move">' +
+      '<button class="arow-btn aup" type="button" title="Move up">↑</button>' +
+      '<button class="arow-btn aupr" type="button" title="Up a room — joins the end of the room above">⇈</button>' +
+      '<button class="arow-btn adown" type="button" title="Move down">↓</button>' +
+      '<button class="arow-btn adownr" type="button" title="Down a room — joins the top of the room below">⇊</button>' +
+      "</span>" +
       '<span class="anum"></span>' +
       '<span class="athumb"><img src="' + thumbSrc(w) + '" loading="lazy" alt="" draggable="false"></span>' +
       '<span class="atext"><span class="at">' + esc(w.title) + est + "</span>" +
@@ -3129,10 +3138,6 @@ function muRow(w, wall) {
       '<select class="awall' + (wall ? " pinned" : "") +
       '" title="Which wall this painting hangs on — the compass is absolute, the same in every room; auto lets the room decide">' +
       opts + "</select>" +
-      '<button class="arow-btn aup" type="button" title="Move up">↑</button>' +
-      '<button class="arow-btn adown" type="button" title="Move down">↓</button>' +
-      '<button class="arow-btn aupr" type="button" title="Up a room — joins the end of the room above">⇈</button>' +
-      '<button class="arow-btn adownr" type="button" title="Down a room — joins the top of the room below">⇊</button>' +
       '<button class="arow-btn asplit" type="button" title="Cut here: this painting starts a new room">✂</button>' +
       '<button class="arow-btn aunhang" type="button" title="Take off the wall (stays in the library)">✕</button>' +
       "</span></li>"
@@ -3143,28 +3148,40 @@ const MU_OPP = { n: "s", s: "n", e: "w", w: "e" };
 const MU_WALL_NAME = { n: "north", s: "south", e: "east", w: "west" };
 
 function muRoomSection(room, i, nrooms, entry) {
+  const breeze = room.layout === "breezeway";
   const seg = MU_LAYOUTS.map(([v, label]) =>
     '<button class="seg-btn' + (room.layout === v ? " on" : "") +
     '" type="button" data-layout="' + v + '">' + label + "</button>").join("");
   // Which of this room's own walls holds the doorway onward. The compass is
   // absolute — north is north in every room — and only the wall this room
-  // was entered through is spoken for.
-  const exit = room.exit || "n";
+  // was entered through is spoken for. A breezeway doesn't choose: the way
+  // out faces the way in.
+  const exit = breeze ? MU_OPP[entry] : (room.exit || "n");
   const doorSeg = i < nrooms - 1
     ? '<span class="tiny mroom-via-l">door to next on</span>' +
-      '<div class="seg" role="group" aria-label="Which wall holds the doorway to the next room">' +
-      [["w", "W"], ["n", "N"], ["e", "E"], ["s", "S"]].map(([v, label]) =>
-        v === entry
-          ? '<button class="seg-btn seg-via" type="button" disabled ' +
-            'title="' + (i === 0
-              ? "The south wall holds the museum's front door"
-              : "The " + MU_WALL_NAME[v] + " wall holds the door back to room " + i) + '">' +
-            label + "</button>"
-          : '<button class="seg-btn seg-via' + (exit === v ? " on" : "") +
-            '" type="button" data-exit="' + v + '" title="The doorway to room ' + (i + 2) +
-            " sits on this room's " + MU_WALL_NAME[v] + ' wall">' + label + "</button>"
-      ).join("") + "</div>"
+      (breeze
+        ? '<div class="seg" role="group" aria-label="Where the doorway onward sits">' +
+          '<button class="seg-btn seg-via on" type="button" disabled ' +
+          'title="A breezeway passes straight through: its onward door faces the one it was entered by">' +
+          exit.toUpperCase() + "</button></div>"
+        : '<div class="seg" role="group" aria-label="Which wall holds the doorway to the next room">' +
+          [["w", "W"], ["n", "N"], ["e", "E"], ["s", "S"]].map(([v, label]) =>
+            v === entry
+              ? '<button class="seg-btn seg-via" type="button" disabled ' +
+                'title="' + (i === 0
+                  ? "The south wall holds the museum's front door"
+                  : "The " + MU_WALL_NAME[v] + " wall holds the door back to room " + i) + '">' +
+                label + "</button>"
+              : '<button class="seg-btn seg-via' + (exit === v ? " on" : "") +
+                '" type="button" data-exit="' + v + '" title="The doorway to room ' + (i + 2) +
+                " sits on this room's " + MU_WALL_NAME[v] + ' wall">' + label + "</button>"
+          ).join("") + "</div>")
     : "";
+  // A breezeway hangs its two long sides only, so only those are on offer.
+  const wallOpts = breeze
+    ? [["", "auto"]].concat(entry === "n" || entry === "s"
+        ? [["e", "E"], ["w", "W"]] : [["n", "N"], ["s", "S"]])
+    : null;
   const n = room.works.length;
   // Any room but the first can give its works back to the room above; an empty
   // first room (with rooms below) can simply go.
@@ -3181,7 +3198,7 @@ function muRoomSection(room, i, nrooms, entry) {
       doorSeg + drop +
       "</header>" +
       '<ol class="arrange marrange">' +
-      room.works.map((w) => muRow(w, (room.walls || {})[w.id])).join("") + "</ol>" +
+      room.works.map((w) => muRow(w, (room.walls || {})[w.id], wallOpts)).join("") + "</ol>" +
       (n ? "" : '<p class="mroom-empty tiny">Empty — drag paintings in.</p>') +
     "</section>"
   );
@@ -3281,7 +3298,23 @@ function wireMuseumArrange(container) {
       muSaveArrangement(true);
     } else if (btn.classList.contains("seg-btn") && sec) {
       if (sec.dataset.layout === btn.dataset.layout) return;
+      const was = sec.dataset.layout;
       sec.dataset.layout = btn.dataset.layout;
+      if (btn.dataset.layout === "breezeway" || was === "breezeway") {
+        // Becoming a breezeway forces the exit opposite the entry and narrows
+        // the wall pickers (leaving one restores them) — the section has to be
+        // redrawn either way. And a passage must pass INTO something: a
+        // breezeway at the end of the museum grows an empty room beyond it.
+        if (btn.dataset.layout === "breezeway" && !sec.nextElementSibling) {
+          const ns = document.createElement("section");
+          ns.className = "mroom";
+          ns.dataset.layout = "spacious";
+          ns.innerHTML = '<ol class="arrange marrange"></ol>';
+          sec.after(ns);
+        }
+        muSaveArrangement(true);       // the server fixes the exit; re-render shows it
+        return;
+      }
       sec.querySelectorAll(".seg-btn:not(.seg-via)").forEach((b) => b.classList.toggle("on", b === btn));
       muSaveArrangement(false);        // nothing structural moved; no re-render flicker
     } else if (btn.classList.contains("mroom-merge") && sec) {
@@ -3369,7 +3402,10 @@ async function museumArrangeView(keepScroll) {
     "faces the same way in every room (auto lets the room decide). " +
     "✂ cuts a room in two at that painting; <b>Tight</b> hangs " +
     "close (small pieces pair up, two high) and sizes the room snug; " +
-    "<b>Spacious</b> hangs one generous line. Every room but the last picks " +
+    "<b>Spacious</b> hangs one generous line. <b>Breezeway</b> is a " +
+    "passthrough hall: its doors sit dead opposite each other, nothing hangs " +
+    "beside them, and the works take the two long sides — make the last room " +
+    "one and an empty room grows beyond it to pass into. Every room but the last picks " +
     "which of its own walls holds the doorway onward — <b>N</b>, <b>S</b>, " +
     "<b>E</b> or <b>W</b>, less the wall it was entered through — so the " +
     "museum wanders the plan instead of running one straight line. Add works " +
@@ -3431,6 +3467,7 @@ const MU_PLINTH = MU_CASE_W / 2 + MU_CORNER / 2;   // trim reach beyond the open
 const MU_FRONT_W = 200, MU_FRONT_H = 285;   // the front door's gilded leaves
 const MU_BASE = 24, MU_CROWN = 15;   // the woodwork: wide baseboard, plain crown
 const MU_MARGIN = 70;                // bare wall kept at the ends of each run
+const MU_BREEZE_PAD = 70;            // breezeway: bare wall each side of its doors
 const MU_STACK_GAP = 18;             // air between two stacked pieces
 const MU_SPEED = 310;                // walk, cm/s
 const MU_TURN = 1.75;                // turn, rad/s
@@ -3505,11 +3542,22 @@ function muSlots(works, layout, walls) {
    than a cabinet nor narrower than its own widest painting. Every wall hangs,
    the entry wall included, so the run divides across the whole perimeter. */
 const MU_RATIO = 1.25;               // rooms hang a little wider than deep
-function muRoomGeom(slots, layout, hasExit, hasEntryDoor) {
+function muRoomGeom(slots, layout, hasExit, hasEntryDoor, front, doorsNS) {
   const gap = layout === "tight" ? 34 : 100;
   const run = slots.reduce((t, s) => t + s.w, 0) +
               gap * Math.max(0, slots.length - 1);
   const widest = slots.reduce((t, s) => Math.max(t, s.w), 0);
+  if (layout === "breezeway") {
+    // A passthrough hall: across the passage, just the doorway plus a real
+    // shoulder of bare wall; along it, enough for the whole run split over
+    // the two long sides. Which axis is which follows the entry (doorsNS).
+    const lane = (front ? MU_FRONT_W : MU_DOOR_W) + 2 * MU_BREEZE_PAD;
+    const along = Math.round(Math.max(
+      420, widest + 2 * MU_MARGIN, run / 2 + 2 * MU_MARGIN + gap));
+    return doorsNS
+      ? { W: lane, D: along, gap: gap }
+      : { W: along, D: lane, gap: gap };
+  }
   const margins = (4 + (hasExit ? 4 : 2) + (hasEntryDoor ? 4 : 2)) * MU_MARGIN;
   const doors = ((hasExit ? 1 : 0) + (hasEntryDoor ? 1 : 0)) * MU_DOOR_W;
   let D = (run + doors + margins) / (2 + 2 * MU_RATIO);
@@ -3540,7 +3588,20 @@ function muWallAxis(rot) {
    two shoulders instead of its whole width. */
 function muRoomSegs(g) {
   const segs = [];
+  // A breezeway hangs nothing beside its doors — not even the shoulders. The
+  // whole run belongs to the two long sides, and if the passage dead-ends
+  // (an empty room follows and was culled), the blank far wall stays blank.
+  const ent = g.layout === "breezeway" ? (g.entry || "s") : null;
   muWalls(g).forEach((w) => {
+    if (ent) {
+      const side = (ent === "n" || ent === "s")
+        ? (w.id === "e" || w.id === "w") : (w.id === "n" || w.id === "s");
+      if (side) {
+        segs.push({ wall: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
+                    rot: w.rot, cx: w.cx, cz: w.cz, off: 0 });
+      }
+      return;
+    }
     const front = w.id === "s" && g.front;   // room 1's own front door
     const doored = w.id === g.exit || w.id === g.entry || front;
     // a doored wall has thickness: its face sits at the reveal's edge, so
@@ -3946,26 +4007,46 @@ function muBuild(museum) {
   // Room 1's entry is the museum's own front door, on its south wall.
   let entry = "s";
   rooms.forEach((room, i) => {
-    const slots = muSlots(room.works, room.layout, room.walls);
-    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, true);
+    const breeze = room.layout === "breezeway";
+    const doorsNS = entry === "n" || entry === "s";
+    // A breezeway's works may only sit on its long sides: a wall pin left
+    // over from another layout (or another entry direction) lapses to auto
+    // rather than aiming a painting at a wall that hangs nothing.
+    let walls = room.walls;
+    if (breeze && walls) {
+      const ok = doorsNS ? { e: 1, w: 1 } : { n: 1, s: 1 };
+      walls = {};
+      Object.keys(room.walls).forEach((k) => {
+        if (ok[room.walls[k]]) walls[k] = room.walls[k];
+      });
+    }
+    const slots = muSlots(room.works, room.layout, walls);
+    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, true,
+                         i === 0, doorsNS);
     g.slots = slots;
     g.layout = room.layout;
     let ex = room.exit;
-    if (!MU_OPP[ex] || ex === entry) ex = ["n", "e", "s", "w"].find((w) => w !== entry);
+    if (breeze) ex = MU_OPP[entry];      // a passage passes straight through
+    else if (!MU_OPP[ex] || ex === entry) ex = ["n", "e", "s", "w"].find((w) => w !== entry);
     g.exit = i < rooms.length - 1 ? ex : null;
     g.entry = i > 0 ? entry : null;      // room 1 draws its own south wall
     g.front = i === 0;
     entry = MU_OPP[ex];
     // Corners are sacred: if any wall's group would poke past one — the
     // proportional shares can fragment awkwardly — the room grows until
-    // every wall holds its whole group inside its own margins.
+    // every wall holds its whole group inside its own margins. A breezeway
+    // grows only lengthways; the lane across stays a lane.
     for (let t = 0; t < 8; t++) {
       const segs = muRoomSegs(g);
       muDistribute(g.slots, segs, g.gap);
       const over = segs.reduce((m, s) => Math.max(m, s.used - s.cap), 0);
       if (over <= 0) break;
-      g.D += Math.ceil(over);
-      g.W = Math.max(g.W, Math.round(MU_RATIO * g.D));
+      if (breeze && !doorsNS) {
+        g.W += Math.ceil(over);
+      } else {
+        g.D += Math.ceil(over);
+        if (!breeze) g.W = Math.max(g.W, Math.round(MU_RATIO * g.D));
+      }
     }
     geoms.push(g);
   });
@@ -4187,8 +4268,9 @@ function muRoomLabel() {
   const el = document.getElementById("mu-room");
   if (!el || !MU.rooms.length) return;
   const r = MU.rooms[MU.ri];
-  el.textContent = "Room " + (MU.ri + 1) + " of " + MU.rooms.length +
-                   " · " + (r.layout === "tight" ? "tight" : "spacious") + " hang";
+  el.textContent = "Room " + (MU.ri + 1) + " of " + MU.rooms.length + " · " +
+                   (r.layout === "breezeway" ? "breezeway"
+                    : (r.layout === "tight" ? "tight" : "spacious") + " hang");
 }
 
 /* Walls stop you, doorways don't: crossing any of the room's four sides is
