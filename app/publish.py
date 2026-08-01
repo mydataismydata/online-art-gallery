@@ -496,6 +496,7 @@ def _museum_blobs():
                       if wid in pid_by_wid},
             "exit": r["exit"],
             "layout": r["layout"],
+            "name": r["name"],
         })
     if not hung:
         return {}
@@ -976,6 +977,7 @@ def _import_museum(repo):
                       if p in wid_by_pid},
             "exit": r.get("exit"),
             "layout": r.get("layout"),
+            "name": r.get("name"),
         })
     d = museum.save(rooms)
     return {"imported": 1, "rooms": len(d["rooms"]), "hung": d["count"]}

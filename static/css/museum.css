@@ -190,7 +190,17 @@ body.mu-open { overflow: hidden; }
   background: var(--raised); border: 1px solid var(--hair-soft);
 }
 .mroom-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-.mroom-head h2 { margin: 0; font: 400 19px var(--serif); color: var(--display2); }
+/* The heading is the room's name, edited right where it stands. Unnamed rooms
+   wear their number as a placeholder, a shade dimmer — an invitation to type.
+   Scoped under the header to outweigh the form sheet's input[type=text]. */
+.mroom-head .mroom-name {
+  width: 240px; max-width: 100%; padding: 0 2px;
+  background: none; border: 0; border-bottom: 1px solid transparent;
+  font: 400 19px var(--serif); color: var(--display2);
+}
+.mroom-head .mroom-name::placeholder { color: var(--dim); opacity: 1; }
+.mroom-head .mroom-name:hover { border-bottom-color: var(--hair-mid); }
+.mroom-head .mroom-name:focus { outline: none; border-bottom-color: var(--gold-line); }
 .mroom-n { white-space: nowrap; }
 .mroom-empty { margin: 12px 2px 2px; font-style: italic; }
 .mroom .arrange { margin-top: 12px; max-width: none; }

@@ -5,7 +5,8 @@ ordered list of work ids plus a layout — "tight" (small padding, small pieces
 may stack two high), "spacious" (one generous horizontal line) or "breezeway"
 (a passthrough hall: doors fixed on opposite walls, works on the two sides
 only). The rooms are the walk: room 1's door is the entrance, each further
-room opens off the last.
+room opens off the last. A room may carry a name — its signage in the walk;
+unnamed rooms go by their number.
 
 Membership is by work id, like a collection, and with the same manners: a work
 whose file has gone simply drops off the wall (resolve skips it), and an artist
@@ -65,6 +66,15 @@ def clean_layout(s):
     return s if s in LAYOUTS else DEFAULT_LAYOUT
 
 
+MAX_NAME = 60
+
+
+def clean_name(s):
+    """A room's name is one short line of signage: whitespace collapsed,
+    length capped, absent stored as empty."""
+    return " ".join(str(s or "").split())[:MAX_NAME]
+
+
 def _read():
     try:
         rec = json.loads(config.MUSEUM_FILE.read_text(encoding="utf-8"))
@@ -90,7 +100,8 @@ def _rooms(rec):
         walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
         walls = {k: v for k, v in walls.items() if k in ids and v in WALLS}
         out.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
-                    "layout": clean_layout(r.get("layout"))})
+                    "layout": clean_layout(r.get("layout")),
+                    "name": clean_name(r.get("name"))})
     return _norm_exits(out)
 
 
@@ -105,7 +116,7 @@ def detail():
     for r in _rooms(rec):
         works = [w for w in (library.get(wid) for wid in r["work_ids"]) if w]
         rooms.append({"works": works, "walls": r["walls"], "exit": r["exit"],
-                      "layout": r["layout"]})
+                      "layout": r["layout"], "name": r["name"]})
         hung += len(works)
     return {"rooms": rooms, "count": hung,
             "updated": (rec or {}).get("updated")}
@@ -113,7 +124,8 @@ def detail():
 
 def save(rooms_in):
     """Replace the whole hang:
-    [{work_ids: [...], walls: {id: "n"|"s"|"e"|"w"}, layout: "tight"|"spacious"}].
+    [{work_ids: [...], walls: {id: "n"|"s"|"e"|"w"},
+      layout: "tight"|"spacious"|"breezeway", name: "..."}].
 
     Ids are validated against the library and a work hangs once — a duplicate
     keeps its first placement. Unknown ids are dropped rather than stored:
@@ -144,7 +156,8 @@ def save(rooms_in):
         walls = {str(k): v for k, v in walls.items()
                  if str(k) in ids and v in WALLS}
         rooms.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
-                      "layout": clean_layout(r.get("layout"))})
+                      "layout": clean_layout(r.get("layout")),
+                      "name": clean_name(r.get("name"))})
     _norm_exits(rooms)
     with _lock:
         rec = _read() or {}

@@ -3192,7 +3192,12 @@ function muRoomSection(room, i, nrooms, entry) {
   return (
     '<section class="mroom" data-layout="' + esc(room.layout) + '" data-exit="' + esc(exit) + '">' +
       '<header class="mroom-head">' +
-      "<h2>Room " + (i + 1) + "</h2>" +
+      // The room's name, edited in place where the heading was. The walk shows
+      // it as the room's signage; left blank, the room goes by its number.
+      '<input class="mroom-name" type="text" maxlength="60" spellcheck="false" ' +
+      'autocomplete="off" aria-label="Room name" value="' + esc(room.name || "") +
+      '" placeholder="Room ' + (i + 1) + '" ' +
+      'title="Name this room — the walk shows the name in place of the room number">' +
       '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
       '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
       doorSeg + drop +
@@ -3211,11 +3216,15 @@ function muSerialize() {
       const sel = r.querySelector(".awall");
       if (sel && sel.value) walls[r.dataset.id] = sel.value;
     });
+    // A section minted on this screen (a cut, a grown room) has no name field
+    // until the re-render; it starts life unnamed.
+    const name = sec.querySelector(".mroom-name");
     return {
       work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
       walls: walls,
       exit: sec.dataset.exit || "n",
       layout: sec.dataset.layout,
+      name: name ? name.value.trim() : "",
     };
   });
 }
@@ -3372,8 +3381,12 @@ function wireMuseumArrange(container) {
     }
   });
 
-  // Pinning a wall moves nothing on this screen — just save the choice.
+  // Pinning a wall or naming a room moves nothing on this screen — just save.
   container.addEventListener("change", (e) => {
+    if (e.target.classList.contains("mroom-name")) {
+      muSaveArrangement(false);
+      return;
+    }
     if (!e.target.classList.contains("awall")) return;
     e.target.classList.toggle("pinned", !!e.target.value);
     muSaveArrangement(false);
@@ -3395,7 +3408,9 @@ async function museumArrangeView(keepScroll) {
     '<p class="sub">' + museum.count + (museum.count === 1 ? " work" : " works") +
     " · " + rooms.length + (rooms.length === 1 ? " room" : " rooms") +
     " · every change saves as you make it</p></div></div>" +
-    '<p class="arrange-hint">Drag a painting by its handle, or nudge it with ' +
+    '<p class="arrange-hint">Type over a room\'s heading to name it — the ' +
+    "walk hangs the name in place of the room number. " +
+    "Drag a painting by its handle, or nudge it with " +
     "↑ ↓ — past a room's edge it crosses into the neighbour — and ⇈ ⇊ " +
     "stride a whole room at a time. The wall picker " +
     "pins a painting to a compass wall, and the compass is absolute: north " +
@@ -4025,6 +4040,7 @@ function muBuild(museum) {
                          i === 0, doorsNS);
     g.slots = slots;
     g.layout = room.layout;
+    g.name = room.name || "";
     let ex = room.exit;
     if (breeze) ex = MU_OPP[entry];      // a passage passes straight through
     else if (!MU_OPP[ex] || ex === entry) ex = ["n", "e", "s", "w"].find((w) => w !== entry);
@@ -4097,7 +4113,7 @@ function muBuild(museum) {
     muHangRoom(g, el, i);
     MU.place = null;
     MU.rooms.push({ cx: g.cx, cz: g.cz, hx: g.W / 2, hz: g.D / 2,
-                    doors: [], layout: g.layout, el: el });
+                    doors: [], layout: g.layout, name: g.name, el: el });
     if (g.door) {
       const door = g.door;
       const edge = Math.abs(door.u[1]) > 0.5 ? "z" : "x";
@@ -4184,7 +4200,8 @@ function muMapBuild() {
   const rects = [], doors = [], nums = [];
   MU.rooms.forEach((r, i) => {
     rects.push('<rect class="mm-room" data-ri="' + i + '" x="' + (r.cx - r.hx) +
-      '" y="' + (r.cz - r.hz) + '" width="' + 2 * r.hx + '" height="' + 2 * r.hz + '"/>');
+      '" y="' + (r.cz - r.hz) + '" width="' + 2 * r.hx + '" height="' + 2 * r.hz +
+      '"><title>' + esc(r.name || "Room " + (i + 1)) + "</title></rect>");
     nums.push('<text class="mm-num" x="' + r.cx + '" y="' + r.cz +
       '" font-size="' + u(10) + '">' + (i + 1) + "</text>");
     // Each doorway once: a strip of room-colour across the shared wall, so the
@@ -4264,13 +4281,13 @@ function muCull() {
   MU.targets.forEach((t) => t.el.classList.toggle("mu-hidden", t.ri !== MU.ri));
 }
 
+/* The room's signage: its given name, or its number while it has none. The
+   hang style is the arrange screen's vocabulary, not the museum's. */
 function muRoomLabel() {
   const el = document.getElementById("mu-room");
   if (!el || !MU.rooms.length) return;
   const r = MU.rooms[MU.ri];
-  el.textContent = "Room " + (MU.ri + 1) + " of " + MU.rooms.length + " · " +
-                   (r.layout === "breezeway" ? "breezeway"
-                    : (r.layout === "tight" ? "tight" : "spacious") + " hang");
+  el.textContent = r.name || "Room " + (MU.ri + 1) + " of " + MU.rooms.length;
 }
 
 /* Walls stop you, doorways don't: crossing any of the room's four sides is
