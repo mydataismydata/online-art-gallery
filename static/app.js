@@ -3441,7 +3441,7 @@ const MU = {
   vel: { f: 0, t: 0 }, keys: {}, glide: null, place: null,
   vp: null, world: null, baseP: 900, last: 0, nearTs: 0,
   pinch: null, points: new Map(),
-  clip: null, drag: null, tap: null, targets: [],
+  clip: null, drag: null, tap: null, targets: [], map: null,
 };
 
 /* The canvas in cm. A work with no recorded size hangs at an assumed one that
@@ -4025,6 +4025,7 @@ function muBuild(museum) {
   MU.ri = 0;
   muRoomLabel();
   muCull();
+  muMapBuild();
 }
 
 /* A marker lying on the floor before a doorway — the walk's one destination,
@@ -4060,6 +4061,82 @@ function muTravel(to) {
                Math.hypot(r.cx - mid.x, r.cz - mid.z);
   MU.glide = { from: from, mid: mid, to: { x: r.cx, z: r.cz, yaw: from.yaw + dy },
                t0: null, dur: Math.max(800, Math.min(2200, dist * 1.5)) };
+}
+
+/* The plan of the museum in the corner: every room to scale with its number,
+   the doorways cut through, and a gold wedge for where you stand and which way
+   you face. Drawn once per walk in world centimetres (the viewBox does the
+   scaling); only the wedge moves. North is up, exactly as the rooms chain.
+   Click a room to be put down in the middle of it. Desktop only — museumView
+   doesn't render the host on touch, where the whole screen is for walking. */
+function muMapBuild() {
+  MU.map = null;
+  const host = document.getElementById("mu-map");
+  if (!host || !MU.rooms.length) return;
+  const PAD = 30;
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  MU.rooms.forEach((r) => {
+    x0 = Math.min(x0, r.cx - r.hx); x1 = Math.max(x1, r.cx + r.hx);
+    z0 = Math.min(z0, r.cz - r.hz); z1 = Math.max(z1, r.cz + r.hz);
+  });
+  x0 -= PAD; z0 -= PAD; x1 += PAD; z1 += PAD;
+  const bw = x1 - x0, bh = z1 - z0;
+  const s = Math.min(210 / bw, 160 / bh);
+  const u = (px) => +(px / s).toFixed(1);    // a size meant in screen px, in cm
+  const rects = [], doors = [], nums = [];
+  MU.rooms.forEach((r, i) => {
+    rects.push('<rect class="mm-room" data-ri="' + i + '" x="' + (r.cx - r.hx) +
+      '" y="' + (r.cz - r.hz) + '" width="' + 2 * r.hx + '" height="' + 2 * r.hz + '"/>');
+    nums.push('<text class="mm-num" x="' + r.cx + '" y="' + r.cz +
+      '" font-size="' + u(10) + '">' + (i + 1) + "</text>");
+    // Each doorway once: a strip of room-colour across the shared wall, so the
+    // two boxes read as connected — the same fill "erases" the strokes there.
+    r.doors.forEach((d) => {
+      if (d.to < i) return;
+      const hw = MU_DOOR_W / 2, hd = Math.max(14, u(2.5));
+      doors.push(d.edge === "z"
+        ? '<rect class="mm-door" x="' + (d.c - hw) + '" y="' + (d.at - hd) +
+          '" width="' + 2 * hw + '" height="' + 2 * hd + '"/>'
+        : '<rect class="mm-door" x="' + (d.at - hd) + '" y="' + (d.c - hw) +
+          '" width="' + 2 * hd + '" height="' + 2 * hw + '"/>');
+    });
+  });
+  host.innerHTML =
+    '<svg width="' + Math.round(bw * s) + '" height="' + Math.round(bh * s) +
+    '" viewBox="' + x0 + " " + z0 + " " + bw + " " + bh +
+    '" style="--mm-sw:' + u(1.4) + 'px">' +
+    rects.join("") + doors.join("") + nums.join("") +
+    '<g id="mm-cam"><polygon points="0,-' + u(7.5) + " " + u(5) + "," + u(5.5) +
+    " 0," + u(2.5) + " -" + u(5) + "," + u(5.5) + '"/></g></svg>';
+  MU.map = {
+    cam: host.querySelector("#mm-cam"),
+    rects: [...host.querySelectorAll(".mm-room")],
+    ri: -1,
+  };
+  host.addEventListener("click", (e) => {
+    const t = e.target.closest(".mm-room");
+    if (!t) return;
+    const r = MU.rooms[+t.dataset.ri];
+    if (!r) return;
+    MU.glide = null;
+    MU.cam.x = r.cx;
+    MU.cam.z = r.cz;
+    if (MU.ri !== +t.dataset.ri) { MU.ri = +t.dataset.ri; muRoomLabel(); muCull(); }
+    muApply();
+  });
+}
+
+/* The wedge follows the camera; the tinted room follows the walk. Called from
+   muApply, so the map can never disagree with the view. */
+function muMapSync() {
+  const m = MU.map;
+  m.cam.setAttribute("transform",
+    "translate(" + MU.cam.x.toFixed(1) + " " + MU.cam.z.toFixed(1) + ")" +
+    " rotate(" + (MU.cam.yaw * 180 / Math.PI).toFixed(1) + ")");
+  if (m.ri !== MU.ri) {
+    m.ri = MU.ri;
+    m.rects.forEach((r, i) => r.classList.toggle("on", i === MU.ri));
+  }
 }
 
 /* Only the room you're in and its neighbours render; a museum of twenty rooms
@@ -4129,6 +4206,7 @@ function muApply() {
     "translateZ(" + P + "px) rotateY(" + cam.yaw.toFixed(4) + "rad) " +
     "translate3d(" + (-cam.x * MU_SS).toFixed(1) + "px," + (MU_EYE * MU_SS) +
     "px," + (-cam.z * MU_SS).toFixed(1) + "px)";
+  if (MU.map) muMapSync();
 }
 
 /* Whichever painting you've walked up to and are actually facing, from its
@@ -4359,7 +4437,7 @@ function muTeardown() {
   window.removeEventListener("blur", muBlur);
   window.removeEventListener("resize", muResize);
   document.body.classList.remove("mu-open");
-  MU.vp = MU.world = MU.clip = MU.glide = null;
+  MU.vp = MU.world = MU.clip = MU.glide = MU.map = null;
   MU.keys = {};
   MU.drag = MU.tap = MU.pinch = null;
   MU.points.clear();
@@ -4410,6 +4488,8 @@ async function museumView() {
         // placard on the opened painting already says all of it.
         '<div class="mu-hint">drag the room to walk · ↑ ↓ ← → · scroll to zoom · ' +
         "click a painting to approach, again to open</div>" +
+        // The corner plan. Phones don't get one — the screen is for walking.
+        (touch ? "" : '<div class="mu-map" id="mu-map" aria-label="Museum plan"></div>') +
       "</div>" +
       '<div class="mu-rotate">⟳&nbsp; Turn your phone sideways — the museum is a landscape.</div>' +
     "</div>";

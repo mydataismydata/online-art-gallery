@@ -129,11 +129,41 @@ body.mu-open { overflow: hidden; }
    floor markers, and the painting's own placard says it all once opened. The
    wall labels beside each piece are the museum's own signage. */
 
+/* The map owns the lower-right corner now; the hint keeps to the other side. */
 .mu-hint {
-  position: absolute; right: 18px; bottom: 16px;
+  position: absolute; left: 22px; bottom: 16px;
   font: 400 11.5px var(--sans); color: var(--off);
   pointer-events: none;
 }
+
+/* ---------- the corner plan ---------- */
+/* Half-there until the mouse arrives; solid under it. Every room is a click
+   target that puts you down in its middle. Phones never render the host
+   element (museumView) — the whole screen there is for walking. */
+.mu-map {
+  position: absolute; right: 16px; bottom: 16px;
+  padding: 10px;
+  background: rgba(23, 19, 16, .92); border: 1px solid var(--hair);
+  opacity: .45; transition: opacity .25s ease;
+  pointer-events: auto;
+}
+.mu-map:hover { opacity: 1; }
+.mu-map svg { display: block; }
+.mu-map .mm-room {
+  fill: #332d26; stroke: rgba(236, 227, 210, .55);
+  stroke-width: var(--mm-sw, 2px);
+  cursor: pointer; transition: fill .15s ease;
+}
+.mu-map .mm-room.on { fill: rgba(194, 160, 97, .28); stroke: var(--gold); }
+.mu-map .mm-room:hover { fill: #4c443a; }
+/* Room-coloured, drawn over the shared wall: the opening. */
+.mu-map .mm-door { fill: #332d26; pointer-events: none; }
+.mu-map .mm-num {
+  fill: rgba(236, 227, 210, .55); font-family: var(--sans);
+  text-anchor: middle; dominant-baseline: central;
+  pointer-events: none; user-select: none;
+}
+.mu-map #mm-cam polygon { fill: var(--gold); pointer-events: none; }
 
 /* ---------- phones: landscape only ---------- */
 
