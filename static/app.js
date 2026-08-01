@@ -5421,8 +5421,9 @@ function wireBuiltinSources() {
 
 /* ---------- display options ---------- */
 
-/* The hero row: says which painting is on the front page and why, and offers the
-   only way back to the rotation once one is pinned. */
+/* The hero row: says which painting is on the front page and why, offers a way
+   to circulate it there and then, and the only way back to the rotation once
+   one is pinned. */
 function heroRowHtml(feat) {
   if (!feat || !feat.work) {
     return '<div class="siterow"><label>Home hero</label>' +
@@ -5435,13 +5436,20 @@ function heroRowHtml(feat) {
     : "Rotating daily — today it’s <b>" + esc(who) + "</b>";
   return '<div class="siterow"><label>Home hero</label>' +
     '<span class="tiny herostate">' + state + "</span>" +
+    // Nothing to circulate to when the rotation holds a single painting.
+    ((feat.pool || 0) > 1
+      ? '<button type="button" class="linkbtn" id="hero-next">Show another</button>'
+      : "") +
     (feat.pinned
       ? '<button type="button" class="linkbtn" id="hero-unpin">Unpin</button>'
       : "") +
     '<span class="formmsg" id="hero-msg"></span></div>' +
-    '<p class="optnote">Pin any painting from a grid: hit <b>Select</b>, choose one, ' +
-    "then <b>Pin to hero</b>. Unpinned, the hero moves through the works that have a " +
-    "description, one a day. Pinned per server, like the title.</p>";
+    '<p class="optnote"><b>Show another</b> puts up the next painting now, without ' +
+    "waiting for the day to turn — press it again to keep going. Rotating, the hero " +
+    "carries on from there, one a day, through the works that have a description; " +
+    "pinned, it moves the pin. To choose a particular one, go to any grid, hit " +
+    "<b>Select</b>, choose it, then <b>Pin to hero</b>. Set per server, like the " +
+    "title.</p>";
 }
 
 function displayPanelHtml(feat) {
@@ -5486,6 +5494,21 @@ function displayPanelHtml(feat) {
 function wireDisplayPanel() {
   const pc = document.getElementById("opt-placards");
   if (pc) { pc.checked = placardsOn(); pc.addEventListener("change", () => setPlacards(pc.checked)); }
+
+  const next = document.getElementById("hero-next");
+  if (next) next.addEventListener("click", async () => {
+    const msg = document.getElementById("hero-msg"); msg.className = "formmsg";
+    next.disabled = true;
+    try {
+      const r = await api("/api/featured/next", { method: "POST" });
+      settingsView();                    // re-render: the row names the new one
+      const who = r.work ? [r.work.title, r.work.artist].filter(Boolean).join(" · ") : "";
+      toast(who ? "Now showing " + who + "." : "The hero moved on.");
+    } catch (e) {
+      msg.className = "formmsg err"; msg.textContent = e.message;
+      next.disabled = false;
+    }
+  });
 
   const unpin = document.getElementById("hero-unpin");
   if (unpin) unpin.addEventListener("click", async () => {

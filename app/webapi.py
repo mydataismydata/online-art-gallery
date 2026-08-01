@@ -432,23 +432,55 @@ def _pinned_work():
     return None
 
 
+def _hero_pool():
+    """The works the hero draws on, in a stable order: those with a description —
+    the ones with something to read on the other side — or everything, when none
+    has been written up yet."""
+    works = library.all_works()
+    return [w for w in works if (w.get("description") or "").strip()] or works
+
+
+def _rotating_work(pool):
+    """Today's painting: the rotation turns once a day rather than per request, so
+    the front page has a 'today's painting' rather than a slot machine, and
+    everyone looking at it sees the same one. The owner's offset moves it on."""
+    day = int(time.strftime("%Y%j"))          # year + day-of-year
+    return pool[(day + site.get_featured_offset()) % len(pool)]
+
+
 @bp.get("/api/featured")
 @auth.require_view
 def api_featured():
-    """The work in the home hero: the owner's pin if there is one, otherwise a
-    daily rotation. It turns once a day rather than per request, so the front page
-    has a 'today's painting' rather than a slot machine — and everyone looking at
-    it sees the same one. The rotation prefers works that have a description:
-    those are the ones with something to read on the other side."""
+    """The work in the home hero: the owner's pin if there is one, otherwise the
+    daily rotation. `pool` is how many paintings the rotation has to choose from —
+    the settings screen hides "Show another" when there's nothing else to show."""
+    pool = _hero_pool()
     pinned = _pinned_work()
     if pinned:
-        return jsonify({"work": pinned, "pinned": True})
-    works = library.all_works()
-    if not works:
-        return jsonify({"work": None, "pinned": False})
-    pool = [w for w in works if (w.get("description") or "").strip()] or works
-    day = int(time.strftime("%Y%j"))          # year + day-of-year
-    return jsonify({"work": pool[day % len(pool)], "pinned": False})
+        return jsonify({"work": pinned, "pinned": True, "pool": len(pool)})
+    if not pool:
+        return jsonify({"work": None, "pinned": False, "pool": 0})
+    return jsonify({"work": _rotating_work(pool), "pinned": False, "pool": len(pool)})
+
+
+@bp.post("/api/featured/next")
+@auth.require_role("owner")
+def api_featured_next():
+    """Circulate the hero: put up the next painting now, without waiting for the
+    day to turn. Rotating, that nudges the rotation on — it keeps rotating from
+    there. Pinned, it moves the pin to the next painting, since a pin is a
+    decision to hold one still and this only changes which one."""
+    pool = _hero_pool()
+    if not pool:
+        return jsonify({"work": None, "pinned": False, "pool": 0})
+    pinned = _pinned_work()
+    if not pinned:
+        site.bump_featured_offset(1)
+        return jsonify({"work": _rotating_work(pool), "pinned": False, "pool": len(pool)})
+    here = next((i for i, w in enumerate(pool) if w["id"] == pinned["id"]), -1)
+    nxt = pool[(here + 1) % len(pool)]
+    site.set_featured(nxt["id"], nxt.get("pid"))
+    return jsonify({"work": nxt, "pinned": True, "pool": len(pool)})
 
 
 @bp.post("/api/featured")

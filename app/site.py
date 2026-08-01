@@ -90,6 +90,29 @@ def set_featured(work_id, pid=None):
     return get_featured()
 
 
+def get_featured_offset():
+    """How far the hero rotation has been nudged along. The rotation turns once a
+    day on its own; this lets the owner circulate it by hand without waiting for
+    midnight. Kept beside the pin rather than inside it, so it survives pinning
+    and unpinning — coming back from a pin resumes where the rotation was."""
+    try:
+        return int(_load().get("featured_offset") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def bump_featured_offset(step=1):
+    """Move the rotation on by step places and return the new offset."""
+    data = _load()
+    try:
+        cur = int(data.get("featured_offset") or 0)
+    except (TypeError, ValueError):
+        cur = 0
+    data["featured_offset"] = cur + int(step)
+    _save(data)
+    return data["featured_offset"]
+
+
 def remap_featured(id_map):
     """Follow the hero pin when its painting moves and is therefore re-identified —
     a repoint into another artist, or an artist edit. Without this the pin would
