@@ -368,6 +368,11 @@ async function acceptInviteView(token) {
 
 /* ============================== works grid + selection ============================== */
 
+/* Which works hang in the museum walk — refreshed by artistView so its grid can
+   star them. The pills only display on the artist page (.show-dims), so a set
+   that lingers between views never shows anywhere it shouldn't. */
+let MUSEUM_HUNG = new Set();
+
 function workFigure(w, i, showArtist) {
   const meta = [showArtist ? w.artist : null, w.date || w.year, w.medium]
     .filter(Boolean).join(" · ");
@@ -375,6 +380,12 @@ function workFigure(w, i, showArtist) {
   // dimensions say nothing there — only show them on the private box.
   const dim = (!isPublic() && w.width && w.height)
     ? '<span class="wdim">' + w.width + " × " + w.height + "</span>"
+    : "";
+  // Already on a museum wall — worth knowing while deciding what else to hang.
+  // The source box's concern, like the dimensions: the public site has the walk
+  // itself for that.
+  const star = (!isPublic() && MUSEUM_HUNG.has(w.id))
+    ? '<span class="wstar" title="Hangs in the museum walk">★</span>'
     : "";
   // Only offer the placard where there's something to read.
   const info = w.description
@@ -384,7 +395,7 @@ function workFigure(w, i, showArtist) {
   return (
     '<figure class="work" data-i="' + i + '" data-id="' + w.id + '">' +
       '<div class="wimg"><img src="' + thumbSrc(w) + '" loading="lazy" alt="">' +
-      '<span class="checkmark" aria-hidden="true"></span>' + dim + "</div>" +
+      '<span class="checkmark" aria-hidden="true"></span>' + star + dim + "</div>" +
       '<figcaption><div class="wtext"><div class="wt">' + esc(w.title) + "</div>" +
       (meta ? '<div class="wm">' + esc(meta) + "</div>" : "") +
       "</div>" + info + "</figcaption></figure>"
@@ -976,11 +987,17 @@ function connStripHtml(name, conns, total) {
 async function artistView(name, arranging) {
   setNav("home");
   try {
-    const [d, ov] = await Promise.all([
+    const [d, ov, mus] = await Promise.all([
       api("/api/works?artist=" + encodeURIComponent(name)),
       api("/api/artist/" + encodeURIComponent(name) + "/overview")
         .catch(() => ({ info: null, connections: [], stats: {} })),
+      // What's already on the museum's walls, for the stars on this grid —
+      // the source box only; a failure just means no stars this visit.
+      isPublic() ? null : api("/api/museum").catch(() => null),
     ]);
+    MUSEUM_HUNG = new Set(mus
+      ? mus.museum.rooms.flatMap((r) => r.works).map((w) => w.id)
+      : []);
     const works = d.works;
     if (!works.length) {
       app.innerHTML = page('<div class="emptybox">No works found for ' + esc(name) + ".</div>");
@@ -1098,7 +1115,7 @@ async function artistView(name, arranging) {
     } else {
       bindWorks(works, false, () => artistView(name), browseCtx({ artist: name }));
       const g = document.getElementById("grid");
-      if (g) g.classList.add("show-dims");  // dimension pills only on the artist page
+      if (g) g.classList.add("show-dims");  // the corner pills (dims, museum star) show only here
     }
   } catch (e) { errbox(e); }
 }

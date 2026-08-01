@@ -112,7 +112,16 @@
   font: 400 10.5px var(--sans); line-height: 1; letter-spacing: .02em;
   font-variant-numeric: tabular-nums; padding: 4px 7px; pointer-events: none;
 }
-.show-dims .wdim { display: block; }
+/* Hangs in the museum walk. Rendered only on the source box (workFigure). */
+.wstar {
+  display: none; position: absolute; left: 8px; top: 8px; z-index: 2;
+  background: rgba(13,11,8,.72); color: var(--gold);
+  font: 400 11px/1 var(--sans); padding: 4px 6px; pointer-events: none;
+}
+/* Both pills belong to the artist page's grid alone. */
+.show-dims .wdim, .show-dims .wstar { display: block; }
+/* Select mode's checkmark takes the same corner; the star yields to it. */
+.masonry.selecting .wstar { display: none; }
 .work figcaption { padding: 13px 2px 0; display: flex; align-items: flex-start; gap: 10px; }
 .work .wtext { flex: 1; min-width: 0; }
 .work .wt {
