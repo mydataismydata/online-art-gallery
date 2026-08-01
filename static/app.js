@@ -4122,15 +4122,14 @@ function muMapBuild() {
     MU.glide = null;
     MU.cam.x = r.cx;
     MU.cam.z = r.cz;
-    // Put down turned to face the doorway you'd have come through walking
-    // here from where you stood — the chain runs through adjacent rooms, so
-    // that's the door toward your old room. A glance back to get your
-    // bearings, then turn and explore. Clicking your own room keeps your gaze.
+    // Put down as if you'd walked in: the doorway you'd have come through —
+    // the one toward your old room along the chain — at your back, facing
+    // into the room. Clicking your own room keeps your gaze.
     if (MU.ri !== ri) {
       const d = r.doors.find((k) => k.to === (ri > MU.ri ? ri - 1 : ri + 1));
       if (d) {
-        const dx = (d.edge === "z" ? d.c : d.at) - r.cx;
-        const dz = (d.edge === "z" ? d.at : d.c) - r.cz;
+        const dx = r.cx - (d.edge === "z" ? d.c : d.at);
+        const dz = r.cz - (d.edge === "z" ? d.at : d.c);
         MU.cam.yaw = Math.atan2(dx, -dz);
       }
       MU.ri = ri;
