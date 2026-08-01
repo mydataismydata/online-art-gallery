@@ -5637,12 +5637,11 @@ function heroRowHtml(feat) {
       ? '<button type="button" class="linkbtn" id="hero-unpin">Unpin</button>'
       : "") +
     '<span class="formmsg" id="hero-msg"></span></div>' +
-    '<p class="optnote"><b>Show another</b> puts up the next painting now, without ' +
-    "waiting for the day to turn — press it again to keep going. Rotating, the hero " +
-    "carries on from there, one a day, through the works that have a description; " +
-    "pinned, it moves the pin. To choose a particular one, go to any grid, hit " +
-    "<b>Select</b>, choose it, then <b>Pin to hero</b>. Set per server, like the " +
-    "title.</p>";
+    '<p class="optnote"><b>Show another</b> puts up a different painting now, drawn ' +
+    "at random — press it again until one suits. Rotating, the hero carries on from " +
+    "there, one a day, through the works that have a description; pinned, it moves " +
+    "the pin. To choose a particular one, go to any grid, hit <b>Select</b>, choose " +
+    "it, then <b>Pin to hero</b>. Set per server, like the title.</p>";
 }
 
 function displayPanelHtml(feat) {

@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import re
 import secrets
 import time
@@ -466,19 +467,24 @@ def api_featured():
 @bp.post("/api/featured/next")
 @auth.require_role("owner")
 def api_featured_next():
-    """Circulate the hero: put up the next painting now, without waiting for the
-    day to turn. Rotating, that nudges the rotation on — it keeps rotating from
-    there. Pinned, it moves the pin to the next painting, since a pin is a
-    decision to hold one still and this only changes which one."""
+    """Circulate the hero: put up a DIFFERENT painting now, drawn at random,
+    without waiting for the day to turn. Random, not next-in-line — the pool is
+    ordered by artist, so stepping through it would parade one painter's works
+    one at a time. Rotating, the random stride folds into the offset and the
+    daily turn carries on from wherever it lands; pinned, the pin moves to the
+    random pick, since a pin is a decision to hold one still and this only
+    changes which one. Never lands on the painting already up (when the pool
+    offers any other)."""
     pool = _hero_pool()
     if not pool:
         return jsonify({"work": None, "pinned": False, "pool": 0})
     pinned = _pinned_work()
     if not pinned:
-        site.bump_featured_offset(1)
+        step = random.randrange(1, len(pool)) if len(pool) > 1 else 1
+        site.bump_featured_offset(step)
         return jsonify({"work": _rotating_work(pool), "pinned": False, "pool": len(pool)})
-    here = next((i for i, w in enumerate(pool) if w["id"] == pinned["id"]), -1)
-    nxt = pool[(here + 1) % len(pool)]
+    others = [w for w in pool if w["id"] != pinned["id"]]
+    nxt = random.choice(others) if others else pool[0]
     site.set_featured(nxt["id"], nxt.get("pid"))
     return jsonify({"work": nxt, "pinned": True, "pool": len(pool)})
 
