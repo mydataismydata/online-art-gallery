@@ -4116,12 +4116,27 @@ function muMapBuild() {
   host.addEventListener("click", (e) => {
     const t = e.target.closest(".mm-room");
     if (!t) return;
-    const r = MU.rooms[+t.dataset.ri];
+    const ri = +t.dataset.ri;
+    const r = MU.rooms[ri];
     if (!r) return;
     MU.glide = null;
     MU.cam.x = r.cx;
     MU.cam.z = r.cz;
-    if (MU.ri !== +t.dataset.ri) { MU.ri = +t.dataset.ri; muRoomLabel(); muCull(); }
+    // Put down turned to face the doorway you'd have come through walking
+    // here from where you stood — the chain runs through adjacent rooms, so
+    // that's the door toward your old room. A glance back to get your
+    // bearings, then turn and explore. Clicking your own room keeps your gaze.
+    if (MU.ri !== ri) {
+      const d = r.doors.find((k) => k.to === (ri > MU.ri ? ri - 1 : ri + 1));
+      if (d) {
+        const dx = (d.edge === "z" ? d.c : d.at) - r.cx;
+        const dz = (d.edge === "z" ? d.at : d.c) - r.cz;
+        MU.cam.yaw = Math.atan2(dx, -dz);
+      }
+      MU.ri = ri;
+      muRoomLabel();
+      muCull();
+    }
     muApply();
   });
 }
