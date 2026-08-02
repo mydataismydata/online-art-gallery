@@ -9,7 +9,7 @@ import time
 
 from ... import library
 from ...names import name_match, normalize_comma_name, parse_year, unshout
-from ..util import session, fetch_json, download_to_tmp
+from ..util import session, fetch_json, download_to_tmp, job_hooks
 from . import tuning
 
 ID = "vam"
@@ -43,6 +43,7 @@ def _clean_maker(name):
 
 def run(job):
     sess = session()
+    hooks = job_hooks(job, "the V&A")
     cfg = tuning.effective(ID, CONFIG)
     fine_art = [k.strip().lower() for k in cfg["fine_art_types"].split(",") if k.strip()]
     max_pages = cfg["max_pages"]
@@ -55,7 +56,7 @@ def run(job):
         data = fetch_json(sess, SEARCH, {
             "q": job.query, "page_size": 100, "page": page,
             "images_exist": 1,  # relevance is the default order; passing order_by=relevance 422s
-        })
+        }, **hooks)
         info = data.get("info") or {}
         pages = min(info.get("pages") or 1, max_pages)
         records = data.get("records") or []
@@ -102,7 +103,7 @@ def run(job):
             for size in SIZES:
                 url = "%sfull/%s/0/default.jpg" % (base, size)
                 try:
-                    tmp = download_to_tmp(sess, url)
+                    tmp = download_to_tmp(sess, url, **hooks)
                     break
                 except Exception:
                     continue

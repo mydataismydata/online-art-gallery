@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 from ... import config, library
 from ...names import name_match, parse_year, slugify
-from ..util import session, fetch_json, download_to_tmp
+from ..util import session, fetch_json, download_to_tmp, job_hooks
 
 # ids that a custom source may not claim (would shadow a built-in)
 RESERVED_IDS = {"gac", "met", "aic", "cma", "rijks", "wikidata", "vam"}
@@ -182,6 +182,7 @@ def run_custom(job, defn):
     if not ok:
         raise RuntimeError("Source misconfigured: %s" % err)
     sess = session()
+    hooks = job_hooks(job, cleaned["label"])
     q = job.query.strip()
     max_items = job.opts.get("max_items")
     templated = "{page}" in cleaned["search_url"]
@@ -192,7 +193,7 @@ def run_custom(job, defn):
             return
         url = cleaned["search_url"].replace("{query}", quote(q)).replace("{page}", str(page))
         try:
-            data = fetch_json(sess, url, timeout=45)
+            data = fetch_json(sess, url, timeout=45, **hooks)
         except Exception as e:
             if pnum == 0:
                 raise
@@ -225,7 +226,7 @@ def run_custom(job, defn):
                 "source": cleaned["id"], "source_id": m["sid"], "source_url": None,
             }
             try:
-                tmp = download_to_tmp(sess, str(m["image"]))
+                tmp = download_to_tmp(sess, str(m["image"]), **hooks)
             except Exception as e:
                 job.failed += 1
                 job.log("FAILED \"%s\": %s" % (m["title"], e))

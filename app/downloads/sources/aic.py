@@ -4,7 +4,7 @@ import time
 
 from ... import library
 from ...names import name_match
-from ..util import session, fetch_json, download_to_tmp
+from ..util import session, fetch_json, download_to_tmp, job_hooks
 from . import tuning
 
 ID = "aic"
@@ -35,6 +35,7 @@ CONFIG = [
 
 def run(job):
     sess = session()
+    hooks = job_hooks(job, "the Art Institute")
     cfg = tuning.effective(ID, CONFIG)
     keywords = [k.strip().lower() for k in cfg["type_keywords"].split(",") if k.strip()]
     max_pages = cfg["max_pages"]
@@ -45,7 +46,7 @@ def run(job):
             return
         data = fetch_json(sess, API, {
             "q": job.query, "fields": FIELDS, "limit": 100, "page": page,
-        })
+        }, **hooks)
         total_pages = min((data.get("pagination") or {}).get("total_pages") or 1, max_pages)
         rows = data.get("data") or []
         if page == 1:
@@ -86,7 +87,7 @@ def run(job):
             for size in SIZES:
                 url = "%s/%s/full/%s/0/default.jpg" % (IIIF, row["image_id"], size)
                 try:
-                    tmp = download_to_tmp(sess, url)
+                    tmp = download_to_tmp(sess, url, **hooks)
                     break
                 except Exception:
                     continue

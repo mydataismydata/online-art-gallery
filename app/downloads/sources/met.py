@@ -4,7 +4,7 @@ import time
 
 from ... import library
 from ...names import name_match, parse_year
-from ..util import session, fetch_json, download_to_tmp
+from ..util import session, fetch_json, download_to_tmp, job_hooks
 from . import tuning
 
 ID = "met"
@@ -29,13 +29,14 @@ CONFIG = [
 
 def run(job):
     sess = session()
+    hooks = job_hooks(job, "the Met")
     cfg = tuning.effective(ID, CONFIG)
     keywords = [k.strip().lower() for k in cfg["type_keywords"].split(",") if k.strip()]
     data = fetch_json(sess, BASE + "/search", {
         "artistOrCulture": "true",
         "hasImages": "true",
         "q": job.query,
-    })
+    }, **hooks)
     ids = data.get("objectIDs") or []
     job.log("Met search returned %d objects; checking each for public-domain paintings…" % len(ids))
     if len(ids) > cfg["max_scan"]:
@@ -49,7 +50,7 @@ def run(job):
         if i and i % 100 == 0:
             job.log("…scanned %d/%d objects so far (%d matched)" % (i, len(ids), job.found))
         try:
-            obj = fetch_json(sess, "%s/objects/%d" % (BASE, oid))
+            obj = fetch_json(sess, "%s/objects/%d" % (BASE, oid), **hooks)
         except Exception:
             continue
         time.sleep(0.1)
@@ -86,13 +87,13 @@ def run(job):
             "source_url": obj.get("objectURL"),
         }
         try:
-            tmp = download_to_tmp(sess, url)
+            tmp = download_to_tmp(sess, url, **hooks)
         except Exception as e:
             small = obj.get("primaryImageSmall")
             try:
                 if not small:
                     raise
-                tmp = download_to_tmp(sess, small)
+                tmp = download_to_tmp(sess, small, **hooks)
                 job.log("Original failed for \"%s\" (%s); saved web-size instead." % (title, e))
             except Exception as e2:
                 job.failed += 1

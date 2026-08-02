@@ -85,6 +85,18 @@ def request_with_retries(sess, url, attempts=3, backoff=1.5, max_wait=120,
     return r  # a 429/503 that exhausted retries — caller's raise_for_status() handles it
 
 
+def job_hooks(job, host):
+    """The on_wait/should_stop pair for a job's network calls, so a rate-limit
+    pause is written to the job's log instead of passing silently, and Cancel
+    lands mid-sleep instead of waiting for the next between-downloads check."""
+    return {
+        "on_wait": lambda s: job.log(
+            "Rate limited — %s asked us to wait %d seconds. Holding off."
+            % (host, round(s))),
+        "should_stop": lambda: job.cancelled,
+    }
+
+
 def fetch_json(sess, url, params=None, timeout=60, **retry):
     """A JSON GET. Extra kwargs go to request_with_retries — a caller fetching
     something optional should pass attempts=1, max_wait=0 rather than spend minutes

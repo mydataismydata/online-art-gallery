@@ -18,7 +18,7 @@ import requests
 
 from ... import library
 from ...names import name_match, normalize_comma_name, parse_year, unshout
-from ..util import session, download_to_tmp, request_with_retries
+from ..util import session, download_to_tmp, request_with_retries, job_hooks
 from . import tuning
 
 
@@ -50,8 +50,8 @@ CONFIG = [
 ]
 
 
-def _getj(sess, url):
-    r = request_with_retries(sess, url, headers={"Accept": LD_JSON}, timeout=45)
+def _getj(sess, url, **retry):
+    r = request_with_retries(sess, url, headers={"Accept": LD_JSON}, timeout=45, **retry)
     r.raise_for_status()
     return r.json()
 
@@ -83,7 +83,7 @@ def _date_text(produced_by):
     return None
 
 
-def _maker(sess, produced_by, cache):
+def _maker(sess, produced_by, cache, retry=None):
     ids = []
     for part in [produced_by] + (produced_by.get("part") or []):
         for a in (part.get("carried_out_by") or []):
@@ -98,7 +98,7 @@ def _maker(sess, produced_by, cache):
         return cache[aid]
     name = None
     try:
-        names = _names(_getj(sess, aid))
+        names = _names(_getj(sess, aid, **(retry or {})))
         if names:
             name = _clean_name(names[0]["content"])
     except Exception:
@@ -133,15 +133,15 @@ def _find_digital_object_id(entity):
     return found[0]
 
 
-def _image_url(sess, obj):
+def _image_url(sess, obj, retry=None):
     shows = obj.get("shows") or []
     if not shows:
         return None
-    visual = _getj(sess, shows[0]["id"])
+    visual = _getj(sess, shows[0]["id"], **(retry or {}))
     dobj_id = _find_digital_object_id(visual)
     if not dobj_id:
         return None
-    dobj = _getj(sess, dobj_id)
+    dobj = _getj(sess, dobj_id, **(retry or {}))
     for ap in (dobj.get("access_point") or []):
         if ap.get("id"):
             return ap["id"]
@@ -150,6 +150,7 @@ def _image_url(sess, obj):
 
 def run(job):
     sess = session()
+    hooks = job_hooks(job, "the Rijksmuseum")
     cfg = tuning.effective(ID, CONFIG)
     q = job.query.strip()
     max_items = job.opts.get("max_items")
@@ -162,7 +163,7 @@ def run(job):
         if job.cancelled:
             return
         try:
-            data = _getj(sess, url)
+            data = _getj(sess, url, **hooks)
         except requests.ConnectionError:
             raise RuntimeError("Couldn't reach the Rijksmuseum (data.rijksmuseum.nl) after "
                                "several tries — check the server's internet/DNS connection "
@@ -180,12 +181,12 @@ def run(job):
                 continue
             source_id = oid.rstrip("/").rsplit("/", 1)[-1]
             try:
-                obj = _getj(sess, oid)
-                artist = _maker(sess, obj.get("produced_by") or {}, actor_cache) or q
+                obj = _getj(sess, oid, **hooks)
+                artist = _maker(sess, obj.get("produced_by") or {}, actor_cache, hooks) or q
                 # the search matches makers loosely; keep only real matches
                 if not name_match(q, artist):
                     continue
-                img = _image_url(sess, obj)
+                img = _image_url(sess, obj, hooks)
             except Exception as e:
                 job.failed += 1
                 job.log("FAILED %s: %s" % (source_id, e))
@@ -211,7 +212,8 @@ def run(job):
                 "source_url": oid,  # id.rijksmuseum.nl/<id> resolves to the web page
             }
             try:
-                tmp = download_to_tmp(sess, img, referer="https://www.rijksmuseum.nl/")
+                tmp = download_to_tmp(sess, img, referer="https://www.rijksmuseum.nl/",
+                                      **hooks)
             except Exception as e:
                 job.failed += 1
                 job.log("FAILED \"%s\": %s" % (title, e))

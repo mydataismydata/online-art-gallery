@@ -4,7 +4,7 @@ import time
 
 from ... import library
 from ...names import name_match, parse_year
-from ..util import session, fetch_json, download_to_tmp
+from ..util import session, fetch_json, download_to_tmp, job_hooks
 from . import tuning
 
 ID = "cma"
@@ -36,6 +36,7 @@ def _artist_of(row):
 
 def run(job):
     sess = session()
+    hooks = job_hooks(job, "Cleveland")
     cfg = tuning.effective(ID, CONFIG)
     max_items = job.opts.get("max_items")
     skip, total = 0, None
@@ -47,7 +48,7 @@ def run(job):
             params["type"] = cfg["object_type"]
         if cfg["cc0_only"]:
             params["cc0"] = 1
-        data = fetch_json(sess, API, params)
+        data = fetch_json(sess, API, params, **hooks)
         if total is None:
             total = (data.get("info") or {}).get("total") or 0
             job.log("Cleveland returned %d candidate paintings…" % total)
@@ -86,7 +87,7 @@ def run(job):
                 "source_url": row.get("url"),
             }
             try:
-                tmp = download_to_tmp(sess, url)
+                tmp = download_to_tmp(sess, url, **hooks)
             except Exception as e:
                 job.failed += 1
                 job.log("FAILED \"%s\": %s" % (title, e))

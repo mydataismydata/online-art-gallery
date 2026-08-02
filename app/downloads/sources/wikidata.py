@@ -10,7 +10,7 @@ import time
 
 from ... import library, artistinfo
 from ...names import parse_year
-from ..util import session, fetch_json, download_to_tmp
+from ..util import session, fetch_json, download_to_tmp, job_hooks
 from . import tuning
 
 ID = "wikidata"
@@ -53,6 +53,7 @@ def _val(row, key):
 
 def run(job):
     sess = session()
+    hooks = job_hooks(job, "Wikimedia")
     cfg = tuning.effective(ID, CONFIG)
     limit = cfg["max_works"]
     job.log("Identifying \"%s\" on Wikidata…" % job.query)
@@ -64,7 +65,7 @@ def run(job):
     job.log("Matched %s (%s); querying their paintings…" % (artist, qid))
 
     query = _SPARQL % {"qid": qid, "limit": limit}
-    data = fetch_json(sess, WDQS, {"query": query, "format": "json"}, timeout=90)
+    data = fetch_json(sess, WDQS, {"query": query, "format": "json"}, timeout=90, **hooks)
     rows = (data.get("results") or {}).get("bindings") or []
     job.log("Wikidata lists %d painting%s with an image%s."
             % (len(rows), "" if len(rows) == 1 else "s",
@@ -101,7 +102,8 @@ def run(job):
             "source_url": "https://www.wikidata.org/wiki/%s" % source_id,
         }
         try:
-            tmp = download_to_tmp(sess, image, referer="https://commons.wikimedia.org/")
+            tmp = download_to_tmp(sess, image, referer="https://commons.wikimedia.org/",
+                                  **hooks)
         except Exception as e:
             job.failed += 1
             job.log("FAILED \"%s\": %s" % (title, e))
