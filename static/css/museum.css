@@ -32,6 +32,10 @@ body.mu-open { overflow: hidden; }
 .mu-stage { position: absolute; transform-style: preserve-3d; }
 .mu-roomg { position: absolute; transform-style: preserve-3d; }
 .mu-roomg.mu-hidden { display: none; }
+/* Phones (muCull applies .mu-far there): a neighbouring room shows its
+   architecture through the doorway, but its art waits until you arrive. */
+.mu-roomg.mu-far .mu-art,
+.mu-roomg.mu-far .mu-label { display: none; }
 /* An exit wall and its doorway, built once and turned to whichever wall the
    next room opens from. It lives at stage level — the wall belongs to two
    rooms at once — and culls on its own (see muCull). */

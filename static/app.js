@@ -3495,10 +3495,14 @@ const MU_KEYSET = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
 // (and the camera's strides with it): the projection is identical, but every
 // plane is drawn at MU_SS times the texel density. The crispness is paid for
 // in the VIEWER'S GPU memory — rendering is entirely client-side — and a
-// phone has none to spare: its devicePixelRatio (2-3×) already rasterises
-// several texels per centimetre through the same mechanism, so the stage
-// there stays 1:1 and the screen itself supplies the density.
-const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches) ? 1 : 3;
+// phone has none to spare: every texture ALSO multiplies by its 2-3×
+// devicePixelRatio, and past the compositor's budget the walls blank out and
+// redraw in pieces. So phones aim at ~1.5 device texels per centimetre TOTAL
+// (SS × DPR): the stage shrinks below 1:1 and the screen's own density does
+// the rest — and a long wall stays under WebKit's per-texture size cap.
+const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches)
+  ? Math.min(1, 1.5 / (window.devicePixelRatio || 1))
+  : 3;
 
 // Walking by hand: the room follows your pointer — sideways turns you, up and
 // down walks you — on a mouse exactly as on a finger.
@@ -4285,6 +4289,13 @@ function muMapSync() {
 function muCull() {
   MU.rooms.forEach((r, i) =>
     r.el.classList.toggle("mu-hidden", Math.abs(i - MU.ri) > 1));
+  // Phones go further: the neighbours keep their architecture — the view
+  // through a doorway — but hang their art only once you arrive. Every
+  // painting, frame and placard is a composited texture, and the phone's
+  // budget buys one roomful, not three.
+  if (MU.touch) {
+    MU.rooms.forEach((r, i) => r.el.classList.toggle("mu-far", i !== MU.ri));
+  }
   // A doored wall serves two rooms: it stays up while either is near, or a
   // visible room's far wall would vanish with its culled neighbour.
   MU.wraps.forEach((w) =>
@@ -4378,7 +4389,10 @@ function muNearest(ts) {
     const score = facing / (70 + dist);
     if (score > bestScore) { bestScore = score; best = a; }
   }
-  if (best && !best.hi && Math.hypot(best.x - cam.x, best.z - cam.z) < 480) {
+  // Desktop only: a phone never trades its thumbnail up — decoding a
+  // view-size JPEG mid-walk is exactly the memory spike its compositor
+  // can't absorb, and at phone plane sizes the thumbnail already covers.
+  if (best && !best.hi && !MU.touch && Math.hypot(best.x - cam.x, best.z - cam.z) < 480) {
     best.hi = true;                    // walk up close and the full image loads
     best.img.src = viewSrc(best.work);
   }
@@ -4668,6 +4682,7 @@ async function museumView() {
   MU.vp = $("#mu-vp");
   MU.world = $("#mu-world");
   MU.clip = $("#mu-clip");
+  MU.touch = touch;
   MU.active = true;
   document.body.classList.add("mu-open");
   muResize();
