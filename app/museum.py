@@ -1,12 +1,12 @@
 """The museum: the owner's walkable 3-D hang.
 
 One hang per box, stored in data/museum.json: an ordered list of rooms, each an
-ordered list of work ids plus a layout — "tight" (small padding, small pieces
-may stack two high), "spacious" (one generous horizontal line) or "breezeway"
-(a passthrough hall: doors fixed on opposite walls, works on the two sides
-only). The rooms are the walk: room 1's door is the entrance, each further
-room opens off the last. A room may carry a name — its signage in the walk;
-unnamed rooms go by their number.
+ordered list of work ids plus a layout — "normal" (small padding, small pieces
+may pair up two high), "stacked" (the salon wall: piles climb to three high
+and taller pieces join them) or "breezeway" (a passthrough hall: doors fixed
+on opposite walls, works on the two sides only). The rooms are the walk:
+room 1's door is the entrance, each further room opens off the last. A room
+may carry a name — its signage in the walk; unnamed rooms go by their number.
 
 Membership is by work id, like a collection, and with the same manners: a work
 whose file has gone simply drops off the wall (resolve skips it), and an artist
@@ -23,8 +23,13 @@ from . import config, library
 
 _lock = threading.RLock()
 
-LAYOUTS = ("tight", "spacious", "breezeway")
-DEFAULT_LAYOUT = "spacious"
+LAYOUTS = ("normal", "stacked", "breezeway")
+DEFAULT_LAYOUT = "normal"
+
+# Earlier museums spoke differently: "tight" is today's normal, and "spacious"
+# (one generous line) retired unused. Both still read — an old museum.json, or
+# a repo record published before the rename, builds instead of falling over.
+LEGACY_LAYOUTS = {"tight": "normal", "spacious": "normal"}
 
 # Compass walls, as the walk reads them: you enter heading north, so "n" is the
 # far wall, "s" the wall at your back, "w" left and "e" right. A work absent
@@ -63,6 +68,7 @@ MAX_WORKS = 3000
 
 def clean_layout(s):
     s = (s or "").strip()
+    s = LEGACY_LAYOUTS.get(s, s)
     return s if s in LAYOUTS else DEFAULT_LAYOUT
 
 
@@ -125,7 +131,7 @@ def detail():
 def save(rooms_in):
     """Replace the whole hang:
     [{work_ids: [...], walls: {id: "n"|"s"|"e"|"w"},
-      layout: "tight"|"spacious"|"breezeway", name: "..."}].
+      layout: "normal"|"stacked"|"breezeway", name: "..."}].
 
     Ids are validated against the library and a work hangs once — a duplicate
     keeps its first placement. Unknown ids are dropped rather than stored:

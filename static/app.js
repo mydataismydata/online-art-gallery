@@ -3095,7 +3095,7 @@ function editCollectionDialog(c, onDone) {
    (#/museum/arrange), where the owner drags the order, cuts rooms, and picks
    each room's fit. Works arrive via "h" in the fullscreen viewer. */
 
-const MU_LAYOUTS = [["tight", "Tight"], ["spacious", "Spacious"], ["breezeway", "Breezeway"]];
+const MU_LAYOUTS = [["normal", "Normal"], ["stacked", "Stacked"], ["breezeway", "Breezeway"]];
 
 async function saveMuseum(rooms) {
   const r = await api("/api/museum", {
@@ -3317,7 +3317,7 @@ function wireMuseumArrange(container) {
         if (btn.dataset.layout === "breezeway" && !sec.nextElementSibling) {
           const ns = document.createElement("section");
           ns.className = "mroom";
-          ns.dataset.layout = "spacious";
+          ns.dataset.layout = "normal";
           ns.innerHTML = '<ol class="arrange marrange"></ol>';
           sec.after(ns);
         }
@@ -3401,7 +3401,7 @@ async function museumArrangeView(keepScroll) {
   catch (e) { app.innerHTML = page(errbox(e)); return; }
   const rooms = museum.rooms.length
     ? museum.rooms
-    : [{ works: [], layout: "spacious" }];
+    : [{ works: [], layout: "normal" }];
   const head =
     '<a class="back" href="#/museum">← Walk the museum</a>' +
     '<div class="pagehead" style="margin-top:26px"><div><h1>Arrange the museum</h1>' +
@@ -3415,9 +3415,10 @@ async function museumArrangeView(keepScroll) {
     "stride a whole room at a time. The wall picker " +
     "pins a painting to a compass wall, and the compass is absolute: north " +
     "faces the same way in every room (auto lets the room decide). " +
-    "✂ cuts a room in two at that painting; <b>Tight</b> hangs " +
-    "close (small pieces pair up, two high) and sizes the room snug; " +
-    "<b>Spacious</b> hangs one generous line. <b>Breezeway</b> is a " +
+    "✂ cuts a room in two at that painting; <b>Normal</b> hangs " +
+    "close, and small pieces pair up two high; <b>Stacked</b> is the salon " +
+    "wall — piles climb to three, pieces up to a metre tall join them, and " +
+    "a tall pile rides up the wall. <b>Breezeway</b> is a " +
     "passthrough hall: its doors sit dead opposite each other, nothing hangs " +
     "beside them, and the works take the two long sides — make the last room " +
     "one and an empty room grows beyond it to pass into. Every room but the last picks " +
@@ -3443,7 +3444,7 @@ async function museumArrangeView(keepScroll) {
   $("#mroom-add").addEventListener("click", () => {
     const ns = document.createElement("section");
     ns.className = "mroom";
-    ns.dataset.layout = "spacious";
+    ns.dataset.layout = "normal";
     ns.innerHTML = '<ol class="arrange marrange"></ol>';
     $("#mrooms").appendChild(ns);
     muSaveArrangement(true);
@@ -3527,40 +3528,49 @@ function muArtSize(w) {
   return { h: h, l: l, est: true };
 }
 
-/* A slot is what occupies one width of wall: one framed work, or — in a tight
-   room — two small consecutive works stacked, never more than two. */
+/* A slot is what occupies one width of wall: one framed work, or a vertical
+   pile of consecutive works — in a normal room two small pieces at most, in a
+   stacked room the salon wall: up to three high, and taller pieces join. */
+const MU_STACK_MAX = 320;            // a pile's whole height, frames and air included
 function muSlots(works, layout, walls) {
   const F2 = MU_FRAME * 2;
   const sized = works.map((w) =>
     Object.assign({ work: w, pin: (walls || {})[w.id] || null }, muArtSize(w)));
   const slots = [];
-  // Only a piece we KNOW is small may stack: an unmeasured work hangs at an
-  // assumed size, and guessing a painting small enough to pile up is exactly
-  // the guess a museum doesn't make. And a pair stacks only bound for the
-  // same wall — pinned alike, or both left to the room.
+  // Only a piece we KNOW fits the pile may stack: an unmeasured work hangs at
+  // an assumed size, and guessing a painting small enough to pile up is
+  // exactly the guess a museum doesn't make. And works pile only bound for
+  // the same wall — pinned alike, or all left to the room.
   const small = (s) => !s.est && s.h <= 66 && s.l <= 110;
+  const salon = (s) => !s.est && s.h <= 100 && s.l <= 150;
+  const okay = layout === "stacked" ? salon : small;
+  const most = layout === "stacked" ? 3 : 2;
   for (let i = 0; i < sized.length; i++) {
-    const a = sized[i], b = sized[i + 1];
-    if (layout === "tight" && b && small(a) && small(b) && a.pin === b.pin) {
-      slots.push({ items: [a, b], pin: a.pin, idx: slots.length,
-                   w: Math.max(a.l, b.l) + F2,
-                   h: a.h + b.h + 2 * F2 + MU_STACK_GAP });
+    const items = [sized[i]];
+    let S = sized[i].h + F2;
+    while ((layout === "normal" || layout === "stacked") &&
+           okay(items[0]) && items.length < most) {
+      const nxt = sized[i + 1];
+      if (!nxt || !okay(nxt) || nxt.pin !== items[0].pin) break;
+      if (S + nxt.h + F2 + MU_STACK_GAP > MU_STACK_MAX) break;
+      items.push(nxt);
+      S += nxt.h + F2 + MU_STACK_GAP;
       i++;
-    } else {
-      slots.push({ items: [a], pin: a.pin, idx: slots.length,
-                   w: a.l + F2, h: a.h + F2 });
     }
+    slots.push({ items: items, pin: items[0].pin, idx: slots.length,
+                 w: items.reduce((t, s) => Math.max(t, s.l), 0) + F2, h: S });
   }
   return slots;
 }
 
 /* Size the room around its works: enough wall for the whole run at this
-   layout's spacing — tight sits snug, spacious breathes — and never smaller
-   than a cabinet nor narrower than its own widest painting. Every wall hangs,
-   the entry wall included, so the run divides across the whole perimeter. */
+   layout's spacing — a hang sits snug, a breezeway breathes — and never
+   smaller than a cabinet nor narrower than its own widest painting. Every
+   wall hangs, the entry wall included, so the run divides across the whole
+   perimeter. */
 const MU_RATIO = 1.25;               // rooms hang a little wider than deep
 function muRoomGeom(slots, layout, hasExit, hasEntryDoor, front, doorsNS) {
-  const gap = layout === "tight" ? 34 : 100;
+  const gap = layout === "breezeway" ? 100 : 34;
   const run = slots.reduce((t, s) => t + s.w, 0) +
               gap * Math.max(0, slots.length - 1);
   const widest = slots.reduce((t, s) => Math.max(t, s.w), 0);
@@ -3981,21 +3991,19 @@ function muHangRoom(g, roomEl, ri) {
         roomEl.appendChild(muLabelEl(it.work,
           seg.cx + ax * cl + nx * off, ly, seg.cz + az * cl + nz * off, seg.rot));
       };
-      if (slot.items.length === 1) {
-        const it = slot.items[0];
-        roomEl.appendChild(muArtEl(it, x, -MU_HANG, z, seg.rot, ri));
-        label(it, MU_HANG);
-      } else {
-        // Two high: the pair shares the hang line, first work on top.
-        const a = slot.items[0], b = slot.items[1];
-        const ha = a.h + 2 * MU_FRAME, hb = b.h + 2 * MU_FRAME;
-        const S = ha + hb + MU_STACK_GAP;
-        const ya = -(MU_HANG + S / 2 - ha / 2), yb = -(MU_HANG - S / 2 + hb / 2);
-        roomEl.appendChild(muArtEl(a, x, ya, z, seg.rot, ri));
-        roomEl.appendChild(muArtEl(b, x, yb, z, seg.rot, ri));
-        label(a, -ya);
-        label(b, -yb);
-      }
+      // The pile shares the hang line, first work on top — and a pile too
+      // tall to centre there slides up just enough to clear the baseboard,
+      // stopping short of the crown. A single work is a pile of one, so it
+      // sits exactly on the line.
+      const hs = slot.items.map((it) => it.h + 2 * MU_FRAME);
+      const S = hs.reduce((a, b) => a + b, 0) + MU_STACK_GAP * (hs.length - 1);
+      let top = Math.min(Math.max(MU_HANG, 30 + S / 2), 352 - S / 2) + S / 2;
+      slot.items.forEach((it, k) => {
+        const cy = top - hs[k] / 2;
+        roomEl.appendChild(muArtEl(it, x, -cy, z, seg.rot, ri));
+        label(it, cy);
+        top -= hs[k] + MU_STACK_GAP;
+      });
       t += slot.w + g.gap;
     });
   });
