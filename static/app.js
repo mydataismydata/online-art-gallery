@@ -3509,7 +3509,6 @@ const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches)
 const MU_DRAG_TURN = 0.0026;         // radians turned per pixel dragged across
 const MU_DRAG_WALK = 1.15;           // centimetres walked per pixel dragged down
 const MU_TAP_SLOP = 8;               // a press that travels less than this is a tap
-const MU_TAP_GAP = 400;              // ms allowed between the two taps of a double
 
 const MU = {
   active: false, raf: 0, rooms: [], arts: [], ri: 0,
@@ -3517,7 +3516,7 @@ const MU = {
   vel: { f: 0, t: 0 }, keys: {}, glide: null, place: null,
   vp: null, world: null, baseP: 900, last: 0, nearTs: 0,
   pinch: null, points: new Map(),
-  clip: null, drag: null, tap: null, targets: [], map: null,
+  clip: null, drag: null, targets: [], map: null,
 };
 
 /* The canvas in cm. A work with no recorded size hangs at an assumed one that
@@ -4579,25 +4578,19 @@ function muPointerUp(e) {
   if (!g || g.id !== e.pointerId) return;
   MU.drag = null;
   if (g.moved > MU_TAP_SLOP) return;        // that was a walk, not a tap
-  muTap(g.el, e.timeStamp, e.pointerType !== "mouse");
+  muTap(g.el);
 }
 
-/* What a tap means. The floor marker takes you to the next room. A painting
-   comes closer, and once you're standing before it, opens — but a finger has
-   to ask twice: on a phone the whole room is the walking surface, and one
-   stray touch shouldn't march you across the gallery. */
-function muTap(el, ts, isTouch) {
+/* What a tap means — one tap, mouse or finger alike. The floor marker takes
+   you to the next room. A painting brings you to stand square before it, and
+   a tap once you're standing there opens it. (A press that travels is a walk,
+   never a tap, so dragging across a canvas doesn't march you anywhere.) */
+function muTap(el) {
   if (!el || !el.closest) return;
   const mark = el.closest(".mu-target");
-  if (mark) { MU.tap = null; muTravel(+mark.dataset.to); return; }
+  if (mark) { muTravel(+mark.dataset.to); return; }
   const hit = el.closest(".mu-art");
-  if (!hit) { MU.tap = null; return; }
-  if (isTouch) {
-    const first = MU.tap;
-    MU.tap = { el: hit, t: ts };
-    if (!first || first.el !== hit || ts - first.t > MU_TAP_GAP) return;
-    MU.tap = null;
-  }
+  if (!hit) return;
   const art = MU.arts.find((a) => a.el === hit);
   if (!art) return;
   // Standing there already? Then this means "open it" — the same viewer a
@@ -4624,7 +4617,7 @@ function muTeardown() {
   document.body.classList.remove("mu-open");
   MU.vp = MU.world = MU.clip = MU.glide = MU.map = null;
   MU.keys = {};
-  MU.drag = MU.tap = MU.pinch = null;
+  MU.drag = MU.pinch = null;
   MU.points.clear();
   MU.rooms = [];
   MU.wraps = [];
