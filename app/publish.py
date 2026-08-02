@@ -460,7 +460,9 @@ def _collection_blobs():
             "title": rec.get("title") or "",
             "description": rec.get("description") or "",
             "owner": rec.get("owner") or "",
-            "owner_display": rec.get("owner_display") or "",
+            # Resolved, not the frozen copy: the public box has no accounts to
+            # ask, so it must be handed the name the People page says today.
+            "owner_display": coll.byline(rec) or "",
             "sort": coll.clean_sort(rec.get("sort")),
             "work_pids": pids,
         }

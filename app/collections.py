@@ -81,6 +81,19 @@ def _owner_role(rec):
     return u.get("role") if u else None
 
 
+def byline(rec):
+    """The name on the byline as it stands now: the account's display name
+    (set on the People page), else its username, looked up live for the same
+    reason as the role. The name frozen in at creation serves only where the
+    account can't be asked — deleted here, or a box accounts don't travel to
+    (the public site gets the resolved name via the publisher)."""
+    from . import auth
+    u = auth.get_user(rec.get("owner") or "")
+    if u:
+        return u.get("display") or u.get("username")
+    return rec.get("owner_display")
+
+
 # ---------------- work resolution ----------------
 
 # How a collection hangs. The order is part of the curation, not a viewer's
@@ -158,7 +171,7 @@ def summary(rec):
         "id": rec.get("id"),
         "title": rec.get("title"),
         "description": rec.get("description") or "",
-        "owner_display": rec.get("owner_display"),
+        "owner_display": byline(rec),
         "owner_role": _owner_role(rec),
         "count": len(works),
         "cover": covers[0] if covers else None,
@@ -174,7 +187,7 @@ def detail(rec, user):
         "id": rec.get("id"),
         "title": rec.get("title"),
         "description": rec.get("description") or "",
-        "owner_display": rec.get("owner_display"),
+        "owner_display": byline(rec),
         "created": rec.get("created"),
         "updated": rec.get("updated"),
         "works": works,
@@ -282,7 +295,7 @@ def create_collection(title, description, user):
             "title": title,
             "description": description,
             "owner": (user.get("username") or "").strip().casefold(),
-            "owner_display": user.get("username"),
+            "owner_display": user.get("display") or user.get("username"),
             "work_ids": [],
             "created": time.strftime("%Y-%m-%d %H:%M:%S"),
         }

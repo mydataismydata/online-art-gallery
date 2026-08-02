@@ -136,6 +136,17 @@ def api_users_role(username):
     return jsonify({"user": user})
 
 
+@bp.post("/api/users/<username>/display")
+@auth.require_role("owner")
+def api_users_display(username):
+    data = request.get_json(silent=True) or {}
+    try:
+        user = auth.set_display(username, data.get("display"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"user": user})
+
+
 @bp.post("/api/users/<username>/password")
 @auth.require_role("owner")
 def api_users_password(username):

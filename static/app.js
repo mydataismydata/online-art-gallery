@@ -5941,7 +5941,14 @@ function renderUsers(list) {
     return (
       '<div class="urow"><div class="umeta"><span class="uname">' + esc(u.username) +
       (self ? ' <span class="tiny">(you)</span>' : "") + "</span>" +
-      '<span class="tiny">since ' + esc((u.created || "").split(" ")[0]) + "</span></div>" +
+      '<span class="tiny">since ' + esc((u.created || "").split(" ")[0]) + "</span>" +
+      // The byline: what this person's collections say. Display only — signing
+      // in stays by username, and blank falls back to it.
+      '<input class="udisp" data-user="' + esc(u.username) + '" type="text" maxlength="60" ' +
+      'value="' + esc(u.display || "") + '" placeholder="shown as ' + esc(u.username) + '" ' +
+      'autocomplete="off" spellcheck="false" ' +
+      'title="The name on this person’s collections. Blank shows the username.">' +
+      "</div>" +
       '<div class="uact">' + roleCtl +
       '<button class="linkbtn" data-pw="' + esc(u.username) + '">reset password</button>' +
       (self ? "" : '<button class="danger" data-del="' + esc(u.username) + '">delete</button>') +
@@ -5949,6 +5956,17 @@ function renderUsers(list) {
     );
   }).join("");
 
+  box.querySelectorAll(".udisp").forEach((i) =>
+    i.addEventListener("change", async () => {
+      try {
+        const r = await api("/api/users/" + encodeURIComponent(i.dataset.user) + "/display", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ display: i.value }),
+        });
+        toast("Collections by " + i.dataset.user + " now say “" +
+              (r.user.display || r.user.username) + "”.");
+      } catch (e) { alert(e.message); reloadUsers(); }
+    }));
   box.querySelectorAll(".urole").forEach((s) =>
     s.addEventListener("change", async () => {
       try {

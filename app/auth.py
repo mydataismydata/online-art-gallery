@@ -62,7 +62,7 @@ def public(record):
     if not record:
         return None
     return {"username": record.get("username"), "role": record.get("role"),
-            "created": record.get("created")}
+            "display": record.get("display"), "created": record.get("created")}
 
 
 # ---------------- validation ----------------
@@ -146,6 +146,24 @@ def set_role(username, role):
         if rec["role"] == "owner" and role != "owner" and _count_owners(data) == 1:
             raise ValueError("Can't change the role of the only Owner - promote another Owner first.")
         rec["role"] = role
+        _save(data)
+        return public(rec)
+
+
+def set_display(username, display):
+    """The name shown beside this account's work — collection bylines and the
+    like. Display only: signing in stays by username. Set empty to go back to
+    the username itself."""
+    display = re.sub(r"\s+", " ", (display or "").strip())[:60]
+    with _lock:
+        data = _load()
+        rec = data["users"].get(_key(username))
+        if not rec:
+            raise ValueError("No such user.")
+        if display:
+            rec["display"] = display
+        else:
+            rec.pop("display", None)
         _save(data)
         return public(rec)
 
