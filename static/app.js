@@ -3493,9 +3493,11 @@ const MU_KEYSET = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
 // was magnified on screen and went soft. The stage scales the whole scene up
 // (and the camera's strides with it): the projection is identical, but every
 // plane is drawn at MU_SS times the texel density. The crispness is paid for
-// in the VIEWER'S GPU memory — rendering is entirely client-side — so coarse
-// pointers (phones) take a gentler factor.
-const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches) ? 2 : 3;
+// in the VIEWER'S GPU memory — rendering is entirely client-side — and a
+// phone has none to spare: its devicePixelRatio (2-3×) already rasterises
+// several texels per centimetre through the same mechanism, so the stage
+// there stays 1:1 and the screen itself supplies the density.
+const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches) ? 1 : 3;
 
 // Walking by hand: the room follows your pointer — sideways turns you, up and
 // down walks you — on a mouse exactly as on a finger.
@@ -4175,6 +4177,7 @@ function muTravel(to) {
                Math.hypot(r.cx - mid.x, r.cz - mid.z);
   MU.glide = { from: from, mid: mid, to: { x: r.cx, z: r.cz, yaw: from.yaw + dy },
                t0: null, dur: Math.max(800, Math.min(2200, dist * 1.5)) };
+  muWake();
 }
 
 /* The plan of the museum in the corner: every room to scale with its number,
@@ -4251,6 +4254,7 @@ function muMapBuild() {
       muRoomLabel();
       muCull();
     }
+    muWake();                        // the parked loop resumes for the landing
     muApply();
   });
 }
@@ -4327,6 +4331,12 @@ function muMove(dx, dz) {
 
 function muApply() {
   const cam = MU.cam;
+  // The camera hasn't moved: write nothing, so the compositor sees a still
+  // scene and the frame loop can tell stillness from motion (and park).
+  const a = MU.appl;
+  if (a && a.x === cam.x && a.z === cam.z && a.yaw === cam.yaw &&
+      a.zoom === cam.zoom && a.p === MU.baseP) return false;
+  MU.appl = { x: cam.x, z: cam.z, yaw: cam.yaw, zoom: cam.zoom, p: MU.baseP };
   const P = Math.round(MU.baseP * cam.zoom);
   MU.vp.style.perspective = P + "px";
   // The CSS eye sits at z = +P, so the world is pushed P forward first: the
@@ -4337,6 +4347,7 @@ function muApply() {
     "translate3d(" + (-cam.x * MU_SS).toFixed(1) + "px," + (MU_EYE * MU_SS) +
     "px," + (-cam.z * MU_SS).toFixed(1) + "px)";
   if (MU.map) muMapSync();
+  return true;
 }
 
 /* Whichever painting you've walked up to and are actually facing, from its
@@ -4399,11 +4410,11 @@ function muGlideTo(art) {
   // loop read different clocks, and an easing fed a negative time runs away.
   MU.glide = { from: from, to: to, t0: null,
                dur: Math.max(500, Math.min(1400, Math.hypot(to.x - from.x, to.z - from.z) * 2.2)) };
+  muWake();
 }
 
 function muFrame(ts) {
   if (!MU.active) return;
-  MU.raf = requestAnimationFrame(muFrame);
   const dt = Math.min(0.05, (ts - MU.last) / 1000 || 0.016);
   MU.last = ts;
   const k = MU.keys;
@@ -4434,14 +4445,31 @@ function muFrame(ts) {
     const s = Math.min(1, dt * 7.5);
     MU.vel.f += (f * MU_SPEED - MU.vel.f) * s;
     MU.vel.t += (t * MU_TURN - MU.vel.t) * s;
+    // Settled and nothing held: snap the residue to a true zero, so the
+    // numbers stop creeping and stillness below can be seen exactly.
+    if (!f && !t && Math.abs(MU.vel.f) < 0.4 && Math.abs(MU.vel.t) < 0.004) {
+      MU.vel.f = MU.vel.t = 0;
+    }
     MU.cam.yaw += MU.vel.t * dt;
     if (Math.abs(MU.vel.f) > 0.4) {
       muMove(Math.sin(MU.cam.yaw) * MU.vel.f * dt,
              -Math.cos(MU.cam.yaw) * MU.vel.f * dt);
     }
   }
-  muApply();
+  const wrote = muApply();
   muNearest(ts);
+  // A still museum needs no frames. A second after the last real movement the
+  // loop parks — no style writes, no wakeups, a cool phone — and any key,
+  // wheel, touch or stroll re-arms it through muWake.
+  if (wrote || MU.glide) MU.moveTs = ts;
+  if (ts - MU.moveTs < 1000) MU.raf = requestAnimationFrame(muFrame);
+  else MU.raf = 0;
+}
+
+/* Re-arm the parked frame loop; every input path passes through here. */
+function muWake() {
+  MU.moveTs = performance.now();
+  if (!MU.raf && MU.active) MU.raf = requestAnimationFrame(muFrame);
 }
 
 function muKeyDown(e) {
@@ -4456,6 +4484,7 @@ function muKeyDown(e) {
     e.preventDefault();              // the page behind must not scroll
     MU.keys[e.key] = true;
     MU.glide = null;
+    muWake();
   }
 }
 function muKeyUp(e) { if (MU_KEYSET[e.key]) MU.keys[e.key] = false; }
@@ -4470,6 +4499,7 @@ function muResize() {
 function muWheel(e) {
   e.preventDefault();
   MU.cam.zoom = Math.max(0.55, Math.min(3.2, MU.cam.zoom * Math.exp(-e.deltaY * 0.0012)));
+  muWake();
   muApply();
 }
 
@@ -4481,6 +4511,7 @@ function muWheel(e) {
 function muPointerDown(e) {
   if (e.button > 0) return;                 // a right-click is not a walk
   if (e.pointerType === "mouse") e.preventDefault();   // no image-dragging, no selection
+  muWake();
   MU.points.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (MU.clip && MU.clip.setPointerCapture) {
     try { MU.clip.setPointerCapture(e.pointerId); } catch (err) { /* gone already */ }
@@ -4495,6 +4526,7 @@ function muPointerDown(e) {
 }
 function muPointerMove(e) {
   if (!MU.points.has(e.pointerId)) return;
+  muWake();
   MU.points.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (MU.pinch && MU.points.size >= 2) {
     const [a, b] = [...MU.points.values()];
@@ -4562,6 +4594,7 @@ function muTeardown() {
   if (!MU.active) return;
   MU.active = false;
   cancelAnimationFrame(MU.raf);
+  MU.raf = 0;
   document.removeEventListener("keydown", muKeyDown, true);
   document.removeEventListener("keyup", muKeyUp, true);
   window.removeEventListener("blur", muBlur);
@@ -4661,6 +4694,8 @@ async function museumView() {
   }
 
   MU.last = 0;
+  MU.appl = null;                    // first muFrame must write, whatever the camera says
+  MU.moveTs = performance.now();     // and the loop starts awake
   MU.raf = requestAnimationFrame(muFrame);
 }
 

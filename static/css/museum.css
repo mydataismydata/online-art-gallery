@@ -171,6 +171,11 @@ body.mu-open { overflow: hidden; }
    the floor is the only button a museum needs. */
 .museum.touch .mu-hint { display: none; }
 
+/* The marker's pulse is a luxury a phone can't afford: that one animation
+   keeps the compositor rendering an otherwise still scene, and the heat
+   arrives long before the beauty does. */
+.museum.touch .mu-target { animation: none; opacity: .85; }
+
 /* Portrait is a corridor wall, not a museum: ask for the turn, stop rendering. */
 .mu-rotate {
   display: none; position: absolute; inset: 0; z-index: 5;
