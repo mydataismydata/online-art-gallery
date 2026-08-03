@@ -114,6 +114,25 @@ def clean_sort(s):
     return s if s in SORTS else DEFAULT_SORT
 
 
+# The collection's own museum room ("walk this collection"): one room, hung
+# like the museum's first — the south wall holds the front door. A sparse walls
+# map pins works to compass walls; the layout is the room's fit. No doorways,
+# so no breezeway.
+ROOM_WALLS = ("n", "s", "e", "w")
+ROOM_LAYOUTS = ("normal", "stacked")
+
+
+def clean_room_layout(s):
+    s = (s or "").strip()
+    return s if s in ROOM_LAYOUTS else "normal"
+
+
+def _room_walls(rec):
+    ids = set(rec.get("work_ids") or [])
+    walls = rec.get("walls") if isinstance(rec.get("walls"), dict) else {}
+    return {k: v for k, v in walls.items() if k in ids and v in ROOM_WALLS}
+
+
 def _apply_sort(works, sort):
     """Undated works sort last whichever way the years run — flipping the order
     shouldn't march the ones we know nothing about to the front."""
@@ -193,6 +212,8 @@ def detail(rec, user):
         "works": works,
         "count": len(works),
         "sort": clean_sort(rec.get("sort")),
+        "walls": _room_walls(rec),
+        "layout": clean_room_layout(rec.get("layout")),
         "can_edit": can_edit(rec, user),
     }
 
@@ -254,12 +275,17 @@ def import_published(rec):
             "owner_display": rec.get("owner_display"),
             "work_ids": [w for w in rec.get("work_ids") or [] if w],
             "sort": clean_sort(rec.get("sort")),
+            "walls": {k: v for k, v in (rec.get("walls") or {}).items()
+                      if k and v in ROOM_WALLS},
+            "layout": clean_room_layout(rec.get("layout")),
             "source": "published",
             "created": (cur or {}).get("created") or time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         if cur and all(cur.get(k) == new[k] for k in
                        ("title", "description", "owner", "owner_display", "work_ids")) \
-                and clean_sort(cur.get("sort")) == new["sort"]:
+                and clean_sort(cur.get("sort")) == new["sort"] \
+                and _room_walls(cur) == new["walls"] \
+                and clean_room_layout(cur.get("layout")) == new["layout"]:
             return "unchanged"
         _write(new)
         return "updated" if cur else "added"
@@ -354,6 +380,32 @@ def reorder(cid, ids):
         order += [wid for wid in have if wid not in seen]
         rec["work_ids"] = order
         rec["sort"] = DEFAULT_SORT
+        return _write(rec)
+
+
+def set_room(cid, ids, walls, layout):
+    """Arrange the collection's museum room: order, wall pins and fit in one
+    save, as the room's arrange screen makes each change. The order rule is
+    reorder's exactly — and like reorder it drops the collection into manual
+    mode, because a hand-hung room IS the hand-made order."""
+    with _lock:
+        rec = _read(cid)
+        if not rec:
+            raise ValueError("No such collection.")
+        have = rec.get("work_ids", [])
+        held = set(have)
+        seen, order = set(), []
+        for wid in ids or []:
+            if wid in held and wid not in seen:
+                seen.add(wid)
+                order.append(wid)
+        order += [wid for wid in have if wid not in seen]
+        rec["work_ids"] = order
+        rec["sort"] = DEFAULT_SORT
+        walls = walls if isinstance(walls, dict) else {}
+        rec["walls"] = {str(k): v for k, v in walls.items()
+                        if str(k) in held and v in ROOM_WALLS}
+        rec["layout"] = clean_room_layout(layout)
         return _write(rec)
 
 

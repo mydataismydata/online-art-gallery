@@ -234,7 +234,14 @@ function route() {
   if (segs[0] === "connections")
     return connectionsView(query.get("artist"), query.get("mode"));
   if (segs[0] === "collections") return collectionsView();
-  if (segs[0] === "collection" && segs[1]) return collectionView(segs[1]);
+  if (segs[0] === "collection" && segs[1]) {
+    if (segs[2] === "walk") {
+      return segs[3] === "arrange"
+        ? collectionRoomArrangeView(segs[1])
+        : collectionWalkView(segs[1]);
+    }
+    return collectionView(segs[1]);
+  }
   if (segs[0] === "museum")
     return (segs[1] === "arrange" && isOwner()) ? museumArrangeView() : museumView();
   // Adding art doesn't exist on the public box, even for the owner.
@@ -2972,8 +2979,12 @@ async function collectionView(cid, arranging) {
       ? '<button class="linkbtn' + (arranging ? " on" : "") + '" id="col-arrange">' +
         (arranging ? "Done arranging" : "Arrange by hand") + "</button>"
       : "";
-    const ctl = (editable || sortSel)
-      ? '<div class="col-ctl">' + sortSel + arrBtn +
+    const walkBtn = works.length
+      ? '<a class="linkbtn" href="#/collection/' + encodeURIComponent(cid) +
+        '/walk">Walk this collection</a>'
+      : "";
+    const ctl = (walkBtn || editable || sortSel)
+      ? '<div class="col-ctl">' + walkBtn + sortSel + arrBtn +
         (editable
           ? '<button class="linkbtn" id="col-edit">edit details</button>' +
             '<button class="danger" id="col-delete">Delete collection</button>'
@@ -3109,7 +3120,7 @@ async function saveMuseum(rooms) {
 
 const MU_WALLS = [["", "auto"], ["n", "N"], ["s", "S"], ["e", "E"], ["w", "W"]];
 
-function muRow(w, wall, wallOpts) {
+function muRow(w, wall, wallOpts, solo) {
   const meta = [w.artist, w.date || w.year, cmDims(w)].filter(Boolean).join(" · ");
   // A work with no recorded size still hangs — at an assumed size — but the
   // owner arranging rooms is exactly the person who can fix it, so say so.
@@ -3124,11 +3135,14 @@ function muRow(w, wall, wallOpts) {
     '<li class="arow" data-id="' + esc(w.id) + '">' +
       '<span class="agrip" aria-hidden="true" title="Drag to move"></span>' +
       // The movers ride between the handle and the number: ↑ ⇈ over ↓ ⇊.
+      // A single-room hang (`solo` — a collection's walk) has no room above
+      // or below to stride to, and no cutting or unhanging either: the
+      // collection page owns membership.
       '<span class="arow-move">' +
       '<button class="arow-btn aup" type="button" title="Move up">↑</button>' +
-      '<button class="arow-btn aupr" type="button" title="Up a room — joins the end of the room above">⇈</button>' +
+      (solo ? "" : '<button class="arow-btn aupr" type="button" title="Up a room — joins the end of the room above">⇈</button>') +
       '<button class="arow-btn adown" type="button" title="Move down">↓</button>' +
-      '<button class="arow-btn adownr" type="button" title="Down a room — joins the top of the room below">⇊</button>' +
+      (solo ? "" : '<button class="arow-btn adownr" type="button" title="Down a room — joins the top of the room below">⇊</button>') +
       "</span>" +
       '<span class="anum"></span>' +
       '<span class="athumb"><img src="' + thumbSrc(w) + '" loading="lazy" alt="" draggable="false"></span>' +
@@ -3138,8 +3152,9 @@ function muRow(w, wall, wallOpts) {
       '<select class="awall' + (wall ? " pinned" : "") +
       '" title="Which wall this painting hangs on — the compass is absolute, the same in every room; auto lets the room decide">' +
       opts + "</select>" +
-      '<button class="arow-btn asplit" type="button" title="Cut here: this painting starts a new room">✂</button>' +
-      '<button class="arow-btn aunhang" type="button" title="Take off the wall (stays in the library)">✕</button>' +
+      (solo ? "" :
+        '<button class="arow-btn asplit" type="button" title="Cut here: this painting starts a new room">✂</button>' +
+        '<button class="arow-btn aunhang" type="button" title="Take off the wall (stays in the library)">✕</button>') +
       "</span></li>"
   );
 }
@@ -3230,14 +3245,18 @@ function muSerialize() {
 }
 
 /* Save what's on screen; on failure re-render from the server so the screen
-   can't keep showing an arrangement the museum refused. */
+   can't keep showing an arrangement that was refused. Which server call and
+   which re-render depends on whose rooms these are — the museum's, or a
+   collection's single room — so each arrange view installs its own pair. */
+let MU_ARRANGE = null;
 async function muSaveArrangement(rerender) {
+  const t = MU_ARRANGE;
   try {
-    await saveMuseum(muSerialize());
-    if (rerender) museumArrangeView(true);
+    await t.save(muSerialize());
+    if (rerender) t.rerender();
   } catch (e) {
     toast(e.message);
-    museumArrangeView(true);
+    t.rerender();
   }
 }
 
@@ -3398,7 +3417,7 @@ async function museumArrangeView(keepScroll) {
   const y = keepScroll ? window.scrollY : 0;
   let museum;
   try { museum = (await api("/api/museum")).museum; }
-  catch (e) { app.innerHTML = page(errbox(e)); return; }
+  catch (e) { errbox(e); return; }
   const rooms = museum.rooms.length
     ? museum.rooms
     : [{ works: [], layout: "normal" }];
@@ -3440,6 +3459,7 @@ async function museumArrangeView(keepScroll) {
     '<button class="linkbtn" id="mroom-add" type="button">+ New room at the end</button>',
     "tight");
   document.querySelectorAll("#mrooms .marrange").forEach((b) => renumber(b));
+  MU_ARRANGE = { save: saveMuseum, rerender: () => museumArrangeView(true) };
   wireMuseumArrange($("#mrooms"));
   $("#mroom-add").addEventListener("click", () => {
     const ns = document.createElement("section");
@@ -3449,6 +3469,58 @@ async function museumArrangeView(keepScroll) {
     $("#mrooms").appendChild(ns);
     muSaveArrangement(true);
   });
+  if (y) window.scrollTo(0, y);
+}
+
+/* Arranging a collection's one museum room: the museum arrange screen with
+   everything doorways brought — exit pickers, cutting, breezeway, room
+   strides — left out. Order is the collection's own hang; membership stays
+   the collection page's business. */
+async function collectionRoomArrangeView(cid, keepScroll) {
+  setNav("collections");
+  const y = keepScroll ? window.scrollY : 0;
+  let c;
+  try { c = (await api("/api/collection/" + encodeURIComponent(cid))).collection; }
+  catch (e) { errbox(e); return; }
+  const back = "#/collection/" + encodeURIComponent(cid);
+  if (!c.can_edit) { location.hash = back + "/walk"; return; }
+  const layout = c.layout || "normal";
+  const seg = [["normal", "Normal"], ["stacked", "Stacked"]].map(([v, label]) =>
+    '<button class="seg-btn' + (layout === v ? " on" : "") +
+    '" type="button" data-layout="' + v + '">' + label + "</button>").join("");
+  const n = c.works.length;
+  app.innerHTML = page(
+    '<a class="back" href="' + back + '/walk">← Walk this collection</a>' +
+    '<div class="pagehead" style="margin-top:26px"><div><h1>Arrange the room</h1>' +
+    '<p class="sub">' + esc(c.title) + " · " + n + (n === 1 ? " work" : " works") +
+    " · every change saves as you make it</p></div></div>" +
+    '<p class="arrange-hint">One room, hung like the museum’s first: the ' +
+    "south wall holds the front door, and a pin to <b>S</b> lands on its " +
+    "shoulders. Drag a painting by its handle or nudge it with ↑ ↓; the wall " +
+    "picker pins it to a compass wall (auto lets the room decide); " +
+    "<b>Normal</b> hangs close, <b>Stacked</b> is the salon wall. The order " +
+    "here is the collection’s own hang, wherever it shows.</p>" +
+    '<div id="mrooms">' +
+    '<section class="mroom" data-layout="' + esc(layout) + '" data-exit="s">' +
+    '<header class="mroom-head"><h2>' + esc(c.title) + "</h2>" +
+    '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
+    '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
+    "</header>" +
+    '<ol class="arrange marrange">' +
+    c.works.map((w) => muRow(w, (c.walls || {})[w.id], null, true)).join("") + "</ol>" +
+    (n ? "" : '<p class="mroom-empty tiny">Empty — add works from the collection page.</p>') +
+    "</section></div>",
+    "tight");
+  document.querySelectorAll("#mrooms .marrange").forEach((b) => renumber(b));
+  MU_ARRANGE = {
+    save: (rooms) => api("/api/collection/" + encodeURIComponent(cid) + "/room", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ work_ids: rooms[0].work_ids, walls: rooms[0].walls,
+                             layout: rooms[0].layout }),
+    }),
+    rerender: () => collectionRoomArrangeView(cid, true),
+  };
+  wireMuseumArrange($("#mrooms"));
   if (y) window.scrollTo(0, y);
 }
 
@@ -4500,7 +4572,7 @@ function muKeyDown(e) {
   // in the capture phase, so the gate is checked while the viewer is still
   // open — its own handler then walks or closes as usual).
   if (viewer.classList.contains("open")) return;
-  if (e.key === "Escape") { location.hash = "#/"; return; }
+  if (e.key === "Escape") { location.hash = MU.exit || "#/"; return; }
   if (MU_KEYSET[e.key]) {
     e.preventDefault();              // the page behind must not scroll
     MU.keys[e.key] = true;
@@ -4633,7 +4705,7 @@ async function museumView() {
   setNav("museum");
   let museum;
   try { museum = (await api("/api/museum")).museum; }
-  catch (e) { app.innerHTML = page(errbox(e)); return; }
+  catch (e) { errbox(e); return; }
   const hasArt = museum.rooms.some((r) => r.works.length);
   const arrange = isOwner()
     ? '<a class="mu-arrange linkbtn" href="#/museum/arrange">Arrange</a>' : "";
@@ -4649,7 +4721,30 @@ async function museumView() {
       "</div>");
     return;
   }
+  muOpenWalk(museum, { exit: "#/", arrange: arrange, map: true });
+}
 
+/* A collection as a walk: its works in their hang order, one room, the front
+   door on the south wall — the museum's first room, standing alone. */
+async function collectionWalkView(cid) {
+  setNav("collections");
+  let c;
+  try { c = (await api("/api/collection/" + encodeURIComponent(cid))).collection; }
+  catch (e) { errbox(e); return; }
+  const back = "#/collection/" + encodeURIComponent(cid);
+  if (!c.works.length) { location.hash = back; return; }
+  const arrange = c.can_edit
+    ? '<a class="mu-arrange linkbtn" href="' + back + '/walk/arrange">Arrange</a>' : "";
+  muOpenWalk(
+    { rooms: [{ works: c.works, walls: c.walls || {}, exit: null,
+                layout: c.layout || "normal", name: c.title }] },
+    { exit: back, arrange: arrange, map: false });
+}
+
+/* Boot the walk over resolved rooms — the museum's, or a collection's one.
+   `o.exit` is where ✕ and Escape land, `o.arrange` the top-bar link (or ""),
+   and `o.map` whether the corner plan renders: one room has nothing to plot. */
+function muOpenWalk(museum, o) {
   const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
   app.innerHTML =
     '<div id="museum" class="museum' + (touch ? " touch" : "") + '">' +
@@ -4659,15 +4754,15 @@ async function museumView() {
         '<div class="mu-top">' +
           '<span class="eyebrow">' + esc(siteShort() || siteTitle()) + "</span>" +
           '<span class="mu-room" id="mu-room"></span>' +
-          '<span class="mu-sp"></span>' + arrange +
-          '<a class="mu-x" href="#/" aria-label="Leave the museum">✕</a>' +
+          '<span class="mu-sp"></span>' + o.arrange +
+          '<a class="mu-x" href="' + o.exit + '" aria-label="Leave the museum">✕</a>' +
         "</div>" +
         // No caption across the bottom: it sat over the floor markers, and the
         // placard on the opened painting already says all of it.
         '<div class="mu-hint">drag the room to walk · ↑ ↓ ← → · scroll to zoom · ' +
         "click a painting to approach, again to open</div>" +
         // The corner plan. Phones don't get one — the screen is for walking.
-        (touch ? "" : '<div class="mu-map" id="mu-map" aria-label="Museum plan"></div>') +
+        (touch || !o.map ? "" : '<div class="mu-map" id="mu-map" aria-label="Museum plan"></div>') +
       "</div>" +
       '<div class="mu-rotate">⟳&nbsp; Turn your phone sideways — the museum is a landscape.</div>' +
     "</div>";
@@ -4676,6 +4771,7 @@ async function museumView() {
   MU.world = $("#mu-world");
   MU.clip = $("#mu-clip");
   MU.touch = touch;
+  MU.exit = o.exit;
   MU.active = true;
   document.body.classList.add("mu-open");
   muResize();

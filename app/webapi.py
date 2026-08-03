@@ -305,6 +305,22 @@ def api_collection_reorder(cid):
     return jsonify({"collection": collections.detail(rec, auth.current_user())})
 
 
+@bp.post("/api/collection/<cid>/room")
+@auth.require_login
+def api_collection_room(cid):
+    """Arrange the collection's museum room: order, wall pins and fit."""
+    rec, err = _load_editable(cid)
+    if err:
+        return err
+    data = request.get_json(silent=True) or {}
+    try:
+        rec = collections.set_room(cid, [str(i) for i in data.get("work_ids") or []],
+                                   data.get("walls"), data.get("layout"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"collection": collections.detail(rec, auth.current_user())})
+
+
 @bp.delete("/api/collection/<cid>")
 @auth.require_login
 def api_collection_delete(cid):

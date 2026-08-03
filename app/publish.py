@@ -465,6 +465,10 @@ def _collection_blobs():
             "owner_display": coll.byline(rec) or "",
             "sort": coll.clean_sort(rec.get("sort")),
             "work_pids": pids,
+            # The collection's museum room travels like the museum's own walls.
+            "walls": {pid_by_wid[k]: v for k, v in (rec.get("walls") or {}).items()
+                      if k in pid_by_wid},
+            "layout": coll.clean_room_layout(rec.get("layout")),
         }
         out[cid] = (rec.get("title") or cid,
                     json.dumps(blob, ensure_ascii=False, indent=1, sort_keys=True))
@@ -940,6 +944,8 @@ def _import_collections(repo):
         # tombstoned, so it never came back) -- the collection simply hangs without it.
         rec["work_ids"] = [wid_by_pid[p] for p in rec.get("work_pids") or []
                            if p in wid_by_pid]
+        walls = rec.get("walls") if isinstance(rec.get("walls"), dict) else {}
+        rec["walls"] = {wid_by_pid[p]: w for p, w in walls.items() if p in wid_by_pid}
         if not rec["work_ids"]:
             continue
         try:

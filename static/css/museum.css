@@ -199,6 +199,8 @@ body.mu-open { overflow: hidden; }
   background: var(--raised); border: 1px solid var(--hair-soft);
 }
 .mroom-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+/* A collection's room wears the collection's title — fixed, not typed. */
+.mroom-head h2 { margin: 0; font: 400 19px var(--serif); color: var(--display2); }
 /* The heading is the room's name, edited right where it stands. Unnamed rooms
    wear their number as a placeholder, a shade dimmer — an invitation to type.
    Scoped under the header to outweigh the form sheet's input[type=text]. */
