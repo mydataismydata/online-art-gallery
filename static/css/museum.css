@@ -233,6 +233,24 @@ body.mu-open { overflow: hidden; }
 .mroom-merge { font-size: 12px; }
 .mroom-via-l { margin-left: 10px; white-space: nowrap; }
 
+/* The room's paint: a small colour well beside the fit pills, square like the
+   wall picker (the pills stay the one rounded thing), and its ↺ reset — a
+   header button, so it forgoes the row buttons' hover-reveal. */
+.mroom-paint { display: inline-flex; align-self: center; }
+.mroom-color {
+  width: 26px; height: 26px; padding: 2px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--hair-mid); border-radius: 0;
+  -webkit-appearance: none; appearance: none;
+}
+.mroom-color::-webkit-color-swatch-wrapper { padding: 0; }
+.mroom-color::-webkit-color-swatch { border: none; }
+.mroom-color::-moz-color-swatch { border: none; }
+.mroom-color:hover { border-color: var(--hair-strong); }
+.mroom-head .mroom-paint-reset {
+  align-self: center; opacity: 1;
+  width: 26px; height: 26px; margin-left: -8px;
+}
+
 /* Row extras the collections list doesn't have: the movers riding just after
    the drag handle (↑ ⇈ over ↓ ⇊), then on the right the wall picker, cut
    here, and take down. */

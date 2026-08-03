@@ -16,6 +16,7 @@ which wall a painting hangs on is curation of the museum itself, not a
 curator's own collection — but the walk is open to anyone who can browse.
 """
 import json
+import re
 import threading
 import time
 
@@ -81,6 +82,16 @@ def clean_name(s):
     return " ".join(str(s or "").split())[:MAX_NAME]
 
 
+_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def clean_color(s):
+    """A room's wall paint: '#rrggbb', kept lowercase. Anything else means the
+    museum's own grey, stored as empty."""
+    s = str(s or "").strip()
+    return s.lower() if _COLOR_RE.match(s) else ""
+
+
 def _read():
     try:
         rec = json.loads(config.MUSEUM_FILE.read_text(encoding="utf-8"))
@@ -107,7 +118,8 @@ def _rooms(rec):
         walls = {k: v for k, v in walls.items() if k in ids and v in WALLS}
         out.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
                     "layout": clean_layout(r.get("layout")),
-                    "name": clean_name(r.get("name"))})
+                    "name": clean_name(r.get("name")),
+                    "color": clean_color(r.get("color"))})
     return _norm_exits(out)
 
 
@@ -122,7 +134,8 @@ def detail():
     for r in _rooms(rec):
         works = [w for w in (library.get(wid) for wid in r["work_ids"]) if w]
         rooms.append({"works": works, "walls": r["walls"], "exit": r["exit"],
-                      "layout": r["layout"], "name": r["name"]})
+                      "layout": r["layout"], "name": r["name"],
+                      "color": r["color"]})
         hung += len(works)
     return {"rooms": rooms, "count": hung,
             "updated": (rec or {}).get("updated")}
@@ -131,7 +144,8 @@ def detail():
 def save(rooms_in):
     """Replace the whole hang:
     [{work_ids: [...], walls: {id: "n"|"s"|"e"|"w"},
-      layout: "normal"|"stacked"|"breezeway", name: "..."}].
+      layout: "normal"|"stacked"|"breezeway", name: "...",
+      color: "#rrggbb" (the walls' paint; empty = the stock grey)}].
 
     Ids are validated against the library and a work hangs once — a duplicate
     keeps its first placement. Unknown ids are dropped rather than stored:
@@ -163,7 +177,8 @@ def save(rooms_in):
                  if str(k) in ids and v in WALLS}
         rooms.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
                       "layout": clean_layout(r.get("layout")),
-                      "name": clean_name(r.get("name"))})
+                      "name": clean_name(r.get("name")),
+                      "color": clean_color(r.get("color"))})
     _norm_exits(rooms)
     with _lock:
         rec = _read() or {}

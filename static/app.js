@@ -3162,6 +3162,18 @@ function muRow(w, wall, wallOpts, solo) {
 const MU_OPP = { n: "s", s: "n", e: "w", w: "e" };
 const MU_WALL_NAME = { n: "north", s: "south", e: "east", w: "west" };
 
+/* The wall-paint control a room's header carries: a colour well holding the
+   room's paint (the stock grey when none is set) and a reset back to it. */
+function muPaintCtl(color) {
+  return (
+    '<label class="mroom-paint" title="Wall paint — the colour this room wears in the walk">' +
+    '<input type="color" class="mroom-color" aria-label="Wall colour" value="' +
+    esc(color || MU_WALL_DEFAULT) + '"></label>' +
+    '<button class="arow-btn mroom-paint-reset" type="button" ' +
+    'title="Back to the stock museum grey">↺</button>'
+  );
+}
+
 function muRoomSection(room, i, nrooms, entry) {
   const breeze = room.layout === "breezeway";
   const seg = MU_LAYOUTS.map(([v, label]) =>
@@ -3215,7 +3227,7 @@ function muRoomSection(room, i, nrooms, entry) {
       'title="Name this room — the walk shows the name in place of the room number">' +
       '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
       '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
-      doorSeg + drop +
+      muPaintCtl(room.color) + doorSeg + drop +
       "</header>" +
       '<ol class="arrange marrange">' +
       room.works.map((w) => muRow(w, (room.walls || {})[w.id], wallOpts)).join("") + "</ol>" +
@@ -3231,15 +3243,18 @@ function muSerialize() {
       const sel = r.querySelector(".awall");
       if (sel && sel.value) walls[r.dataset.id] = sel.value;
     });
-    // A section minted on this screen (a cut, a grown room) has no name field
-    // until the re-render; it starts life unnamed.
+    // A section minted on this screen (a cut, a grown room) has no name or
+    // paint field until the re-render; it starts life unnamed, stock grey.
+    // Picking the exact stock grey IS the stock grey, so it stores as none.
     const name = sec.querySelector(".mroom-name");
+    const paint = sec.querySelector(".mroom-color");
     return {
       work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
       walls: walls,
       exit: sec.dataset.exit || "n",
       layout: sec.dataset.layout,
       name: name ? name.value.trim() : "",
+      color: paint && paint.value !== MU_WALL_DEFAULT ? paint.value : "",
     };
   });
 }
@@ -3319,7 +3334,12 @@ function wireMuseumArrange(container) {
     const btn = e.target.closest("button");
     if (!btn) return;
     const sec = btn.closest(".mroom");
-    if (btn.classList.contains("seg-via") && sec) {
+    if (btn.classList.contains("mroom-paint-reset") && sec) {
+      const inp = sec.querySelector(".mroom-color");
+      if (!inp || inp.value === MU_WALL_DEFAULT) return;
+      inp.value = MU_WALL_DEFAULT;
+      muSaveArrangement(false);
+    } else if (btn.classList.contains("seg-via") && sec) {
       if (!btn.dataset.exit || sec.dataset.exit === btn.dataset.exit) return;
       sec.dataset.exit = btn.dataset.exit;
       // Re-render: every room below may find a different wall spoken for.
@@ -3400,9 +3420,11 @@ function wireMuseumArrange(container) {
     }
   });
 
-  // Pinning a wall or naming a room moves nothing on this screen — just save.
+  // Pinning a wall, naming a room or painting one moves nothing on this
+  // screen — just save.
   container.addEventListener("change", (e) => {
-    if (e.target.classList.contains("mroom-name")) {
+    if (e.target.classList.contains("mroom-name") ||
+        e.target.classList.contains("mroom-color")) {
       muSaveArrangement(false);
       return;
     }
@@ -3428,7 +3450,8 @@ async function museumArrangeView(keepScroll) {
     " · " + rooms.length + (rooms.length === 1 ? " room" : " rooms") +
     " · every change saves as you make it</p></div></div>" +
     '<p class="arrange-hint">Type over a room\'s heading to name it — the ' +
-    "walk hangs the name in place of the room number. " +
+    "walk hangs the name in place of the room number. The paint well " +
+    "recolours the room's walls, ↺ takes back the gallery grey. " +
     "Drag a painting by its handle, or nudge it with " +
     "↑ ↓ — past a room's edge it crosses into the neighbour — and ⇈ ⇊ " +
     "stride a whole room at a time. The wall picker " +
@@ -3498,13 +3521,15 @@ async function collectionRoomArrangeView(cid, keepScroll) {
     "south wall holds the front door, and a pin to <b>S</b> lands on its " +
     "shoulders. Drag a painting by its handle or nudge it with ↑ ↓; the wall " +
     "picker pins it to a compass wall (auto lets the room decide); " +
-    "<b>Normal</b> hangs close, <b>Stacked</b> is the salon wall. The order " +
+    "<b>Normal</b> hangs close, <b>Stacked</b> is the salon wall, and the " +
+    "paint well recolours the walls (↺ takes back the gallery grey). The order " +
     "here is the collection’s own hang, wherever it shows.</p>" +
     '<div id="mrooms">' +
     '<section class="mroom" data-layout="' + esc(layout) + '" data-exit="s">' +
     '<header class="mroom-head"><h2>' + esc(c.title) + "</h2>" +
     '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
     '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
+    muPaintCtl(c.color) +
     "</header>" +
     '<ol class="arrange marrange">' +
     c.works.map((w) => muRow(w, (c.walls || {})[w.id], null, true)).join("") + "</ol>" +
@@ -3516,7 +3541,7 @@ async function collectionRoomArrangeView(cid, keepScroll) {
     save: (rooms) => api("/api/collection/" + encodeURIComponent(cid) + "/room", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ work_ids: rooms[0].work_ids, walls: rooms[0].walls,
-                             layout: rooms[0].layout }),
+                             layout: rooms[0].layout, color: rooms[0].color }),
     }),
     rerender: () => collectionRoomArrangeView(cid, true),
   };
@@ -3554,6 +3579,10 @@ const MU_REVEAL = 24;                // the wall's thickness through the opening
 const MU_PLINTH = MU_CASE_W / 2 + MU_CORNER / 2;   // trim reach beyond the opening (21)
 const MU_FRONT_W = 200, MU_FRONT_H = 285;   // the front door's gilded leaves
 const MU_BASE = 24, MU_CROWN = 15;   // the woodwork: wide baseboard, plain crown
+// Vertical breathing room: a frame never sits closer than 30cm of bare wall
+// to the baseboard's top, nor 20cm to the crown's underside.
+const MU_FLOOR_PAD = MU_BASE + 30;   // floor to a frame's lowest allowed edge
+const MU_CROWN_PAD = MU_CROWN + 20;  // ceiling down to its highest
 const MU_MARGIN = 70;                // bare wall kept at the ends of each run
 const MU_BREEZE_PAD = 70;            // breezeway: bare wall each side of its doors
 const MU_STACK_GAP = 18;             // air between two stacked pieces
@@ -3654,11 +3683,13 @@ function muRoomGeom(slots, layout, exit, entry, front, doorsNS) {
               gap * Math.max(0, slots.length - 1);
   const widest = slots.reduce((t, s) => Math.max(t, s.w), 0);
   // The ceiling answers to the art: never lower than the standard room, and
-  // always clearing the tallest thing hung — its 30cm off the floor, its 28
-  // below the crown (the hang clamp's own margins), and a hand's breadth to
-  // spare. A five-metre altarpiece simply gets a five-and-a-half-metre hall.
+  // always clearing the tallest thing hung — its bare wall below (baseboard
+  // included), its bare wall above (crown included: the hang clamp's own
+  // margins), and a hand's breadth to spare. A five-metre altarpiece simply
+  // gets a six-metre hall.
   const tallest = slots.reduce((m, s) => Math.max(m, s.h), 0);
-  const H = Math.max(MU_WALL_H, Math.ceil(tallest + 66));
+  const H = Math.max(MU_WALL_H,
+                     Math.ceil(tallest + MU_FLOOR_PAD + MU_CROWN_PAD + 8));
   if (layout === "breezeway") {
     // A passthrough hall: across the passage, just the doorway plus a real
     // shoulder of bare wall; along it, enough for the whole run split over
@@ -3893,9 +3924,32 @@ function muLabelEl(work, x, y, z, rotY) {
    around the doorway when another room follows. The far wall is shared: its
    planes are double-sided, so the next room's entry side is the same wall seen
    from behind, and a doorway is simply the gap both rooms agree on. */
+/* Paint an element's walls. The picked colour becomes the whole family the
+   stock grey was: front (n/s) walls at full value, side (e/w) walls a step
+   deeper, each fading lighter at the crown and duskier at the floor in the
+   same proportions as the default (museum-room.css reads these variables).
+   The woodwork stays the museum's own white. No colour, no-op: the
+   stylesheet's greys stand. */
+const MU_WALL_DEFAULT = "#afaca6";
+function muPaint(el, color) {
+  if (!/^#[0-9a-f]{6}$/i.test(color || "")) return;
+  const c = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+  const hx = (v) => Math.round(v).toString(16).padStart(2, "0");
+  const mix = (base, t, to) => "#" + base.map((v) => hx(v + (to - v) * t)).join("");
+  [["front", c], ["side", c.map((v) => v * 0.95)]].forEach(([face, base]) => {
+    const set = (part, val) =>
+      el.style.setProperty("--mu-wall-" + face + "-" + part, val);
+    set("top", mix(base, 0.11, 255));
+    set("high", mix(base, 0.05, 255));
+    set("mid", mix(base, 0, 255));
+    set("bottom", mix(base, 0.03, 0));
+  });
+}
+
 function muBuildRoom(g, i, geoms, world) {
   const room = document.createElement("div");
   room.className = "mu-roomg";
+  muPaint(room, g.color);
   const W = g.W, D = g.D, H = g.H;
 
   room.appendChild(muEl("mu-floor", W, D, muT(0, 0, 0, " rotateX(90deg)")));
@@ -3938,11 +3992,13 @@ function muBuildRoom(g, i, geoms, world) {
       w.rot + "deg)";
     // The front door faces the room alone (its far side is the outside
     // world); a passage is dressed on both faces.
-    // Each face's wall rises to ITS room's ceiling: a tall hall next to a
-    // standard room shares the doorway, not the height.
+    // Each face's wall rises to ITS room's ceiling and wears ITS room's
+    // paint: a tall red hall next to a standard grey room shares the
+    // doorway, not the height or the colour.
     muDoorway(wrap, ow, oh, front ? [0] : [0, 180], front ? "mu-entry-door" : null,
       front ? [w.len] : [w.len, nlen], front ? [0] : [0, eo],
-      front ? [H] : [H, geoms[i + 1].H], w.cls);
+      front ? [H] : [H, geoms[i + 1].H],
+      front ? [g.color] : [g.color, geoms[i + 1].color], w.cls);
     world.appendChild(wrap);
     MU.wraps.push({ el: wrap, a: i, b: front ? i : i + 1 });
   });
@@ -3959,7 +4015,7 @@ function muBuildRoom(g, i, geoms, world) {
    so the same assembly serves every wall and both sides of it. A closed
    doorway gets a leaf at the back of the reveal (the front door's gilded
    leaves ride in as a class). */
-function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, wallCls) {
+function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, cs, wallCls) {
   const cx2 = ow / 2 + MU_CASE_W / 2;      // casing / block / plinth centreline
   const FZ = MU_REVEAL / 2;                // each face sits at the reveal's edge
   wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-left", MU_REVEAL, oh,
@@ -3981,6 +4037,7 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, wallCls) {
     const L = sw - off, R = sw + off;    // shoulder widths, door to wall end
     const f = document.createElement("div");
     f.className = "mu-doorg";
+    muPaint(f, cs[fi]);                  // and wears its own room's paint
     f.style.transform = "rotateY(" + deg + "deg)";
     // this face's wall, flush with the reveal's edge
     if (L > 0)
@@ -4102,13 +4159,14 @@ function muHangRoom(g, roomEl, ri) {
           seg.cx + ax * cl + nx * off, ly, seg.cz + az * cl + nz * off, seg.rot));
       };
       // The pile shares the hang line, first work on top — and a pile too
-      // tall to centre there slides up just enough to clear the baseboard,
-      // stopping short of the crown (the room itself has grown to make that
-      // always possible). A single work is a pile of one, so it sits exactly
-      // on the line.
+      // tall to centre there slides up just enough to keep its padding over
+      // the baseboard, stopping short of the crown's own (the room itself
+      // has grown to make that always possible). A single work is a pile of
+      // one, so it sits exactly on the line.
       const hs = slot.items.map((it) => it.h + 2 * MU_FRAME);
       const S = hs.reduce((a, b) => a + b, 0) + MU_STACK_GAP * (hs.length - 1);
-      let top = Math.min(Math.max(MU_HANG, 30 + S / 2), (g.H - 28) - S / 2) + S / 2;
+      let top = Math.min(Math.max(MU_HANG, MU_FLOOR_PAD + S / 2),
+                         (g.H - MU_CROWN_PAD) - S / 2) + S / 2;
       slot.items.forEach((it, k) => {
         const cy = top - hs[k] / 2;
         roomEl.appendChild(muArtEl(it, x, -cy, z, seg.rot, ri));
@@ -4168,6 +4226,7 @@ function muBuild(museum) {
     g.slots = slots;
     g.layout = room.layout;
     g.name = room.name || "";
+    g.color = room.color || "";
     g.exit = exit;
     g.entry = ent;
     g.front = i === 0;
@@ -4789,7 +4848,8 @@ async function collectionWalkView(cid) {
     ? '<a class="mu-arrange linkbtn" href="' + back + '/walk/arrange">Arrange</a>' : "";
   muOpenWalk(
     { rooms: [{ works: c.works, walls: c.walls || {}, exit: null,
-                layout: c.layout || "normal", name: c.title }] },
+                layout: c.layout || "normal", name: c.title,
+                color: c.color || "" }] },
     { exit: back, arrange: arrange, map: false });
 }
 

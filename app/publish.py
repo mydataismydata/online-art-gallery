@@ -469,6 +469,7 @@ def _collection_blobs():
             "walls": {pid_by_wid[k]: v for k, v in (rec.get("walls") or {}).items()
                       if k in pid_by_wid},
             "layout": coll.clean_room_layout(rec.get("layout")),
+            "color": coll.clean_room_color(rec.get("color")),
         }
         out[cid] = (rec.get("title") or cid,
                     json.dumps(blob, ensure_ascii=False, indent=1, sort_keys=True))
@@ -503,6 +504,7 @@ def _museum_blobs():
             "exit": r["exit"],
             "layout": r["layout"],
             "name": r["name"],
+            "color": r["color"],
         })
     if not hung:
         return {}
@@ -986,6 +988,7 @@ def _import_museum(repo):
             "exit": r.get("exit"),
             "layout": r.get("layout"),
             "name": r.get("name"),
+            "color": r.get("color"),
         })
     d = museum.save(rooms)
     return {"imported": 1, "rooms": len(d["rooms"]), "hung": d["count"]}

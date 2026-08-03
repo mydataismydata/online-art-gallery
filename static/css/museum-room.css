@@ -84,12 +84,16 @@
    ARCHITECTURAL PALETTE
    ========================================================================= */
 
+/* A painted room (app.js muPaint) overrides the six wall tones per room
+   group / doorway face; everything else below keeps the house palette. */
 :root {
   --mu-wall-front-top: #b8b5ae;
+  --mu-wall-front-high: #b3b0aa;
   --mu-wall-front-mid: #afaca6;
   --mu-wall-front-bottom: #aaa7a1;
 
   --mu-wall-side-top: #aeaba5;
+  --mu-wall-side-high: #aaa7a1;
   --mu-wall-side-mid: #a6a39d;
   --mu-wall-side-bottom: #a19e98;
 
@@ -291,7 +295,7 @@
     linear-gradient(
       180deg,
       var(--mu-wall-front-top) 0,
-      #b3b0aa 110px,
+      var(--mu-wall-front-high) 110px,
       var(--mu-wall-front-mid) 270px,
       var(--mu-wall-front-bottom) 100%
     );
@@ -304,7 +308,7 @@
     linear-gradient(
       180deg,
       var(--mu-wall-side-top) 0,
-      #aaa7a1 110px,
+      var(--mu-wall-side-high) 110px,
       var(--mu-wall-side-mid) 270px,
       var(--mu-wall-side-bottom) 100%
     );

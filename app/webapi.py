@@ -315,7 +315,8 @@ def api_collection_room(cid):
     data = request.get_json(silent=True) or {}
     try:
         rec = collections.set_room(cid, [str(i) for i in data.get("work_ids") or []],
-                                   data.get("walls"), data.get("layout"))
+                                   data.get("walls"), data.get("layout"),
+                                   data.get("color"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"collection": collections.detail(rec, auth.current_user())})

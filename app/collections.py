@@ -127,6 +127,16 @@ def clean_room_layout(s):
     return s if s in ROOM_LAYOUTS else "normal"
 
 
+_ROOM_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def clean_room_color(s):
+    """The room's wall paint, museum.clean_color's shape: '#rrggbb' kept
+    lowercase, anything else the stock grey (stored as empty)."""
+    s = str(s or "").strip()
+    return s.lower() if _ROOM_COLOR_RE.match(s) else ""
+
+
 def _room_walls(rec):
     ids = set(rec.get("work_ids") or [])
     walls = rec.get("walls") if isinstance(rec.get("walls"), dict) else {}
@@ -214,6 +224,7 @@ def detail(rec, user):
         "sort": clean_sort(rec.get("sort")),
         "walls": _room_walls(rec),
         "layout": clean_room_layout(rec.get("layout")),
+        "color": clean_room_color(rec.get("color")),
         "can_edit": can_edit(rec, user),
     }
 
@@ -278,6 +289,7 @@ def import_published(rec):
             "walls": {k: v for k, v in (rec.get("walls") or {}).items()
                       if k and v in ROOM_WALLS},
             "layout": clean_room_layout(rec.get("layout")),
+            "color": clean_room_color(rec.get("color")),
             "source": "published",
             "created": (cur or {}).get("created") or time.strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -285,7 +297,8 @@ def import_published(rec):
                        ("title", "description", "owner", "owner_display", "work_ids")) \
                 and clean_sort(cur.get("sort")) == new["sort"] \
                 and _room_walls(cur) == new["walls"] \
-                and clean_room_layout(cur.get("layout")) == new["layout"]:
+                and clean_room_layout(cur.get("layout")) == new["layout"] \
+                and clean_room_color(cur.get("color")) == new["color"]:
             return "unchanged"
         _write(new)
         return "updated" if cur else "added"
@@ -383,7 +396,7 @@ def reorder(cid, ids):
         return _write(rec)
 
 
-def set_room(cid, ids, walls, layout):
+def set_room(cid, ids, walls, layout, color=None):
     """Arrange the collection's museum room: order, wall pins and fit in one
     save, as the room's arrange screen makes each change. The order rule is
     reorder's exactly — and like reorder it drops the collection into manual
@@ -406,6 +419,7 @@ def set_room(cid, ids, walls, layout):
         rec["walls"] = {str(k): v for k, v in walls.items()
                         if str(k) in held and v in ROOM_WALLS}
         rec["layout"] = clean_room_layout(layout)
+        rec["color"] = clean_room_color(color)
         return _write(rec)
 
 
