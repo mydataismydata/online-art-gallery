@@ -3640,11 +3640,15 @@ function muSlots(works, layout, walls) {
 
 /* Size the room around its works: enough wall for the whole run at this
    layout's spacing — a hang sits snug, a breezeway breathes — and never
-   smaller than a cabinet nor narrower than its own widest painting. Every
-   wall hangs, the entry wall included, so the run divides across the whole
-   perimeter. */
+   smaller than a cabinet nor narrower than its own widest painting. Left to
+   itself the run divides across the whole perimeter, every wall hanging, the
+   entry wall included. But the moment anything is pinned, the pins drive the
+   shape: each axis answers to its own two walls — what's pinned there, plus
+   that wall's door — and only the unpinned remainder still spreads at the
+   usual proportion. Two photos on the north wall no longer buy it a share
+   of the whole collection's run. */
 const MU_RATIO = 1.25;               // rooms hang a little wider than deep
-function muRoomGeom(slots, layout, hasExit, hasEntryDoor, front, doorsNS) {
+function muRoomGeom(slots, layout, exit, entry, front, doorsNS) {
   const gap = layout === "breezeway" ? 100 : 34;
   const run = slots.reduce((t, s) => t + s.w, 0) +
               gap * Math.max(0, slots.length - 1);
@@ -3666,8 +3670,29 @@ function muRoomGeom(slots, layout, hasExit, hasEntryDoor, front, doorsNS) {
       ? { W: lane, D: along, H: H, gap: gap }
       : { W: along, D: lane, H: H, gap: gap };
   }
-  const margins = (4 + (hasExit ? 4 : 2) + (hasEntryDoor ? 4 : 2)) * MU_MARGIN;
-  const doors = ((hasExit ? 1 : 0) + (hasEntryDoor ? 1 : 0)) * MU_DOOR_W;
+  if (slots.some((s) => s.pin)) {
+    const door = { n: 0, e: 0, s: front ? MU_FRONT_W : 0, w: 0 };
+    if (exit) door[exit] = MU_DOOR_W;
+    if (entry) door[entry] = MU_DOOR_W;
+    // A wall's own demand: its pinned run, its door, and bare wall at the
+    // ends — four margins when a doorway cuts it into two shoulders.
+    const need = (k) => {
+      const on = slots.filter((s) => s.pin === k);
+      return on.reduce((t, s) => t + s.w, 0) +
+             gap * Math.max(0, on.length - 1) +
+             door[k] + (door[k] ? 4 : 2) * MU_MARGIN;
+    };
+    const auto = slots.filter((s) => !s.pin);
+    const spread = auto.reduce((t, s) => t + s.w + gap, 0) / (2 + 2 * MU_RATIO);
+    const wideA = auto.reduce((t, s) => Math.max(t, s.w), 0);
+    const D = Math.max(520, wideA + 2 * MU_MARGIN,
+                       Math.max(need("e"), need("w")) + spread);
+    const W = Math.max(600, MU_DOOR_W + 280,
+                       Math.max(need("n"), need("s")) + MU_RATIO * spread);
+    return { W: Math.round(W), D: Math.round(D), H: H, gap: gap };
+  }
+  const margins = (4 + (exit ? 4 : 2) + (entry || front ? 4 : 2)) * MU_MARGIN;
+  const doors = ((exit ? 1 : 0) + (entry || front ? 1 : 0)) * MU_DOOR_W;
   let D = (run + doors + margins) / (2 + 2 * MU_RATIO);
   D = Math.max(520, widest + 2 * MU_MARGIN, D);
   const W = Math.max(600, MU_DOOR_W + 280, Math.round(MU_RATIO * D));
@@ -4132,31 +4157,47 @@ function muBuild(museum) {
       });
     }
     const slots = muSlots(room.works, room.layout, walls);
-    const g = muRoomGeom(slots, room.layout, i < rooms.length - 1, true,
-                         i === 0, doorsNS);
-    g.slots = slots;
-    g.layout = room.layout;
-    g.name = room.name || "";
+    // Doors are settled before sizing: the geometry weighs each wall
+    // knowing which of them carry a doorway.
     let ex = room.exit;
     if (breeze) ex = MU_OPP[entry];      // a passage passes straight through
     else if (!MU_OPP[ex] || ex === entry) ex = ["n", "e", "s", "w"].find((w) => w !== entry);
-    g.exit = i < rooms.length - 1 ? ex : null;
-    g.entry = i > 0 ? entry : null;      // room 1 draws its own south wall
+    const exit = i < rooms.length - 1 ? ex : null;
+    const ent = i > 0 ? entry : null;    // room 1 draws its own south wall
+    const g = muRoomGeom(slots, room.layout, exit, ent, i === 0, doorsNS);
+    g.slots = slots;
+    g.layout = room.layout;
+    g.name = room.name || "";
+    g.exit = exit;
+    g.entry = ent;
     g.front = i === 0;
     entry = MU_OPP[ex];
     // Corners are sacred: if any wall's group would poke past one — the
     // proportional shares can fragment awkwardly — the room grows until
     // every wall holds its whole group inside its own margins. A breezeway
-    // grows only lengthways; the lane across stays a lane.
+    // grows only lengthways; the lane across stays a lane. A pinned room
+    // grows only the axis that's short: a crowded side wall deepens the
+    // room without dragging the near-empty cross walls wider with it.
+    const pinned = slots.some((s) => s.pin);
     for (let t = 0; t < 8; t++) {
       const segs = muRoomSegs(g);
       muDistribute(g.slots, segs, g.gap);
-      const over = segs.reduce((m, s) => Math.max(m, s.used - s.cap), 0);
-      if (over <= 0) break;
+      const over = (ok) => segs.reduce((m, s) =>
+        (ok(s) ? Math.max(m, s.used - s.cap) : m), 0);
+      if (!breeze && pinned) {
+        const oW = over((s) => s.wall === "n" || s.wall === "s");
+        const oD = over((s) => s.wall === "e" || s.wall === "w");
+        if (oW <= 0 && oD <= 0) break;
+        if (oW > 0) g.W += Math.ceil(oW);
+        if (oD > 0) g.D += Math.ceil(oD);
+        continue;
+      }
+      const o = over(() => true);
+      if (o <= 0) break;
       if (breeze && !doorsNS) {
-        g.W += Math.ceil(over);
+        g.W += Math.ceil(o);
       } else {
-        g.D += Math.ceil(over);
+        g.D += Math.ceil(o);
         if (!breeze) g.W = Math.max(g.W, Math.round(MU_RATIO * g.D));
       }
     }
