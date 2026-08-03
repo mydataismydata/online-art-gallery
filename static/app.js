@@ -3649,6 +3649,12 @@ function muRoomGeom(slots, layout, hasExit, hasEntryDoor, front, doorsNS) {
   const run = slots.reduce((t, s) => t + s.w, 0) +
               gap * Math.max(0, slots.length - 1);
   const widest = slots.reduce((t, s) => Math.max(t, s.w), 0);
+  // The ceiling answers to the art: never lower than the standard room, and
+  // always clearing the tallest thing hung — its 30cm off the floor, its 28
+  // below the crown (the hang clamp's own margins), and a hand's breadth to
+  // spare. A five-metre altarpiece simply gets a five-and-a-half-metre hall.
+  const tallest = slots.reduce((m, s) => Math.max(m, s.h), 0);
+  const H = Math.max(MU_WALL_H, Math.ceil(tallest + 66));
   if (layout === "breezeway") {
     // A passthrough hall: across the passage, just the doorway plus a real
     // shoulder of bare wall; along it, enough for the whole run split over
@@ -3657,15 +3663,15 @@ function muRoomGeom(slots, layout, hasExit, hasEntryDoor, front, doorsNS) {
     const along = Math.round(Math.max(
       420, widest + 2 * MU_MARGIN, run / 2 + 2 * MU_MARGIN + gap));
     return doorsNS
-      ? { W: lane, D: along, gap: gap }
-      : { W: along, D: lane, gap: gap };
+      ? { W: lane, D: along, H: H, gap: gap }
+      : { W: along, D: lane, H: H, gap: gap };
   }
   const margins = (4 + (hasExit ? 4 : 2) + (hasEntryDoor ? 4 : 2)) * MU_MARGIN;
   const doors = ((hasExit ? 1 : 0) + (hasEntryDoor ? 1 : 0)) * MU_DOOR_W;
   let D = (run + doors + margins) / (2 + 2 * MU_RATIO);
   D = Math.max(520, widest + 2 * MU_MARGIN, D);
   const W = Math.max(600, MU_DOOR_W + 280, Math.round(MU_RATIO * D));
-  return { W: W, D: Math.round(D), gap: gap };
+  return { W: W, D: Math.round(D), H: H, gap: gap };
 }
 
 /* The room's four walls in its own frame — the room's centre is the origin,
@@ -3865,7 +3871,7 @@ function muLabelEl(work, x, y, z, rotY) {
 function muBuildRoom(g, i, geoms, world) {
   const room = document.createElement("div");
   room.className = "mu-roomg";
-  const W = g.W, D = g.D, H = MU_WALL_H;
+  const W = g.W, D = g.D, H = g.H;
 
   room.appendChild(muEl("mu-floor", W, D, muT(0, 0, 0, " rotateX(90deg)")));
   room.appendChild(muEl("mu-ceil", W, D, muT(0, -H, 0, " rotateX(-90deg)")));
@@ -3907,8 +3913,11 @@ function muBuildRoom(g, i, geoms, world) {
       w.rot + "deg)";
     // The front door faces the room alone (its far side is the outside
     // world); a passage is dressed on both faces.
+    // Each face's wall rises to ITS room's ceiling: a tall hall next to a
+    // standard room shares the doorway, not the height.
     muDoorway(wrap, ow, oh, front ? [0] : [0, 180], front ? "mu-entry-door" : null,
-      front ? [w.len] : [w.len, nlen], front ? [0] : [0, eo], H, w.cls);
+      front ? [w.len] : [w.len, nlen], front ? [0] : [0, eo],
+      front ? [H] : [H, geoms[i + 1].H], w.cls);
     world.appendChild(wrap);
     MU.wraps.push({ el: wrap, a: i, b: front ? i : i + 1 });
   });
@@ -3925,7 +3934,7 @@ function muBuildRoom(g, i, geoms, world) {
    so the same assembly serves every wall and both sides of it. A closed
    doorway gets a leaf at the back of the reveal (the front door's gilded
    leaves ride in as a class). */
-function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, H, wallCls) {
+function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, wallCls) {
   const cx2 = ow / 2 + MU_CASE_W / 2;      // casing / block / plinth centreline
   const FZ = MU_REVEAL / 2;                // each face sits at the reveal's edge
   wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-left", MU_REVEAL, oh,
@@ -3942,6 +3951,7 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, H, wallCls) {
     // This face's wall runs [off − span/2, off + span/2] in face-local x —
     // off is where its room's centre sits when the room slid off the door.
     const off = offs[fi] || 0;
+    const H = hs[fi];                    // this face rises to its own room's ceiling
     const sw = spans[fi] / 2 - ow / 2;
     const L = sw - off, R = sw + off;    // shoulder widths, door to wall end
     const f = document.createElement("div");
@@ -3997,7 +4007,7 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, H, wallCls) {
    floor. Segment and shadow are a pair: shorten one, shorten both. */
 const MU_FS_NAME = { n: "north", s: "south", e: "east", w: "west" };
 function muTrimRoom(room, i, g) {
-  const H = MU_WALL_H;
+  const H = g.H;
   const yB = -MU_BASE / 2, yC = -(H - MU_CROWN / 2);
   muWalls(g).forEach((w) => {
     const front = w.id === "s" && g.front;
@@ -4068,11 +4078,12 @@ function muHangRoom(g, roomEl, ri) {
       };
       // The pile shares the hang line, first work on top — and a pile too
       // tall to centre there slides up just enough to clear the baseboard,
-      // stopping short of the crown. A single work is a pile of one, so it
-      // sits exactly on the line.
+      // stopping short of the crown (the room itself has grown to make that
+      // always possible). A single work is a pile of one, so it sits exactly
+      // on the line.
       const hs = slot.items.map((it) => it.h + 2 * MU_FRAME);
       const S = hs.reduce((a, b) => a + b, 0) + MU_STACK_GAP * (hs.length - 1);
-      let top = Math.min(Math.max(MU_HANG, 30 + S / 2), 352 - S / 2) + S / 2;
+      let top = Math.min(Math.max(MU_HANG, 30 + S / 2), (g.H - 28) - S / 2) + S / 2;
       slot.items.forEach((it, k) => {
         const cy = top - hs[k] / 2;
         roomEl.appendChild(muArtEl(it, x, -cy, z, seg.rot, ri));
