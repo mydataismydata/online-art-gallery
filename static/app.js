@@ -3216,9 +3216,18 @@ function muRoomSection(room, i, nrooms, entry) {
     ? '<button class="linkbtn mroom-merge" type="button" title="Remove this cutoff — the works join the room above">merge up</button>'
     : (n === 0 && nrooms > 1
         ? '<button class="linkbtn mroom-merge" type="button">remove room</button>' : "");
+  // The room's own place in the walk: one step earlier, one step later. The
+  // ends keep their pair, greyed — the header shouldn't reflow room to room.
+  const moves =
+    '<span class="mroom-move">' +
+    '<button class="arow-btn mroom-up" type="button"' + (i === 0 ? " disabled" : "") +
+    ' title="Move this room one earlier in the walk">↑</button>' +
+    '<button class="arow-btn mroom-down" type="button"' +
+    (i === nrooms - 1 ? " disabled" : "") +
+    ' title="Move this room one later in the walk">↓</button></span>';
   return (
     '<section class="mroom" data-layout="' + esc(room.layout) + '" data-exit="' + esc(exit) + '">' +
-      '<header class="mroom-head">' +
+      '<header class="mroom-head">' + moves +
       // The room's name, edited in place where the heading was. The walk shows
       // it as the room's signage; left blank, the room goes by its number.
       '<input class="mroom-name" type="text" maxlength="60" spellcheck="false" ' +
@@ -3273,6 +3282,17 @@ async function muSaveArrangement(rerender) {
     toast(e.message);
     t.rerender();
   }
+}
+
+/* A room with nothing in it yet — what a cut, a move or "+ new room" adds to
+   the screen. It carries no name or paint field: the re-render after the save
+   gives it those, unnamed and stock grey. */
+function muEmptyRoomEl(layout) {
+  const ns = document.createElement("section");
+  ns.className = "mroom";
+  ns.dataset.layout = layout || "normal";
+  ns.innerHTML = '<ol class="arrange marrange"></ol>';
+  return ns;
 }
 
 /* The collections arrange, taught about several lists: a painting dragged by its
@@ -3334,7 +3354,23 @@ function wireMuseumArrange(container) {
     const btn = e.target.closest("button");
     if (!btn) return;
     const sec = btn.closest(".mroom");
-    if (btn.classList.contains("mroom-paint-reset") && sec) {
+    if ((btn.classList.contains("mroom-up") ||
+         btn.classList.contains("mroom-down")) && sec) {
+      // A whole room moves one place in the walk, taking its works, name,
+      // paint and fit with it. Its doorway is another matter: the chain is
+      // re-read from the top on save, and any room whose chosen exit now
+      // faces the wall it's entered by is handed a different one — so the
+      // screen redraws to show where the doors actually ended up.
+      const up = btn.classList.contains("mroom-up");
+      const near = up ? sec.previousElementSibling : sec.nextElementSibling;
+      if (!near || !near.classList.contains("mroom")) return;
+      if (up) near.before(sec); else near.after(sec);
+      // A passage must still pass INTO something: whichever room the move
+      // left standing last, if it's a breezeway it grows a room beyond it.
+      const last = container.querySelector(".mroom:last-child");
+      if (last && last.dataset.layout === "breezeway") last.after(muEmptyRoomEl());
+      muSaveArrangement(true);
+    } else if (btn.classList.contains("mroom-paint-reset") && sec) {
       const inp = sec.querySelector(".mroom-color");
       if (!inp || inp.value === MU_WALL_DEFAULT) return;
       inp.value = MU_WALL_DEFAULT;
@@ -3354,11 +3390,7 @@ function wireMuseumArrange(container) {
         // redrawn either way. And a passage must pass INTO something: a
         // breezeway at the end of the museum grows an empty room beyond it.
         if (btn.dataset.layout === "breezeway" && !sec.nextElementSibling) {
-          const ns = document.createElement("section");
-          ns.className = "mroom";
-          ns.dataset.layout = "normal";
-          ns.innerHTML = '<ol class="arrange marrange"></ol>';
-          sec.after(ns);
+          sec.after(muEmptyRoomEl());
         }
         muSaveArrangement(true);       // the server fixes the exit; re-render shows it
         return;
@@ -3378,10 +3410,7 @@ function wireMuseumArrange(container) {
       const rows = [...sec.querySelectorAll(".arow")];
       const idx = rows.indexOf(row);
       if (idx <= 0) return;            // a cut before the first painting is the wall we have
-      const ns = document.createElement("section");
-      ns.className = "mroom";
-      ns.dataset.layout = sec.dataset.layout;
-      ns.innerHTML = '<ol class="arrange marrange"></ol>';
+      const ns = muEmptyRoomEl(sec.dataset.layout);
       sec.after(ns);
       const nl = ns.querySelector(".marrange");
       rows.slice(idx).forEach((r) => nl.appendChild(r));
@@ -3451,7 +3480,9 @@ async function museumArrangeView(keepScroll) {
     " · every change saves as you make it</p></div></div>" +
     '<p class="arrange-hint">Type over a room\'s heading to name it — the ' +
     "walk hangs the name in place of the room number. The paint well " +
-    "recolours the room's walls, ↺ takes back the gallery grey. " +
+    "recolours the room's walls, ↺ takes back the gallery grey. The " +
+    "↑ ↓ beside the name move the whole room one place along the walk, works " +
+    "and all — the doors re-chain to suit. " +
     "Drag a painting by its handle, or nudge it with " +
     "↑ ↓ — past a room's edge it crosses into the neighbour — and ⇈ ⇊ " +
     "stride a whole room at a time. The wall picker " +
@@ -3485,11 +3516,7 @@ async function museumArrangeView(keepScroll) {
   MU_ARRANGE = { save: saveMuseum, rerender: () => museumArrangeView(true) };
   wireMuseumArrange($("#mrooms"));
   $("#mroom-add").addEventListener("click", () => {
-    const ns = document.createElement("section");
-    ns.className = "mroom";
-    ns.dataset.layout = "normal";
-    ns.innerHTML = '<ol class="arrange marrange"></ol>';
-    $("#mrooms").appendChild(ns);
+    $("#mrooms").appendChild(muEmptyRoomEl());
     muSaveArrangement(true);
   });
   if (y) window.scrollTo(0, y);

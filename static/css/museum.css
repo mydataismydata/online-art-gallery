@@ -233,6 +233,15 @@ body.mu-open { overflow: hidden; }
 .mroom-merge { font-size: 12px; }
 .mroom-via-l { margin-left: 10px; white-space: nowrap; }
 
+/* The room's own movers, ↑ ↓ at the head of the room — the pair the paintings
+   carry, one floor up. Header buttons, so they stand without the row's
+   hover-reveal; at the ends of the museum the impossible one greys instead of
+   vanishing, so the header doesn't reflow from room to room. */
+.mroom-move { display: inline-flex; align-self: center; margin-right: -2px; }
+.mroom-move .arow-btn { width: 26px; height: 26px; opacity: 1; }
+.mroom-move .arow-btn[disabled] { opacity: .26; cursor: default; }
+.mroom-move .arow-btn[disabled]:hover { border-color: transparent; color: var(--faint); }
+
 /* The room's paint: a small colour well beside the fit pills, square like the
    wall picker (the pills stay the one rounded thing), and its ↺ reset — a
    header button, so it forgoes the row buttons' hover-reveal. */
