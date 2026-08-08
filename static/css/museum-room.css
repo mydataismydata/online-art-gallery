@@ -838,8 +838,12 @@
    a shut stair keeps its treads but loses the glow of a landing. */
 .mu-door-leaf.mu-shut-door { cursor: default; }
 
-/* The brass sign over a stairway. */
+/* The brass sign over a stairway. Absolutely positioned like every other
+   plane: a static child would hand the 0×0 doorway wrap a layout box of its
+   own, and the compositor rasterises the whole 3-D subtree against it — the
+   wall grows a phantom sliver at its end. */
 .mu-stair-sign {
+  position: absolute; left: 0; top: 0;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(180deg, #b99b58, #8f7439);
   color: #241c0d;

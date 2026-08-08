@@ -4475,12 +4475,14 @@ const MU_FS_NAME = { n: "north", s: "south", e: "east", w: "west" };
 function muTrimRoom(room, i, g) {
   const H = g.H;
   const yB = -MU_BASE / 2, yC = -(H - MU_CROWN / 2);
+  const dbw = {};
+  (g.doors || []).forEach((d) => { dbw[d.wall] = d; });
   muWalls(g).forEach((w) => {
-    const front = w.id === "s" && g.front;
-    const doored = w.id === g.exit || w.id === g.entry || front;
+    const d = dbw[w.id];
     // the trim sits a shade off its wall face, toward the room — and a
-    // doored wall's face sits at the reveal's edge
-    const off = (doored ? MU_REVEAL / 2 : 0) + 2.4;
+    // doored wall's face (whatever the door: the chain's, a stairway, an
+    // extra door) sits at the reveal's edge
+    const off = (d ? MU_REVEAL / 2 : 0) + 2.4;
     const [nx, nz] = [Math.sin(w.rot * Math.PI / 180), Math.cos(w.rot * Math.PI / 180)];
     const cx = w.cx + nx * off, cz = w.cz + nz * off;
     const rot = " rotateY(" + w.rot + "deg)";
@@ -4493,15 +4495,15 @@ function muTrimRoom(room, i, g) {
         muT(bx + nx * 5, -0.15, bz + nz * 5, " rotateX(90deg)")));
     };
     room.appendChild(muEl("mu-trim mu-crown", w.len, MU_CROWN, muT(cx, yC, cz, rot)));
-    if (!doored) {
+    if (!d) {
       base(w.len, cx, cz);
       return;
     }
-    const ow = front ? MU_FRONT_W : MU_DOOR_W;
+    const ow = d.ow;
     const [ax, az] = muWallAxis(w.rot);
     // baseboards break where the casing lands — around the doorway wherever
     // the room's dodge left it (only an entry door ever sits off-centre)
-    const dt = w.id === g.entry ? (g.entryOff || 0) * (ax + az) : 0;
+    const dt = d.kind === "entry" ? (g.entryOff || 0) * (ax + az) : 0;
     [[-w.len / 2, dt - ow / 2 - MU_PLINTH],
      [dt + ow / 2 + MU_PLINTH, w.len / 2]].forEach(([t0, t1]) => {
       const sl = t1 - t0, o = (t0 + t1) / 2;
