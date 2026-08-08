@@ -247,10 +247,12 @@ def save(rooms_in):
     return detail()
 
 
-def hang(ids):
-    """Hang works at the end of the last room, creating the first room if the
-    museum is bare. A work already on a wall stays exactly where it is. Returns
-    (newly_hung, room_number) — the 1-based room they went into."""
+def hang(ids, floor=None):
+    """Hang works at the end of a storey's last room — `floor` is the 0-based
+    storey asked for; one the museum doesn't have (or None) means the ground
+    floor. Creates the first room if the museum is bare. A work already on a
+    wall stays exactly where it is. Returns (newly_hung, room_number, floor):
+    the 1-based room within its storey, and the storey they went to."""
     by_id = library.scan()["by_id"]
     with _lock:
         rec = _read() or {}
@@ -261,13 +263,20 @@ def hang(ids):
             if wid in by_id and wid not in have:
                 have.add(wid)
                 added.append(wid)
-        if added:
-            if not rooms:
-                rooms = [{"work_ids": [], "layout": DEFAULT_LAYOUT}]
-            rooms[-1]["work_ids"].extend(added)
-            rec["rooms"] = rooms
-            _write(rec)
-        return len(added), len(rooms) or 1
+        floors = sorted({r["floor"] for r in rooms})
+        f = floor if floor in floors else (floors[0] if floors else 0)
+        if not added:
+            return 0, 0, f
+        if not rooms:
+            rooms = [{"work_ids": [], "layout": DEFAULT_LAYOUT, "floor": 0}]
+            f = 0
+        target = max(i for i, r in enumerate(rooms)
+                     if r.get("floor", 0) == f)
+        rooms[target]["work_ids"].extend(added)
+        rec["rooms"] = rooms
+        _write(rec)
+        n = sum(1 for r in rooms[:target + 1] if r.get("floor", 0) == f)
+        return len(added), n, f
 
 
 def unhang(ids):

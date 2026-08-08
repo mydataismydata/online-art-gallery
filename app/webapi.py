@@ -385,13 +385,16 @@ def api_museum_save():
 @bp.post("/api/museum/hang")
 @auth.require_role("owner")
 def api_museum_hang():
-    """Hang works (the viewer's "h") — appended to the last room."""
+    """Hang works (the viewer's floor-number hotkey) — appended to the asked
+    storey's last room; a storey the museum doesn't have means the ground
+    floor."""
     data = request.get_json(silent=True) or {}
     ids = data.get("ids") or []
     if not isinstance(ids, list) or not ids:
         return jsonify({"error": "No works given."}), 400
-    added, room = museum.hang([str(i) for i in ids])
-    return jsonify({"added": added, "room": room})
+    added, room, floor = museum.hang([str(i) for i in ids],
+                                     museum.clean_floor(data.get("floor")))
+    return jsonify({"added": added, "room": room, "floor": floor})
 
 
 @bp.post("/api/museum/unhang")

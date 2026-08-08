@@ -3104,7 +3104,8 @@ function editCollectionDialog(c, onDone) {
    walked room by room. Two screens share the data: the walk (#/museum), built
    out of CSS 3-D planes and driven with the arrow keys, and the arrange screen
    (#/museum/arrange), where the owner drags the order, cuts rooms, and picks
-   each room's fit. Works arrive via "h" in the fullscreen viewer. */
+   each room's fit. Works arrive via the floor-number keys (1–9) in the
+   fullscreen viewer. */
 
 const MU_LAYOUTS = [["normal", "Normal"], ["stacked", "Stacked"], ["breezeway", "Breezeway"]];
 
@@ -3684,8 +3685,9 @@ async function museumArrangeView(keepScroll) {
       "gives a room a second opening — two extra cardinal doors on one " +
       "storey join into a passage, and <b>Up</b> pairs with a <b>Down</b> " +
       "above into a staircase (a floor with no stair grows one in its " +
-      "last room). Add works by pressing <b>H</b> on any painting in the " +
-      "fullscreen viewer.");
+      "last room). Add works from any painting's fullscreen view: press " +
+      "the floor's number (<b>1</b>–<b>9</b>) and it hangs at the end of " +
+      "that storey — a number the museum doesn't have lands on Floor 1.");
   // Doorway rows name their neighbours the way the walk's signage does: the
   // room's given name, or its number on this storey while it has none.
   const lbl = (i) => mine[i] && (mine[i][0].name || "Room " + (i + 1));
@@ -5307,8 +5309,9 @@ async function museumView() {
       '<div class="pagehead"><div><h1>The museum</h1></div></div>' +
       '<div class="emptybox">Nothing hangs here yet.' +
       (isOwner()
-        ? " Open any painting in the fullscreen viewer and press <b>H</b> to hang " +
-          'it — then <a href="#/museum/arrange">arrange the rooms</a>.'
+        ? " Open any painting in the fullscreen viewer and press <b>1</b> to hang " +
+          "it (a higher number hangs it on that floor) — then " +
+          '<a href="#/museum/arrange">arrange the rooms</a>.'
         : " The owner hasn’t hung the museum yet — come back soon.") +
       "</div>");
     return;
@@ -7733,7 +7736,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowLeft") showWork(V.i - 1);
   else if (e.key === "Escape") closeViewer();
   else if (e.key === "c" || e.key === "C") collectHotkey();
-  else if (e.key === "h" || e.key === "H") hangHotkey();
+  else if (e.key >= "1" && e.key <= "9" && !e.metaKey && !e.ctrlKey && !e.altKey)
+    hangHotkey(+e.key - 1);
   else if (e.key === "p" || e.key === "P") {
     // Turning placards on should actually show one, even if the last one was
     // folded away to its pill.
@@ -7768,18 +7772,21 @@ function collectHotkey() {
   if (work) addWorkToCollection(work);
 }
 
-/* ---- hotkey "h": hang the painting on screen in the museum ---- */
-async function hangHotkey() {
+/* ---- hotkeys 1–9: hang the painting on screen in the museum, on that
+   floor — a storey the museum doesn't have means the ground floor ---- */
+async function hangHotkey(fi) {
   if (!isOwner()) { viewerFlash("Only the owner hangs the museum."); return; }
   const work = V.list[V.i];
   if (!work) return;
   try {
     const r = await api("/api/museum/hang", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [work.id] }),
+      body: JSON.stringify({ ids: [work.id], floor: fi || 0 }),
     });
     viewerFlash(r.added
-      ? "✓ Hung in the museum — room " + r.room + ". Arrange it from the Museum page."
+      ? "✓ Hung in the museum — Floor " + (r.floor + 1) + ", room " + r.room +
+        (fi && r.floor !== fi ? " (no Floor " + (fi + 1) + " yet)" : "") +
+        ". Arrange it from the Museum page."
       : "Already hangs in the museum.");
   } catch (e) { viewerFlash("⚠ " + e.message); }
 }
