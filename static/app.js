@@ -3154,16 +3154,16 @@ function muRow(w, pin, solo) {
 /* The name a wall goes by in the arrange screen, and the doorway rows that
    sit among the art exactly where the openings sit in the room. */
 const MU_WALL_LONG = { w: "West", n: "North", e: "East", s: "South" };
-function muDoorRow(d) {
+function muDoorRow(d, near) {
   const what =
     d.kind === "front" ? "the museum's front doors" :
-    d.kind === "entry" ? "doorway in — from the room before" :
-    d.kind === "exit" ? "doorway on — to the next room" :
+    d.kind === "entry" ? "doorway in — from " + ((near && near.prev) || "the room before") :
+    d.kind === "exit" ? "doorway on — to " + ((near && near.next) || "the next room") :
     d.kind === "stairup" ? (d.closed ? "stairs up (unpaired — closed)" : "stairs up") :
     d.kind === "stairdown" ? (d.closed ? "stairs down (unpaired — closed)" : "stairs down") :
     d.closed ? "extra door (unpaired — closed)" : "extra door — a passage";
   return '<li class="mdoor-row" data-wall="' + d.wall + '" aria-hidden="true">' +
-    '<span class="mdoor-glyph">▯</span> ' + what + "</li>";
+    '<span class="mdoor-glyph">▯</span> ' + esc(what) + "</li>";
 }
 
 /* One room's list, grouped the way the room actually hangs: the walls in
@@ -3173,7 +3173,7 @@ function muDoorRow(d) {
    distribution — so the screen and the museum can never disagree. Moving a
    row onto another wall (or past a doorway, onto the door's other side)
    pins it there; rows never moved hang free and follow the room. */
-function muRoomBody(room, p, solo) {
+function muRoomBody(room, p, solo, near) {
   const works = room.works || [];
   if (!works.length) return '<ol class="arrange marrange"></ol>';
   const breeze = room.layout === "breezeway";
@@ -3204,7 +3204,7 @@ function muRoomBody(room, p, solo) {
       MU_WALL_LONG[wid] + " wall</li>";
     const d = ((p && p.doors) || []).find((dd) => dd.wall === wid);
     ws.forEach((seg, si) => {
-      if (si > 0 && d) html += muDoorRow(d);
+      if (si > 0 && d) html += muDoorRow(d, near);
       seg.slots.forEach((slot) => slot.items.forEach((it) => {
         html += muRow(it.work, (room.walls || {})[it.work.id] || "", solo);
       }));
@@ -3243,7 +3243,7 @@ function muPaintCtl(color) {
   );
 }
 
-function muRoomSection(room, p, i, nrooms, floor, floors) {
+function muRoomSection(room, p, i, nrooms, floor, floors, near) {
   const breeze = room.layout === "breezeway";
   const entry = p.entry || "s";
   const seg = MU_LAYOUTS.map(([v, label]) =>
@@ -3292,12 +3292,9 @@ function muRoomSection(room, p, i, nrooms, floor, floors) {
     (d.kind === "stairup" ? "⤴ stairs up" : "⤵ stairs down") +
     (d.closed ? " (closed)" : "") + "</span>").join("");
   const n = room.works.length;
-  // Any room but the first can give its works back to the room above; an empty
-  // first room (with rooms below) can simply go.
-  const drop = i > 0
-    ? '<button class="linkbtn mroom-merge" type="button" title="Remove this cutoff — the works join the room above">merge up</button>'
-    : (n === 0 && nrooms > 1
-        ? '<button class="linkbtn mroom-merge" type="button">remove room</button>' : "");
+  // An empty room can simply go — as long as it isn't the museum's last.
+  const drop = n === 0 && (nrooms > 1 || floors > 1)
+    ? '<button class="linkbtn mroom-merge" type="button">remove room</button>' : "";
   // The room's own place in the walk: one step earlier, one step later —
   // and past the end of its storey, onto the next one. The impossible ends
   // grey instead of vanishing, so the header doesn't reflow room to room.
@@ -3323,9 +3320,9 @@ function muRoomSection(room, p, i, nrooms, floor, floors) {
       'title="Name this room — the walk shows the name in place of the room number">' +
       '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
       '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
-      muPaintCtl(room.color) + door2 + doorSeg + badges + drop +
+      muPaintCtl(room.color) + doorSeg + door2 + badges + drop +
       "</header>" +
-      muRoomBody(room, p, false) +
+      muRoomBody(room, p, false, near) +
       (n ? "" : '<p class="mroom-empty tiny">Empty — drag paintings in.</p>') +
     "</section>"
   );
@@ -3689,8 +3686,12 @@ async function museumArrangeView(keepScroll) {
       "above into a staircase (a floor with no stair grows one in its " +
       "last room). Add works by pressing <b>H</b> on any painting in the " +
       "fullscreen viewer.");
+  // Doorway rows name their neighbours the way the walk's signage does: the
+  // room's given name, or its number on this storey while it has none.
+  const lbl = (i) => mine[i] && (mine[i][0].name || "Room " + (i + 1));
   const sections = mine.map(([r, gi], i) =>
-    muRoomSection(r, FP.plan[gi], i, mine.length, f, floors));
+    muRoomSection(r, FP.plan[gi], i, mine.length, f, floors,
+                  { prev: i > 0 ? lbl(i - 1) : "", next: lbl(i + 1) || "" }));
   app.innerHTML = page(
     head + tabs +
     '<div id="mrooms">' +
