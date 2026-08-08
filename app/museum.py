@@ -34,8 +34,12 @@ LEGACY_LAYOUTS = {"tight": "normal", "spacious": "normal"}
 
 # Compass walls, as the walk reads them: you enter heading north, so "n" is the
 # far wall, "s" the wall at your back, "w" left and "e" right. A work absent
-# from a room's walls map hangs wherever the layout finds space.
+# from a room's walls map hangs wherever the layout finds space. A doorway
+# cuts its wall into two shoulders, and a pin may name one: "s1" is the first
+# shoulder as the walk reads the wall, "s2" the far one; plain "s" leaves the
+# side to the room. On a wall with no doorway the suffix simply falls away.
 WALLS = ("n", "s", "e", "w")
+PINS = WALLS + tuple(w + i for w in WALLS for i in ("1", "2"))
 
 # Which of a room's OWN walls holds the doorway to the next room. The compass
 # is absolute — every room's north faces the same way — and any wall may hold
@@ -44,23 +48,72 @@ WALLS = ("n", "s", "e", "w")
 OPPOSITE = {"n": "s", "s": "n", "e": "w", "w": "e"}
 DEFAULT_EXIT = "n"
 
+# A room's optional second opening: another cardinal wall, or a stairway.
+# Two rooms on the same floor whose extra doors face any cardinal become a
+# connected pair (a passage between them); an "up" pairs with a "down" on the
+# floor above to make a staircase. An unpaired extra door stands closed.
+DOOR2 = ("n", "s", "e", "w", "up", "down")
+
+# Floors stack from 0 (the front-door floor, shown as "Floor 1"). Rooms are
+# stored floor-major in walk order; each floor chains its own rooms exactly
+# like the old single-storey museum, and floors join by stairway — an extra
+# door pair where the owner placed one, or a stair grown in the floor's last
+# room otherwise.
+MAX_FLOORS = 8
+
+
+def clean_floor(v):
+    try:
+        f = int(v)
+    except Exception:
+        f = 0
+    return max(0, min(MAX_FLOORS - 1, f))
+
+
+def clean_door2(s):
+    s = str(s or "").strip()
+    return s if s in DOOR2 else ""
+
 
 def _norm_exits(rooms):
-    """Chain-normalise exits in place: each room's exit must be a wall and not
-    the room's own entry (the opposite of the previous room's exit). Room one
-    starts with its entry on the south wall — the museum's front door. A
-    breezeway passes straight through: its exit is always opposite its entry,
-    whatever the client sent."""
-    entry = "s"
+    """Chain-normalise in place, floor by floor: within a floor each room's
+    exit must be a wall and not the room's own entry (the opposite of the
+    previous room's exit); the floor's last room has no onward door. Every
+    floor's first room is entered from the south — the front door on the
+    ground floor, the arriving stairway above. A breezeway passes straight
+    through. The extra door may not sit on the entry or exit wall; a
+    breezeway allows none at all."""
+    floors = {}
     for r in rooms:
-        x = r.get("exit")
-        if r.get("layout") == "breezeway":
-            x = OPPOSITE[entry]
-        elif x not in WALLS or x == entry:
-            x = next(w for w in ("n", "e", "s", "w") if w != entry)
-        r["exit"] = x
-        entry = OPPOSITE[x]
+        floors.setdefault(r.get("floor", 0), []).append(r)
+    for f, frooms in floors.items():
+        entry = "s"
+        for i, r in enumerate(frooms):
+            last = i == len(frooms) - 1
+            x = r.get("exit")
+            if last:
+                x = None
+            elif r.get("layout") == "breezeway":
+                x = OPPOSITE[entry]
+            elif x not in WALLS or x == entry:
+                x = next(w for w in ("n", "e", "s", "w") if w != entry)
+            r["exit"] = x
+            d2 = clean_door2(r.get("door2"))
+            if r.get("layout") == "breezeway" or d2 == entry or (x and d2 == x):
+                d2 = ""
+            r["door2"] = d2
+            entry = OPPOSITE[x] if x else "s"
     return rooms
+
+
+def _floor_major(rooms):
+    """Rooms in storage order: floor by floor, walk order kept within each,
+    floor numbers compacted so the stack has no empty storeys."""
+    present = sorted({r.get("floor", 0) for r in rooms})
+    level = {f: i for i, f in enumerate(present)}
+    for r in rooms:
+        r["floor"] = level[r.get("floor", 0)]
+    return sorted(rooms, key=lambda r: r["floor"])
 
 # Walls for runaway payloads, far above any hang a person would build by hand.
 MAX_ROOMS = 60
@@ -115,12 +168,14 @@ def _rooms(rec):
             continue
         ids = [w for w in r.get("work_ids") or [] if isinstance(w, str) and w]
         walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
-        walls = {k: v for k, v in walls.items() if k in ids and v in WALLS}
+        walls = {k: v for k, v in walls.items() if k in ids and v in PINS}
         out.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
                     "layout": clean_layout(r.get("layout")),
                     "name": clean_name(r.get("name")),
-                    "color": clean_color(r.get("color"))})
-    return _norm_exits(out)
+                    "color": clean_color(r.get("color")),
+                    "floor": clean_floor(r.get("floor")),
+                    "door2": clean_door2(r.get("door2"))})
+    return _norm_exits(_floor_major(out))
 
 
 def detail():
@@ -135,7 +190,8 @@ def detail():
         works = [w for w in (library.get(wid) for wid in r["work_ids"]) if w]
         rooms.append({"works": works, "walls": r["walls"], "exit": r["exit"],
                       "layout": r["layout"], "name": r["name"],
-                      "color": r["color"]})
+                      "color": r["color"], "floor": r["floor"],
+                      "door2": r["door2"]})
         hung += len(works)
     return {"rooms": rooms, "count": hung,
             "updated": (rec or {}).get("updated")}
@@ -143,9 +199,10 @@ def detail():
 
 def save(rooms_in):
     """Replace the whole hang:
-    [{work_ids: [...], walls: {id: "n"|"s"|"e"|"w"},
+    [{work_ids: [...], walls: {id: "n"|"s"|"e"|"w" or a shoulder like "s1"},
       layout: "normal"|"stacked"|"breezeway", name: "...",
-      color: "#rrggbb" (the walls' paint; empty = the stock grey)}].
+      color: "#rrggbb" (the walls' paint; empty = the stock grey),
+      floor: 0-based storey, door2: extra opening ("n".."w"|"up"|"down"|"")}].
 
     Ids are validated against the library and a work hangs once — a duplicate
     keeps its first placement. Unknown ids are dropped rather than stored:
@@ -174,11 +231,14 @@ def save(rooms_in):
             raise ValueError("That's over %d works — hang fewer." % MAX_WORKS)
         walls = r.get("walls") if isinstance(r.get("walls"), dict) else {}
         walls = {str(k): v for k, v in walls.items()
-                 if str(k) in ids and v in WALLS}
+                 if str(k) in ids and v in PINS}
         rooms.append({"work_ids": ids, "walls": walls, "exit": r.get("exit"),
                       "layout": clean_layout(r.get("layout")),
                       "name": clean_name(r.get("name")),
-                      "color": clean_color(r.get("color"))})
+                      "color": clean_color(r.get("color")),
+                      "floor": clean_floor(r.get("floor")),
+                      "door2": clean_door2(r.get("door2"))})
+    rooms = _floor_major(rooms)
     _norm_exits(rooms)
     with _lock:
         rec = _read() or {}

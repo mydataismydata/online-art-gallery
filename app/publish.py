@@ -505,6 +505,8 @@ def _museum_blobs():
             "layout": r["layout"],
             "name": r["name"],
             "color": r["color"],
+            "floor": r["floor"],
+            "door2": r["door2"],
         })
     if not hung:
         return {}
@@ -989,6 +991,8 @@ def _import_museum(repo):
             "layout": r.get("layout"),
             "name": r.get("name"),
             "color": r.get("color"),
+            "floor": r.get("floor"),
+            "door2": r.get("door2"),
         })
     d = museum.save(rooms)
     return {"imported": 1, "rooms": len(d["rooms"]), "hung": d["count"]}

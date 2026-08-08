@@ -112,6 +112,15 @@ body.mu-open { overflow: hidden; }
 /* ---------- the walk's chrome ---------- */
 
 .mu-hud { position: absolute; inset: 0; pointer-events: none; }
+
+/* The stairwell dark: a breath of black while a portal carries you between
+   storeys (or through a paired passage). */
+.mu-fade {
+  position: absolute; inset: 0; z-index: 30;
+  background: #0b0a09; opacity: 0; pointer-events: none;
+  transition: opacity .22s ease;
+}
+.mu-fade.on { opacity: 1; }
 .mu-top {
   position: absolute; left: 0; right: 0; top: 0;
   display: flex; align-items: center; gap: 16px;
@@ -232,6 +241,54 @@ body.mu-open { overflow: hidden; }
 
 .mroom-merge { font-size: 12px; }
 .mroom-via-l { margin-left: 10px; white-space: nowrap; }
+
+/* The floor selector above the rooms, and the storey note beside it. */
+.mfloors { display: flex; align-items: center; gap: 16px; margin: 20px 0 4px; }
+.mfloors .seg { margin-left: 0; }
+.mfloors-n { white-space: nowrap; }
+
+/* The folded-away help: a small "i" in the byline, the old hint below. */
+.info-i {
+  width: 20px; height: 20px; margin-left: 6px; padding: 0;
+  cursor: pointer; vertical-align: -3px;
+  background: none; color: var(--dim);
+  border: 1px solid var(--hair-mid); border-radius: 50%;
+  font: 600 11px var(--serif); font-style: italic;
+}
+.info-i:hover, .info-i.on { color: var(--gold-hi); border-color: var(--gold-line); }
+
+/* The wall headings and doorway rows that group a room's list the way the
+   room hangs. Neither is a row anyone can drag — they're the architecture. */
+.mwall-h {
+  margin: 14px 0 2px; padding: 4px 2px 3px;
+  border-bottom: 1px solid var(--hair-mid);
+  font: 600 10px var(--sans); letter-spacing: .2em; text-transform: uppercase;
+  color: var(--dim); list-style: none;
+}
+.marrange .mwall-h:first-child { margin-top: 2px; }
+.mdoor-row {
+  display: flex; align-items: center; gap: 10px;
+  margin: 3px 0; padding: 5px 10px;
+  border: 1px dashed var(--hair-strong); color: var(--faint);
+  font: 400 12px var(--sans); font-style: italic; list-style: none;
+}
+.mdoor-glyph { font-style: normal; font-size: 14px; color: var(--dim2); }
+
+/* The pin mark at a row's end: hand-placed vs hanging free. */
+.apin { width: 20px; text-align: center; color: var(--gold-hi); font-size: 13px; }
+.apin.afree { color: var(--faint); }
+
+/* The extra-door picker, compact like the old wall select. */
+.mdoor2 {
+  height: 26px; padding: 0 6px; margin-left: 6px; cursor: pointer;
+  background: var(--panel); color: var(--dim);
+  border: 1px solid var(--hair-mid); border-radius: 0;
+  font: 600 10px var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  -webkit-appearance: none; appearance: none;
+}
+.mdoor2:hover, .mdoor2:focus { color: var(--text); border-color: var(--hair-strong); }
+.mroom-d2l { display: inline-flex; align-items: center; align-self: center; white-space: nowrap; }
+.mroom-stair { white-space: nowrap; color: var(--gold-hi); }
 
 /* The room's own movers, ↑ ↓ at the head of the room — the pair the paintings
    carry, one floor up. Header buttons, so they stand without the row's

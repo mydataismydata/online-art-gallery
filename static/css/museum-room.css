@@ -797,6 +797,58 @@
     inset 0 0 0 2px rgba(31, 26, 21, 0.30);
 }
 
+/* A stairway through a doorway: darkness with treads reading up (lit from
+   the landing) or down (falling away into shadow), behind the reveal. */
+
+.mu-door-leaf.mu-stair-door {
+  background-color: #1d1a17;
+  background-image:
+    linear-gradient(180deg, rgba(0, 0, 0, .5) 0, rgba(0, 0, 0, 0) 40px),
+    repeating-linear-gradient(
+      180deg,
+      #4a443d 0, #4a443d 3px,
+      #2c2823 3px, #2c2823 26px
+    );
+  box-shadow: inset 0 0 0 2px rgba(20, 17, 14, 0.5),
+              inset 0 -30px 40px -20px rgba(0, 0, 0, 0.6);
+}
+
+.mu-door-leaf.mu-stair-door.mu-stair-dn {
+  background-image:
+    linear-gradient(180deg, rgba(0, 0, 0, .18) 0, rgba(0, 0, 0, .62) 100%),
+    repeating-linear-gradient(
+      180deg,
+      #3a352f 0, #3a352f 2px,
+      #211e1a 2px, #211e1a 34px
+    );
+}
+
+/* A paired extra door: an open passage into the dark — you can't see where
+   it goes, and stepping in takes you there. */
+.mu-door-leaf.mu-pass-door {
+  background-color: #171512;
+  background-image:
+    linear-gradient(180deg, rgba(0, 0, 0, .55) 0, rgba(0, 0, 0, 0) 50px),
+    linear-gradient(90deg, rgba(0, 0, 0, .4) 0, transparent 18%,
+                    transparent 82%, rgba(0, 0, 0, .4) 100%);
+  box-shadow: inset 0 0 0 2px rgba(15, 13, 11, 0.6);
+}
+
+/* An unpaired extra door keeps the house's shut leaf (the default above);
+   a shut stair keeps its treads but loses the glow of a landing. */
+.mu-door-leaf.mu-shut-door { cursor: default; }
+
+/* The brass sign over a stairway. */
+.mu-stair-sign {
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #b99b58, #8f7439);
+  color: #241c0d;
+  font: 700 9px var(--sans, sans-serif);
+  letter-spacing: .22em;
+  border: 1px solid rgba(48, 37, 16, 0.55);
+  box-shadow: 0 1px 2px rgba(20, 15, 8, 0.4);
+}
+
 /* Backward compatibility for older front-door markup. */
 
 .mu-front {

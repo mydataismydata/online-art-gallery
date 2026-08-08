@@ -116,9 +116,11 @@ def clean_sort(s):
 
 # The collection's own museum room ("walk this collection"): one room, hung
 # like the museum's first — the south wall holds the front door. A sparse walls
-# map pins works to compass walls; the layout is the room's fit. No doorways,
-# so no breezeway.
+# map pins works to compass walls — or to one shoulder of a doored wall, the
+# museum's "s1"/"s2" manner; the layout is the room's fit. No doorways, so no
+# breezeway.
 ROOM_WALLS = ("n", "s", "e", "w")
+ROOM_PINS = ROOM_WALLS + tuple(w + i for w in ROOM_WALLS for i in ("1", "2"))
 ROOM_LAYOUTS = ("normal", "stacked")
 
 
@@ -140,7 +142,7 @@ def clean_room_color(s):
 def _room_walls(rec):
     ids = set(rec.get("work_ids") or [])
     walls = rec.get("walls") if isinstance(rec.get("walls"), dict) else {}
-    return {k: v for k, v in walls.items() if k in ids and v in ROOM_WALLS}
+    return {k: v for k, v in walls.items() if k in ids and v in ROOM_PINS}
 
 
 def _apply_sort(works, sort):
@@ -287,7 +289,7 @@ def import_published(rec):
             "work_ids": [w for w in rec.get("work_ids") or [] if w],
             "sort": clean_sort(rec.get("sort")),
             "walls": {k: v for k, v in (rec.get("walls") or {}).items()
-                      if k and v in ROOM_WALLS},
+                      if k and v in ROOM_PINS},
             "layout": clean_room_layout(rec.get("layout")),
             "color": clean_room_color(rec.get("color")),
             "source": "published",
@@ -417,7 +419,7 @@ def set_room(cid, ids, walls, layout, color=None):
         rec["sort"] = DEFAULT_SORT
         walls = walls if isinstance(walls, dict) else {}
         rec["walls"] = {str(k): v for k, v in walls.items()
-                        if str(k) in held and v in ROOM_WALLS}
+                        if str(k) in held and v in ROOM_PINS}
         rec["layout"] = clean_room_layout(layout)
         rec["color"] = clean_room_color(color)
         return _write(rec)

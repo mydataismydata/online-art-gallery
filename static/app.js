@@ -3118,30 +3118,23 @@ async function saveMuseum(rooms) {
 
 /* ---------- arranging the museum ---------- */
 
-const MU_WALLS = [["", "auto"], ["n", "N"], ["s", "S"], ["e", "E"], ["w", "W"]];
-
-function muRow(w, wall, wallOpts, solo) {
+function muRow(w, pin, solo) {
   const meta = [w.artist, w.date || w.year, cmDims(w)].filter(Boolean).join(" · ");
   // A work with no recorded size still hangs — at an assumed size — but the
   // owner arranging rooms is exactly the person who can fix it, so say so.
   const est = cmDims(w) ? "" :
     '<span class="mu-est" title="No recorded size — hangs at an assumed size until height and length are set on its placard">est. size</span>';
-  // A breezeway's rows offer only its two hanging walls; a pin to a wall no
-  // longer on offer shows as auto (and the walk treats it so).
-  const opts = (wallOpts || MU_WALLS).map(([v, label]) =>
-    '<option value="' + v + '"' + ((wall || "") === v ? " selected" : "") + ">" +
-    label + "</option>").join("");
   return (
-    '<li class="arow" data-id="' + esc(w.id) + '">' +
+    '<li class="arow" data-id="' + esc(w.id) + '" data-pin="' + esc(pin || "") + '">' +
       '<span class="agrip" aria-hidden="true" title="Drag to move"></span>' +
       // The movers ride between the handle and the number: ↑ ⇈ over ↓ ⇊.
       // A single-room hang (`solo` — a collection's walk) has no room above
       // or below to stride to, and no cutting or unhanging either: the
       // collection page owns membership.
       '<span class="arow-move">' +
-      '<button class="arow-btn aup" type="button" title="Move up">↑</button>' +
+      '<button class="arow-btn aup" type="button" title="Move up — past a wall heading or doorway it changes walls">↑</button>' +
       (solo ? "" : '<button class="arow-btn aupr" type="button" title="Up a room — joins the end of the room above">⇈</button>') +
-      '<button class="arow-btn adown" type="button" title="Move down">↓</button>' +
+      '<button class="arow-btn adown" type="button" title="Move down — past a wall heading or doorway it changes walls">↓</button>' +
       (solo ? "" : '<button class="arow-btn adownr" type="button" title="Down a room — joins the top of the room below">⇊</button>') +
       "</span>" +
       '<span class="anum"></span>' +
@@ -3149,14 +3142,90 @@ function muRow(w, wall, wallOpts, solo) {
       '<span class="atext"><span class="at">' + esc(w.title) + est + "</span>" +
       (meta ? '<span class="am">' + esc(meta) + "</span>" : "") + "</span>" +
       '<span class="arow-btns">' +
-      '<select class="awall' + (wall ? " pinned" : "") +
-      '" title="Which wall this painting hangs on — the compass is absolute, the same in every room; auto lets the room decide">' +
-      opts + "</select>" +
+      (pin ? '<span class="apin" title="Pinned to this wall — placed by hand, it stays put">⚲</span>'
+           : '<span class="apin afree" title="Hangs free — the room places it and may move it as the hang changes">·</span>') +
       (solo ? "" :
         '<button class="arow-btn asplit" type="button" title="Cut here: this painting starts a new room">✂</button>' +
         '<button class="arow-btn aunhang" type="button" title="Take off the wall (stays in the library)">✕</button>') +
       "</span></li>"
   );
+}
+
+/* The name a wall goes by in the arrange screen, and the doorway rows that
+   sit among the art exactly where the openings sit in the room. */
+const MU_WALL_LONG = { w: "West", n: "North", e: "East", s: "South" };
+function muDoorRow(d) {
+  const what =
+    d.kind === "front" ? "the museum's front doors" :
+    d.kind === "entry" ? "doorway in — from the room before" :
+    d.kind === "exit" ? "doorway on — to the next room" :
+    d.kind === "stairup" ? (d.closed ? "stairs up (unpaired — closed)" : "stairs up") :
+    d.kind === "stairdown" ? (d.closed ? "stairs down (unpaired — closed)" : "stairs down") :
+    d.closed ? "extra door (unpaired — closed)" : "extra door — a passage";
+  return '<li class="mdoor-row" data-wall="' + d.wall + '" aria-hidden="true">' +
+    '<span class="mdoor-glyph">▯</span> ' + what + "</li>";
+}
+
+/* One room's list, grouped the way the room actually hangs: the walls in
+   walk order (West · North · East · South), every doorway a row of its own
+   in its true place, and each work under the wall the room gives it. The
+   grouping is computed with the walk's own machinery — slots, geometry,
+   distribution — so the screen and the museum can never disagree. Moving a
+   row onto another wall (or past a doorway, onto the door's other side)
+   pins it there; rows never moved hang free and follow the room. */
+function muRoomBody(room, p, solo) {
+  const works = room.works || [];
+  if (!works.length) return '<ol class="arrange marrange"></ol>';
+  const breeze = room.layout === "breezeway";
+  const doorsNS = ((p && p.entry) || "s") === "n" || ((p && p.entry) || "s") === "s";
+  let walls = room.walls || {};
+  if (breeze) {
+    const ok = doorsNS ? { e: 1, w: 1 } : { n: 1, s: 1 };
+    const kept = {};
+    Object.keys(walls).forEach((k) => {
+      if (ok[(walls[k] || "")[0]]) kept[k] = (walls[k] || "")[0];
+    });
+    walls = kept;
+  }
+  const slots = muSlots(works, room.layout, walls);
+  const g = muRoomGeom(slots, room.layout, (p && p.doors) || [], doorsNS);
+  g.slots = slots;
+  g.layout = room.layout;
+  g.doors = (p && p.doors) || [];
+  g.entry = p && p.entry;
+  g.entryOff = 0;
+  const segs = muRoomSegs(g);
+  muDistribute(slots, segs, g.gap);
+  let html = "";
+  ["w", "n", "e", "s"].forEach((wid) => {
+    const ws = segs.filter((s2) => s2.wall === wid);
+    if (!ws.length) return;              // a breezeway's doored sides hang nothing
+    html += '<li class="mwall-h" data-wall="' + wid + '" aria-hidden="true">' +
+      MU_WALL_LONG[wid] + " wall</li>";
+    const d = ((p && p.doors) || []).find((dd) => dd.wall === wid);
+    ws.forEach((seg, si) => {
+      if (si > 0 && d) html += muDoorRow(d);
+      seg.slots.forEach((slot) => slot.items.forEach((it) => {
+        html += muRow(it.work, (room.walls || {})[it.work.id] || "", solo);
+      }));
+    });
+  });
+  return '<ol class="arrange marrange">' + html + "</ol>";
+}
+
+/* Where a row now sits is what it's pinned to: the wall whose heading is
+   above it — and on a doored wall, which side of the doorway row it landed. */
+function muPinFromPos(row) {
+  let wall = "", crossed = 0;
+  for (let n = row.previousElementSibling; n; n = n.previousElementSibling) {
+    if (n.classList.contains("mdoor-row")) crossed++;
+    if (n.classList.contains("mwall-h")) { wall = n.dataset.wall; break; }
+  }
+  if (!wall) { row.dataset.pin = ""; return ""; }
+  const doored = row.parentElement.querySelector(
+    '.mdoor-row[data-wall="' + wall + '"]');
+  row.dataset.pin = doored ? wall + (crossed ? "2" : "1") : wall;
+  return row.dataset.pin;
 }
 
 const MU_OPP = { n: "s", s: "n", e: "w", w: "e" };
@@ -3174,8 +3243,9 @@ function muPaintCtl(color) {
   );
 }
 
-function muRoomSection(room, i, nrooms, entry) {
+function muRoomSection(room, p, i, nrooms, floor, floors) {
   const breeze = room.layout === "breezeway";
+  const entry = p.entry || "s";
   const seg = MU_LAYOUTS.map(([v, label]) =>
     '<button class="seg-btn' + (room.layout === v ? " on" : "") +
     '" type="button" data-layout="' + v + '">' + label + "</button>").join("");
@@ -3183,7 +3253,7 @@ function muRoomSection(room, i, nrooms, entry) {
   // absolute — north is north in every room — and only the wall this room
   // was entered through is spoken for. A breezeway doesn't choose: the way
   // out faces the way in.
-  const exit = breeze ? MU_OPP[entry] : (room.exit || "n");
+  const exit = p.exit || (breeze ? MU_OPP[entry] : (room.exit || "n"));
   const doorSeg = i < nrooms - 1
     ? '<span class="tiny mroom-via-l">door to next on</span>' +
       (breeze
@@ -3193,22 +3263,34 @@ function muRoomSection(room, i, nrooms, entry) {
           exit.toUpperCase() + "</button></div>"
         : '<div class="seg" role="group" aria-label="Which wall holds the doorway to the next room">' +
           [["w", "W"], ["n", "N"], ["e", "E"], ["s", "S"]].map(([v, label]) =>
-            v === entry
+            v === entry && (i > 0 || p.front)
               ? '<button class="seg-btn seg-via" type="button" disabled ' +
                 'title="' + (i === 0
                   ? "The south wall holds the museum's front door"
-                  : "The " + MU_WALL_NAME[v] + " wall holds the door back to room " + i) + '">' +
+                  : "The " + MU_WALL_NAME[v] + " wall holds the door back to the room before") + '">' +
                 label + "</button>"
               : '<button class="seg-btn seg-via' + (exit === v ? " on" : "") +
-                '" type="button" data-exit="' + v + '" title="The doorway to room ' + (i + 2) +
-                " sits on this room's " + MU_WALL_NAME[v] + ' wall">' + label + "</button>"
+                '" type="button" data-exit="' + v + '" title="The doorway onward sits on this room\'s ' +
+                MU_WALL_NAME[v] + ' wall">' + label + "</button>"
           ).join("") + "</div>")
     : "";
-  // A breezeway hangs its two long sides only, so only those are on offer.
-  const wallOpts = breeze
-    ? [["", "auto"]].concat(entry === "n" || entry === "s"
-        ? [["e", "E"], ["w", "W"]] : [["n", "N"], ["s", "S"]])
-    : null;
+  // The room's optional second opening. Cardinal doors pair with another
+  // extra door on the same storey into a passage; up and down pair across
+  // the storeys into a staircase; unpaired ones stand closed.
+  const d2 = room.door2 || "";
+  const door2 = breeze ? "" :
+    '<label class="tiny mroom-d2l">extra door<select class="mdoor2" ' +
+    'title="A second opening for this room: a cardinal wall pairs with another extra door on this storey (a passage); Up and Down pair across storeys (a staircase)">' +
+    [["", "none"], ["w", "W"], ["n", "N"], ["e", "E"], ["s", "S"],
+     ["up", "Up"], ["down", "Down"]].map(([v, label]) =>
+      '<option value="' + v + '"' + (d2 === v ? " selected" : "") + ">" +
+      label + "</option>").join("") + "</select></label>";
+  // What the plan actually gave this room, stairs-wise.
+  const badges = (p.doors || []).filter((d) =>
+    d.kind === "stairup" || d.kind === "stairdown").map((d) =>
+    '<span class="tiny mroom-stair">' +
+    (d.kind === "stairup" ? "⤴ stairs up" : "⤵ stairs down") +
+    (d.closed ? " (closed)" : "") + "</span>").join("");
   const n = room.works.length;
   // Any room but the first can give its works back to the room above; an empty
   // first room (with rooms below) can simply go.
@@ -3216,17 +3298,22 @@ function muRoomSection(room, i, nrooms, entry) {
     ? '<button class="linkbtn mroom-merge" type="button" title="Remove this cutoff — the works join the room above">merge up</button>'
     : (n === 0 && nrooms > 1
         ? '<button class="linkbtn mroom-merge" type="button">remove room</button>' : "");
-  // The room's own place in the walk: one step earlier, one step later. The
-  // ends keep their pair, greyed — the header shouldn't reflow room to room.
+  // The room's own place in the walk: one step earlier, one step later —
+  // and past the end of its storey, onto the next one. The impossible ends
+  // grey instead of vanishing, so the header doesn't reflow room to room.
+  const upX = i === 0 && floor === 0;
+  const dnX = i === nrooms - 1 && floor === floors - 1;
   const moves =
     '<span class="mroom-move">' +
-    '<button class="arow-btn mroom-up" type="button"' + (i === 0 ? " disabled" : "") +
-    ' title="Move this room one earlier in the walk">↑</button>' +
-    '<button class="arow-btn mroom-down" type="button"' +
-    (i === nrooms - 1 ? " disabled" : "") +
-    ' title="Move this room one later in the walk">↓</button></span>';
+    '<button class="arow-btn mroom-up" type="button"' + (upX ? " disabled" : "") +
+    ' title="' + (i === 0 ? "Move this room down to Floor " + floor
+                          : "Move this room one earlier in the walk") + '">↑</button>' +
+    '<button class="arow-btn mroom-down" type="button"' + (dnX ? " disabled" : "") +
+    ' title="' + (i === nrooms - 1 ? "Move this room up to Floor " + (floor + 2)
+                                   : "Move this room one later in the walk") + '">↓</button></span>';
   return (
-    '<section class="mroom" data-layout="' + esc(room.layout) + '" data-exit="' + esc(exit) + '">' +
+    '<section class="mroom" data-layout="' + esc(room.layout) +
+    '" data-exit="' + esc(exit) + '" data-door2="' + esc(d2) + '">' +
       '<header class="mroom-head">' + moves +
       // The room's name, edited in place where the heading was. The walk shows
       // it as the room's signage; left blank, the room goes by its number.
@@ -3236,36 +3323,53 @@ function muRoomSection(room, i, nrooms, entry) {
       'title="Name this room — the walk shows the name in place of the room number">' +
       '<span class="tiny mroom-n">' + n + (n === 1 ? " work" : " works") + "</span>" +
       '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
-      muPaintCtl(room.color) + doorSeg + drop +
+      muPaintCtl(room.color) + door2 + doorSeg + badges + drop +
       "</header>" +
-      '<ol class="arrange marrange">' +
-      room.works.map((w) => muRow(w, (room.walls || {})[w.id], wallOpts)).join("") + "</ol>" +
+      muRoomBody(room, p, false) +
       (n ? "" : '<p class="mroom-empty tiny">Empty — drag paintings in.</p>') +
     "</section>"
   );
 }
 
-function muSerialize() {
-  return [...document.querySelectorAll("#mrooms .mroom")].map((sec) => {
-    const walls = {};
-    sec.querySelectorAll(".arow").forEach((r) => {
-      const sel = r.querySelector(".awall");
-      if (sel && sel.value) walls[r.dataset.id] = sel.value;
-    });
-    // A section minted on this screen (a cut, a grown room) has no name or
-    // paint field until the re-render; it starts life unnamed, stock grey.
-    // Picking the exact stock grey IS the stock grey, so it stores as none.
-    const name = sec.querySelector(".mroom-name");
-    const paint = sec.querySelector(".mroom-color");
-    return {
-      work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
-      walls: walls,
-      exit: sec.dataset.exit || "n",
-      layout: sec.dataset.layout,
-      name: name ? name.value.trim() : "",
-      color: paint && paint.value !== MU_WALL_DEFAULT ? paint.value : "",
-    };
+/* The museum arrange screen's working state: every room of every storey (in
+   the POST shape), which storey is on screen, and the plan that grouped it.
+   The DOM only ever shows one storey; the rest ride along here. Null while
+   a collection's single room is being arranged instead. */
+let MU_ARRM = null;
+
+function muSecRoom(sec, floor) {
+  const walls = {};
+  sec.querySelectorAll(".arow").forEach((r) => {
+    if (r.dataset.pin) walls[r.dataset.id] = r.dataset.pin;
   });
+  // A section minted on this screen (a cut, a grown room) has no name or
+  // paint field until the re-render; it starts life unnamed, stock grey.
+  // Picking the exact stock grey IS the stock grey, so it stores as none.
+  const name = sec.querySelector(".mroom-name");
+  const paint = sec.querySelector(".mroom-color");
+  const d2 = sec.querySelector(".mdoor2");
+  return {
+    work_ids: [...sec.querySelectorAll(".arow")].map((r) => r.dataset.id),
+    walls: walls,
+    exit: sec.dataset.exit || "n",
+    layout: sec.dataset.layout,
+    name: name ? name.value.trim() : "",
+    color: paint && paint.value !== MU_WALL_DEFAULT ? paint.value : "",
+    floor: floor || 0,
+    door2: d2 ? d2.value : (sec.dataset.door2 || ""),
+  };
+}
+
+function muSerialize() {
+  const secs = [...document.querySelectorAll("#mrooms .mroom")];
+  if (!MU_ARRM) return secs.map((sec) => muSecRoom(sec, 0));
+  // One storey is on screen; the others pass through from the working state,
+  // kept floor-major exactly as the museum stores them.
+  const f = MU_ARRM.floor;
+  const out = MU_ARRM.rooms.filter((r) => r.floor < f);
+  out.push(...secs.map((sec) => muSecRoom(sec, f)));
+  out.push(...MU_ARRM.rooms.filter((r) => r.floor > f));
+  return out;
 }
 
 /* Save what's on screen; on failure re-render from the server so the screen
@@ -3273,10 +3377,10 @@ function muSerialize() {
    which re-render depends on whose rooms these are — the museum's, or a
    collection's single room — so each arrange view installs its own pair. */
 let MU_ARRANGE = null;
-async function muSaveArrangement(rerender) {
+async function muSaveArrangement(rerender, rooms) {
   const t = MU_ARRANGE;
   try {
-    await t.save(muSerialize());
+    await t.save(rooms || muSerialize());
     if (rerender) t.rerender();
   } catch (e) {
     toast(e.message);
@@ -3316,11 +3420,20 @@ function wireMuseumArrange(container) {
       moved = true;
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       const over = el && el.closest ? el.closest(".arow") : null;
+      const mark = !over && el && el.closest
+        ? el.closest(".mwall-h, .mdoor-row") : null;
       if (over && over !== row && container.contains(over)) {
         const r = over.getBoundingClientRect();
         over.parentElement.insertBefore(
           row, ev.clientY > r.top + r.height / 2 ? over.nextSibling : over);
         renumberAll();
+      } else if (mark && container.contains(mark)) {
+        // Dropped on a wall heading or a doorway row: the painting takes the
+        // place just past it — the head of that wall, or the door's far side.
+        if (mark.nextSibling !== row) {
+          mark.parentElement.insertBefore(row, mark.nextSibling);
+          renumberAll();
+        }
       } else {
         // Not over a row: over a room's header, empty list, or padding — the
         // painting joins that room's end (how anything enters an empty room).
@@ -3342,7 +3455,9 @@ function wireMuseumArrange(container) {
       window.removeEventListener("pointercancel", drop);
       row.classList.remove("dragging");
       container.classList.remove("arranging");
-      if (!moved || JSON.stringify(muSerialize()) === before) return;
+      if (!moved) return;
+      muPinFromPos(row);                 // where it landed is what it's pinned to
+      if (JSON.stringify(muSerialize()) === before) return;
       muSaveArrangement(true);
     };
     window.addEventListener("pointermove", move);
@@ -3363,7 +3478,22 @@ function wireMuseumArrange(container) {
       // screen redraws to show where the doors actually ended up.
       const up = btn.classList.contains("mroom-up");
       const near = up ? sec.previousElementSibling : sec.nextElementSibling;
-      if (!near || !near.classList.contains("mroom")) return;
+      if (!near || !near.classList.contains("mroom")) {
+        // Past the end of the storey: the room rides the stairs — down to
+        // the end of the floor below, up to the head of the floor above.
+        // The serialized list is floor-major, so changing the room's floor
+        // is the whole move; the server files it in place.
+        if (!MU_ARRM) return;
+        const f = MU_ARRM.floor;
+        const to = up ? f - 1 : f + 1;
+        if (to < 0 || to >= MU_ARRM.floors) return;
+        const rooms = muSerialize();
+        const at = MU_ARRM.rooms.filter((r) => r.floor < f).length +
+          [...container.querySelectorAll(".mroom")].indexOf(sec);
+        rooms[at].floor = to;
+        muSaveArrangement(true, rooms);
+        return;
+      }
       if (up) near.before(sec); else near.after(sec);
       // A passage must still pass INTO something: whichever room the move
       // left standing last, if it's a breezeway it grows a room beyond it.
@@ -3418,6 +3548,7 @@ function wireMuseumArrange(container) {
     } else if (btn.classList.contains("aupr") || btn.classList.contains("adownr")) {
       // The whole-room stride: same landings as walking the single arrow off
       // a room's edge — the end of the room above, the top of the room below.
+      // The pin travels as its bare wall: the new room decides its shoulders.
       const row = btn.closest(".arow");
       const near = btn.classList.contains("aupr")
         ? sec.previousElementSibling : sec.nextElementSibling;
@@ -3425,21 +3556,26 @@ function wireMuseumArrange(container) {
       const list = near.querySelector(".marrange");
       if (btn.classList.contains("aupr")) list.appendChild(row);
       else list.insertBefore(row, list.firstChild);
+      row.dataset.pin = (row.dataset.pin || "")[0] || "";
       muSaveArrangement(true);
     } else if (btn.classList.contains("aup") || btn.classList.contains("adown")) {
-      // The drag's sober cousin: one step up or down, and past the top or
-      // bottom of a room the painting crosses the cut into the neighbour.
+      // The drag's sober cousin: one step up or down. A wall heading or a
+      // doorway row is hopped — landing on its far side, which re-pins the
+      // painting to the wall (or the door's other shoulder) it landed on —
+      // and past the top or bottom of a room it crosses into the neighbour.
       const row = btn.closest(".arow");
       const up = btn.classList.contains("aup");
       const sib = up ? row.previousElementSibling : row.nextElementSibling;
-      if (sib && sib.classList.contains("arow")) {
+      if (sib) {                         // a row, a wall heading, a doorway
         row.parentElement.insertBefore(row, up ? sib : sib.nextSibling);
+        muPinFromPos(row);
       } else {
         const near = up ? sec.previousElementSibling : sec.nextElementSibling;
         if (!near || !near.classList.contains("mroom")) return;
         const list = near.querySelector(".marrange");
         if (up) list.appendChild(row);
         else list.insertBefore(row, list.firstChild);
+        row.dataset.pin = (row.dataset.pin || "")[0] || "";
       }
       muSaveArrangement(true);
     } else if (btn.classList.contains("aunhang")) {
@@ -3449,17 +3585,41 @@ function wireMuseumArrange(container) {
     }
   });
 
-  // Pinning a wall, naming a room or painting one moves nothing on this
-  // screen — just save.
+  // Naming a room or painting one moves nothing on this screen — just save.
+  // A changed extra door reshapes the room (a doorway row appears among the
+  // art), so that one redraws.
   container.addEventListener("change", (e) => {
     if (e.target.classList.contains("mroom-name") ||
         e.target.classList.contains("mroom-color")) {
       muSaveArrangement(false);
       return;
     }
-    if (!e.target.classList.contains("awall")) return;
-    e.target.classList.toggle("pinned", !!e.target.value);
-    muSaveArrangement(false);
+    if (e.target.classList.contains("mdoor2")) {
+      const sec = e.target.closest(".mroom");
+      if (sec) sec.dataset.door2 = e.target.value;
+      muSaveArrangement(true);
+    }
+  });
+}
+
+/* The helper text, folded away behind a small "i" — the screen is for the
+   rooms, not the manual. The button rides in the byline; the panel opens
+   under the page head. One wiring serves both arrange screens. */
+function muInfoBtn() {
+  return '<button class="info-i" id="mu-info" type="button" aria-expanded="false" ' +
+    'title="How arranging works">i</button>';
+}
+function muInfoPanel(html) {
+  return '<div class="arrange-hint" id="mu-hint" hidden>' + html + "</div>";
+}
+function muWireInfo() {
+  const b = document.getElementById("mu-info");
+  const h = document.getElementById("mu-hint");
+  if (!b || !h) return;
+  b.addEventListener("click", () => {
+    h.hidden = !h.hidden;
+    b.setAttribute("aria-expanded", String(!h.hidden));
+    b.classList.toggle("on", !h.hidden);
   });
 }
 
@@ -3469,44 +3629,70 @@ async function museumArrangeView(keepScroll) {
   let museum;
   try { museum = (await api("/api/museum")).museum; }
   catch (e) { errbox(e); return; }
-  const rooms = museum.rooms.length
+  const all = museum.rooms.length
     ? museum.rooms
-    : [{ works: [], layout: "normal" }];
+    : [{ works: [], layout: "normal", floor: 0 }];
+  all.forEach((r) => { r.floor = r.floor || 0; });
+  const floors = all.reduce((m, r) => Math.max(m, r.floor), 0) + 1;
+  // The whole building's plan — chains, doors, stairs — read the same way
+  // the walk reads it, so the grouped lists below match the hang exactly.
+  const FP = muFloorPlan(all);
+  if (!MU_ARRM || !keepScroll) MU_ARRM = { floor: 0 };
+  MU_ARRM.floor = Math.min(MU_ARRM.floor, floors - 1);
+  MU_ARRM.floors = floors;
+  MU_ARRM.rooms = all.map((r) => ({
+    work_ids: r.works.map((w) => w.id), walls: r.walls || {},
+    exit: r.exit, layout: r.layout, name: r.name || "",
+    color: r.color || "", floor: r.floor, door2: r.door2 || "" }));
+  const f = MU_ARRM.floor;
+  const mine = [];
+  all.forEach((r, gi) => { if (r.floor === f) mine.push([r, gi]); });
+  const tabs = '<div class="mfloors"><div class="seg" role="group" aria-label="Floor">' +
+    Array.from({ length: floors }, (_, k) =>
+      '<button class="seg-btn mfloor-btn' + (k === f ? " on" : "") +
+      '" type="button" data-floor="' + k + '">Floor ' + (k + 1) + "</button>").join("") +
+    (floors < 8
+      ? '<button class="seg-btn mfloor-add" type="button" ' +
+        'title="Add a storey above — it opens with one empty room, and stairs grow to reach it">+ floor</button>'
+      : "") +
+    "</div>" +
+    '<span class="tiny mfloors-n">' +
+    mine.reduce((t, pair) => t + pair[0].works.length, 0) + " works · " +
+    mine.length + (mine.length === 1 ? " room" : " rooms") + " on this floor</span></div>";
   const head =
     '<a class="back" href="#/museum">← Walk the museum</a>' +
-    '<div class="pagehead" style="margin-top:26px"><div><h1>Arrange the museum</h1>' +
+    '<div class="pagehead" style="margin-top:26px"><div><h1>Arrange the museum' +
+    "</h1>" +
     '<p class="sub">' + museum.count + (museum.count === 1 ? " work" : " works") +
-    " · " + rooms.length + (rooms.length === 1 ? " room" : " rooms") +
-    " · every change saves as you make it</p></div></div>" +
-    '<p class="arrange-hint">Type over a room\'s heading to name it — the ' +
-    "walk hangs the name in place of the room number. The paint well " +
-    "recolours the room's walls, ↺ takes back the gallery grey. The " +
-    "↑ ↓ beside the name move the whole room one place along the walk, works " +
-    "and all — the doors re-chain to suit. " +
-    "Drag a painting by its handle, or nudge it with " +
-    "↑ ↓ — past a room's edge it crosses into the neighbour — and ⇈ ⇊ " +
-    "stride a whole room at a time. The wall picker " +
-    "pins a painting to a compass wall, and the compass is absolute: north " +
-    "faces the same way in every room (auto lets the room decide). " +
-    "✂ cuts a room in two at that painting; <b>Normal</b> hangs " +
-    "close, and small pieces pair up two high; <b>Stacked</b> is the salon " +
-    "wall — piles climb to three, pieces up to a metre tall join them, and " +
-    "a tall pile rides up the wall. <b>Breezeway</b> is a " +
-    "passthrough hall: its doors sit dead opposite each other, nothing hangs " +
-    "beside them, and the works take the two long sides — make the last room " +
-    "one and an empty room grows beyond it to pass into. Every room but the last picks " +
-    "which of its own walls holds the doorway onward — <b>N</b>, <b>S</b>, " +
-    "<b>E</b> or <b>W</b>, less the wall it was entered through — so the " +
-    "museum wanders the plan instead of running one straight line. Add works " +
-    "by pressing <b>H</b> on any painting in the fullscreen viewer.</p>";
-  let entry = "s";                     // the wall each room was entered through
-  const sections = rooms.map((r, i) => {
-    const html = muRoomSection(r, i, rooms.length, entry);
-    entry = MU_OPP[r.exit] || "s";
-    return html;
-  });
+    " · " + all.length + (all.length === 1 ? " room" : " rooms") +
+    (floors > 1 ? " · " + floors + " floors" : "") +
+    " · every change saves as you make it " + muInfoBtn() +
+    "</p></div></div>" +
+    muInfoPanel(
+      "Each floor is arranged on its own — the selector above the rooms " +
+      "switches storeys, and <b>+ floor</b> adds one upstairs. Rooms list " +
+      "their works by wall, in walk order — <b>West · North · East · " +
+      "South</b> — with every doorway shown where it stands; drag a " +
+      "painting (or nudge it with ↑ ↓) past a wall heading or a doorway " +
+      "and it's pinned to the wall — and the side of the door — it lands " +
+      "on. ⚲ marks a pinned piece; unmoved pieces hang free and follow " +
+      "the room. ⇈ ⇊ stride a whole room at a time, ✂ cuts a room in two, " +
+      "✕ takes a painting down. The ↑ ↓ beside a room's name move the " +
+      "whole room along the walk — past the end of its storey, onto the " +
+      "next. Type over the heading to name a room; the paint well " +
+      "recolours its walls (↺ takes back the grey). <b>Normal</b> hangs " +
+      "close and small pieces pair up; <b>Stacked</b> is the salon wall; " +
+      "<b>Breezeway</b> is a passthrough hall. Every room but its floor's " +
+      "last picks which wall holds the doorway onward; <b>extra door</b> " +
+      "gives a room a second opening — two extra cardinal doors on one " +
+      "storey join into a passage, and <b>Up</b> pairs with a <b>Down</b> " +
+      "above into a staircase (a floor with no stair grows one in its " +
+      "last room). Add works by pressing <b>H</b> on any painting in the " +
+      "fullscreen viewer.");
+  const sections = mine.map(([r, gi], i) =>
+    muRoomSection(r, FP.plan[gi], i, mine.length, f, floors));
   app.innerHTML = page(
-    head +
+    head + tabs +
     '<div id="mrooms">' +
     sections.join("") +
     "</div>" +
@@ -3515,6 +3701,21 @@ async function museumArrangeView(keepScroll) {
   document.querySelectorAll("#mrooms .marrange").forEach((b) => renumber(b));
   MU_ARRANGE = { save: saveMuseum, rerender: () => museumArrangeView(true) };
   wireMuseumArrange($("#mrooms"));
+  muWireInfo();
+  document.querySelectorAll(".mfloor-btn").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (+b.dataset.floor === MU_ARRM.floor) return;
+      MU_ARRM.floor = +b.dataset.floor;
+      museumArrangeView(true);
+    }));
+  const add = document.querySelector(".mfloor-add");
+  if (add) add.addEventListener("click", () => {
+    const rooms = muSerialize();
+    rooms.push({ work_ids: [], walls: {}, exit: "n", layout: "normal",
+                 name: "", color: "", floor: floors, door2: "" });
+    MU_ARRM.floor = floors;
+    muSaveArrangement(true, rooms);
+  });
   $("#mroom-add").addEventListener("click", () => {
     $("#mrooms").appendChild(muEmptyRoomEl());
     muSaveArrangement(true);
@@ -3539,18 +3740,27 @@ async function collectionRoomArrangeView(cid, keepScroll) {
     '<button class="seg-btn' + (layout === v ? " on" : "") +
     '" type="button" data-layout="' + v + '">' + label + "</button>").join("");
   const n = c.works.length;
+  MU_ARRM = null;                      // one room, no storeys to merge
+  const room = { works: c.works, walls: c.walls || {}, layout: layout };
+  const p = { entry: null, exit: null, front: true,
+              doors: [{ wall: "s", ow: MU_FRONT_W, oh: MU_FRONT_H, kind: "front" }] };
   app.innerHTML = page(
     '<a class="back" href="' + back + '/walk">← Walk this collection</a>' +
     '<div class="pagehead" style="margin-top:26px"><div><h1>Arrange the room</h1>' +
     '<p class="sub">' + esc(c.title) + " · " + n + (n === 1 ? " work" : " works") +
-    " · every change saves as you make it</p></div></div>" +
-    '<p class="arrange-hint">One room, hung like the museum’s first: the ' +
-    "south wall holds the front door, and a pin to <b>S</b> lands on its " +
-    "shoulders. Drag a painting by its handle or nudge it with ↑ ↓; the wall " +
-    "picker pins it to a compass wall (auto lets the room decide); " +
-    "<b>Normal</b> hangs close, <b>Stacked</b> is the salon wall, and the " +
-    "paint well recolours the walls (↺ takes back the gallery grey). The order " +
-    "here is the collection’s own hang, wherever it shows.</p>" +
+    " · every change saves as you make it " + muInfoBtn() +
+    "</p></div></div>" +
+    muInfoPanel(
+      "One room, hung like the museum's first: the south wall holds the " +
+      "front door, shown among the art where it stands. Works are listed " +
+      "by wall in walk order — <b>West · North · East · South</b>; drag a " +
+      "painting (or nudge it with ↑ ↓) past a wall heading or the doors " +
+      "and it's pinned to the wall — and the side of the doors — it lands " +
+      "on. ⚲ marks a pinned piece; unmoved pieces hang free and follow " +
+      "the room. <b>Normal</b> hangs close, <b>Stacked</b> is the salon " +
+      "wall, and the paint well recolours the walls (↺ takes back the " +
+      "gallery grey). The order here is the collection's own hang, " +
+      "wherever it shows.") +
     '<div id="mrooms">' +
     '<section class="mroom" data-layout="' + esc(layout) + '" data-exit="s">' +
     '<header class="mroom-head"><h2>' + esc(c.title) + "</h2>" +
@@ -3558,8 +3768,7 @@ async function collectionRoomArrangeView(cid, keepScroll) {
     '<div class="seg" role="group" aria-label="Room fit">' + seg + "</div>" +
     muPaintCtl(c.color) +
     "</header>" +
-    '<ol class="arrange marrange">' +
-    c.works.map((w) => muRow(w, (c.walls || {})[w.id], null, true)).join("") + "</ol>" +
+    muRoomBody(room, p, true) +
     (n ? "" : '<p class="mroom-empty tiny">Empty — add works from the collection page.</p>') +
     "</section></div>",
     "tight");
@@ -3573,6 +3782,7 @@ async function collectionRoomArrangeView(cid, keepScroll) {
     rerender: () => collectionRoomArrangeView(cid, true),
   };
   wireMuseumArrange($("#mrooms"));
+  muWireInfo();
   if (y) window.scrollTo(0, y);
 }
 
@@ -3694,17 +3904,116 @@ function muSlots(works, layout, walls) {
   return slots;
 }
 
+/* The whole building read once: which storey each room stands on, how each
+   floor chains its rooms, and every opening every room carries — the shared
+   doorways of the chain, the ground floor's front doors, the extra door a
+   room declares, and the stairways that join the storeys. Stairs and paired
+   extra doors are PORTALS: passing one lands you at its partner. A declared
+   "up" pairs with the first "down" on the floor above; two extra cardinal
+   doors on one floor pair into a passage; an unpaired extra door stands
+   closed. A floor left without a declared stair grows one in its last room,
+   arriving at the south wall of the floor above's first — so the storeys are
+   always joined. The walk and the arrange screen both read this, so what you
+   arrange is what you walk. */
+function muFloorPlan(rooms) {
+  const plan = rooms.map((r) => ({
+    floor: 0, entry: null, exit: null, front: false, doors: [],
+    door2: r.door2 || "" }));
+  const byFloor = [];
+  rooms.forEach((r, i) => {
+    const f = r.floor || 0;
+    (byFloor[f] = byFloor[f] || []).push(i);
+  });
+  const floors = byFloor.filter((a) => a && a.length);
+  const door = (wall, kind, big) => ({
+    wall: wall, ow: big ? MU_FRONT_W : MU_DOOR_W,
+    oh: big ? MU_FRONT_H : MU_DOOR_H, kind: kind });
+  floors.forEach((idxs, fi) => {
+    let entry = "s";
+    idxs.forEach((ri, k) => {
+      const p = plan[ri], r = rooms[ri];
+      p.floor = fi;
+      p.front = fi === 0 && k === 0;
+      p.entry = k > 0 ? entry : null;
+      let ex = r.exit;
+      if (r.layout === "breezeway") ex = MU_OPP[entry];
+      else if (!MU_OPP[ex] || ex === entry) ex = ["n", "e", "s", "w"].find((w) => w !== entry);
+      p.exit = k < idxs.length - 1 ? ex : null;
+      if (p.front) p.doors.push(door("s", "front", true));
+      if (p.entry) p.doors.push(door(p.entry, "entry"));
+      if (p.exit) p.doors.push(door(p.exit, "exit"));
+      entry = MU_OPP[ex];
+    });
+  });
+  const taken = (p, w) => p.doors.some((d) => d.wall === w);
+  const free = (p) => ["n", "e", "w", "s"].find((w) => !taken(p, w));
+  // A breezeway hangs nothing beside its two doors and hosts no third.
+  const may = (i) => rooms[i].layout !== "breezeway";
+  const pairs = [];
+  const link = (i, j, di, dj) => {
+    di.pi = dj.pi = pairs.length;
+    di.end = "a"; dj.end = "b";
+    plan[i].doors.push(di);
+    plan[j].doors.push(dj);
+    pairs.push({ a: i, b: j });
+  };
+  const paired = {};
+  // Declared stairways: an "up" finds the first "down" one storey higher.
+  plan.forEach((p, i) => {
+    if (p.door2 !== "up" || !may(i)) return;
+    const j = plan.findIndex((q, k) => !paired[k] && may(k) &&
+      q.floor === p.floor + 1 && q.door2 === "down");
+    if (j < 0 || !free(p) || !free(plan[j])) return;
+    paired[i] = paired[j] = true;
+    link(i, j, door(free(p), "stairup"), door(free(plan[j]), "stairdown"));
+  });
+  // Two spare cardinal doors on one floor join into a passage.
+  plan.forEach((p, i) => {
+    if (paired[i] || !may(i) || !p.door2 || p.door2 === "up" || p.door2 === "down") return;
+    if (taken(p, p.door2)) return;
+    const j = plan.findIndex((q, k) => k > i && !paired[k] && may(k) &&
+      q.floor === p.floor && q.door2 && q.door2 !== "up" && q.door2 !== "down" &&
+      !taken(q, q.door2));
+    if (j < 0) return;
+    paired[i] = paired[j] = true;
+    link(i, j, door(p.door2, "pass"), door(plan[j].door2, "pass"));
+  });
+  // A floor pair no stair joins gets one grown for it: the lower floor's
+  // last room up to the south wall of the upper's first.
+  for (let fi = 0; fi + 1 < floors.length; fi++) {
+    if (pairs.some((pr) => plan[pr.a].floor === fi && plan[pr.b].floor === fi + 1 &&
+                           plan[pr.a].doors.some((d) => d.kind === "stairup" && d.pi != null)))
+      continue;
+    const a = [...floors[fi]].reverse().find(may);
+    const b = floors[fi + 1].find(may);
+    if (a == null || b == null || !free(plan[a]) || !free(plan[b])) continue;
+    const bw = taken(plan[b], "s") ? free(plan[b]) : "s";
+    link(a, b, door(free(plan[a]), "stairup"), door(bw, "stairdown"));
+  }
+  // Whatever stayed unpaired stands as a closed door on its wall.
+  plan.forEach((p, i) => {
+    if (paired[i] || !p.door2 || !may(i)) return;
+    const w = p.door2 === "up" || p.door2 === "down" ? free(p) : p.door2;
+    if (!w || taken(p, w)) return;
+    const d = door(w, p.door2 === "up" ? "stairup"
+                    : p.door2 === "down" ? "stairdown" : "pass");
+    d.closed = true;
+    p.doors.push(d);
+  });
+  return { plan: plan, floors: floors.length, pairs: pairs };
+}
+
 /* Size the room around its works: enough wall for the whole run at this
    layout's spacing — a hang sits snug, a breezeway breathes — and never
    smaller than a cabinet nor narrower than its own widest painting. Left to
    itself the run divides across the whole perimeter, every wall hanging, the
    entry wall included. But the moment anything is pinned, the pins drive the
    shape: each axis answers to its own two walls — what's pinned there, plus
-   that wall's door — and only the unpinned remainder still spreads at the
+   that wall's doors — and only the unpinned remainder still spreads at the
    usual proportion. Two photos on the north wall no longer buy it a share
    of the whole collection's run. */
 const MU_RATIO = 1.25;               // rooms hang a little wider than deep
-function muRoomGeom(slots, layout, exit, entry, front, doorsNS) {
+function muRoomGeom(slots, layout, doors, doorsNS) {
   const gap = layout === "breezeway" ? 100 : 34;
   const run = slots.reduce((t, s) => t + s.w, 0) +
               gap * Math.max(0, slots.length - 1);
@@ -3717,11 +4026,13 @@ function muRoomGeom(slots, layout, exit, entry, front, doorsNS) {
   const tallest = slots.reduce((m, s) => Math.max(m, s.h), 0);
   const H = Math.max(MU_WALL_H,
                      Math.ceil(tallest + MU_FLOOR_PAD + MU_CROWN_PAD + 8));
+  const dw = { n: 0, e: 0, s: 0, w: 0 };
+  (doors || []).forEach((d) => { dw[d.wall] = Math.max(dw[d.wall], d.ow); });
   if (layout === "breezeway") {
     // A passthrough hall: across the passage, just the doorway plus a real
     // shoulder of bare wall; along it, enough for the whole run split over
     // the two long sides. Which axis is which follows the entry (doorsNS).
-    const lane = (front ? MU_FRONT_W : MU_DOOR_W) + 2 * MU_BREEZE_PAD;
+    const lane = Math.max(MU_DOOR_W, dw.n, dw.e, dw.s, dw.w) + 2 * MU_BREEZE_PAD;
     const along = Math.round(Math.max(
       420, widest + 2 * MU_MARGIN, run / 2 + 2 * MU_MARGIN + gap));
     return doorsNS
@@ -3729,16 +4040,13 @@ function muRoomGeom(slots, layout, exit, entry, front, doorsNS) {
       : { W: along, D: lane, H: H, gap: gap };
   }
   if (slots.some((s) => s.pin)) {
-    const door = { n: 0, e: 0, s: front ? MU_FRONT_W : 0, w: 0 };
-    if (exit) door[exit] = MU_DOOR_W;
-    if (entry) door[entry] = MU_DOOR_W;
     // A wall's own demand: its pinned run, its door, and bare wall at the
     // ends — four margins when a doorway cuts it into two shoulders.
     const need = (k) => {
-      const on = slots.filter((s) => s.pin === k);
+      const on = slots.filter((s) => (s.pin || "")[0] === k);
       return on.reduce((t, s) => t + s.w, 0) +
              gap * Math.max(0, on.length - 1) +
-             door[k] + (door[k] ? 4 : 2) * MU_MARGIN;
+             dw[k] + (dw[k] ? 4 : 2) * MU_MARGIN;
     };
     const auto = slots.filter((s) => !s.pin);
     const spread = auto.reduce((t, s) => t + s.w + gap, 0) / (2 + 2 * MU_RATIO);
@@ -3749,9 +4057,10 @@ function muRoomGeom(slots, layout, exit, entry, front, doorsNS) {
                        Math.max(need("n"), need("s")) + MU_RATIO * spread);
     return { W: Math.round(W), D: Math.round(D), H: H, gap: gap };
   }
-  const margins = (4 + (exit ? 4 : 2) + (entry || front ? 4 : 2)) * MU_MARGIN;
-  const doors = ((exit ? 1 : 0) + (entry || front ? 1 : 0)) * MU_DOOR_W;
-  let D = (run + doors + margins) / (2 + 2 * MU_RATIO);
+  const margins = ["n", "e", "s", "w"].reduce(
+    (t, k) => t + (dw[k] ? 4 : 2), 0) * MU_MARGIN;
+  const doorsum = dw.n + dw.e + dw.s + dw.w;
+  let D = (run + doorsum + margins) / (2 + 2 * MU_RATIO);
   D = Math.max(520, widest + 2 * MU_MARGIN, D);
   const W = Math.max(600, MU_DOOR_W + 280, Math.round(MU_RATIO * D));
   return { W: W, D: Math.round(D), H: H, gap: gap };
@@ -3775,10 +4084,14 @@ function muWallAxis(rot) {
 
 /* The room's hangable walls, in walk order: left wall, far wall, right wall,
    then the entry wall — passed on the way in, read on the way back out. A
-   doored wall (the exit, wherever it is, and the entry behind you) hangs its
-   two shoulders instead of its whole width. */
+   doored wall — whatever the door: the chain's, the front's, a stairway, an
+   extra door — hangs its two shoulders instead of its whole width. Each
+   segment carries a shoulder id ("s1", "s2" as the walk reads the wall) that
+   a pin may name; an undoored wall's one segment answers to the bare wall. */
 function muRoomSegs(g) {
   const segs = [];
+  const dbw = {};
+  (g.doors || []).forEach((d) => { dbw[d.wall] = d; });
   // A breezeway hangs nothing beside its doors — not even the shoulders. The
   // whole run belongs to the two long sides, and if the passage dead-ends
   // (an empty room follows and was culled), the blank far wall stays blank.
@@ -3788,32 +4101,31 @@ function muRoomSegs(g) {
       const side = (ent === "n" || ent === "s")
         ? (w.id === "e" || w.id === "w") : (w.id === "n" || w.id === "s");
       if (side) {
-        segs.push({ wall: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
+        segs.push({ wall: w.id, sid: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
                     rot: w.rot, cx: w.cx, cz: w.cz, off: 0 });
       }
       return;
     }
-    const front = w.id === "s" && g.front;   // room 1's own front door
-    const doored = w.id === g.exit || w.id === g.entry || front;
+    const d = dbw[w.id];
     // a doored wall has thickness: its face sits at the reveal's edge, so
     // everything mounted on it hangs that much further into the room
-    const off = doored ? MU_REVEAL / 2 : 0;
-    if (!doored) {
-      segs.push({ wall: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
+    const off = d ? MU_REVEAL / 2 : 0;
+    if (!d) {
+      segs.push({ wall: w.id, sid: w.id, len: w.len, cap: w.len - 2 * MU_MARGIN,
                   rot: w.rot, cx: w.cx, cz: w.cz, off: off });
       return;
     }
-    const ow = front ? MU_FRONT_W : MU_DOOR_W;
+    const ow = d.ow;
     const [ax, az] = muWallAxis(w.rot);
-    // The entry doorway sits wherever the room's dodge left it (the exit and
-    // the front door are always the room's own centre): shoulders differ.
-    const dt = w.id === g.entry ? (g.entryOff || 0) * (ax + az) : 0;
-    [[-w.len / 2, dt - ow / 2], [dt + ow / 2, w.len / 2]].forEach(([t0, t1]) => {
+    // The entry doorway sits wherever the room's dodge left it (every other
+    // door is the room's own centre): shoulders differ.
+    const dt = d.kind === "entry" ? (g.entryOff || 0) * (ax + az) : 0;
+    [[-w.len / 2, dt - ow / 2], [dt + ow / 2, w.len / 2]].forEach(([t0, t1], si) => {
       const sl = t1 - t0, o = (t0 + t1) / 2;
       if (sl <= 0) return;
       segs.push({
-        wall: w.id, len: sl, cap: sl - 2 * MU_MARGIN, rot: w.rot,
-        cx: w.cx + ax * o, cz: w.cz + az * o, off: off,
+        wall: w.id, sid: w.id + (si + 1), len: sl, cap: sl - 2 * MU_MARGIN,
+        rot: w.rot, cx: w.cx + ax * o, cz: w.cz + az * o, off: off,
       });
     });
   });
@@ -3834,14 +4146,19 @@ function muDistribute(slots, segs, gap) {
   const width = (seg, s) => s.w + (seg.slots.length ? gap : 0);
   const load = (seg) => seg.used / Math.max(1, seg.cap);
   slots.filter((s) => s.pin).forEach((s) => {
-    const wall = segs.filter((g) => g.wall === s.pin);
+    // A pin names a wall ("s") or one shoulder of it ("s1"); a shoulder pin
+    // on a wall whose door has gone falls back to the whole wall, and a pin
+    // to a wall this room doesn't hang lapses to auto — nothing drops.
+    let wall = segs.filter((g) => g.sid === s.pin);
+    if (!wall.length) wall = segs.filter((g) => g.wall === s.pin[0]);
+    if (!wall.length) { s.lapsed = true; return; }
     const room = wall.filter((g) => g.used + width(g, s) <= g.cap);
     const seg = (room.length ? room : wall).reduce((a, b) =>
       (load(a) <= load(b) ? a : b));
     seg.used += width(seg, s);
     seg.slots.push(s);
   });
-  const auto = slots.filter((s) => !s.pin);
+  const auto = slots.filter((s) => !s.pin || s.lapsed);
   const total = auto.reduce((t, s) => t + s.w + gap, 0);
   const capSum = segs.reduce((t, g) => t + Math.max(0, g.cap - g.used), 0) || 1;
   let i = 0;
@@ -3983,51 +4300,88 @@ function muBuildRoom(g, i, geoms, world) {
   room.appendChild(muEl("mu-ceil", W, D, muT(0, -H, 0, " rotateX(-90deg)")));
 
   // The room's walls, minus its entry — that one is the previous room's exit
-  // wall seen from behind (room 1 has no entry, so it gets all four).
-  // Whichever wall carries the exit is built split around its doorway, in a
+  // wall seen from behind (a floor's first room has no entry, so it gets all
+  // four). A wall carrying any door is built split around its opening, in a
   // group of its own so the same assembly serves any compass wall alike.
+  const dbw = {};
+  (g.doors || []).forEach((d) => { dbw[d.wall] = d; });
   muWalls(g).forEach((w) => {
-    if (w.id === g.entry) return;
+    const d = dbw[w.id];
+    if (d && d.kind === "entry") return;
     const rot = " rotateY(" + w.rot + "deg)";
-    const front = w.id === "s" && g.front;
-    if (w.id !== g.exit && !front) {
+    if (!d) {
       room.appendChild(muEl("mu-wall " + w.cls, w.len, H, muT(w.cx, -H / 2, w.cz, rot)));
       return;
     }
-    // A doored wall: the exit passage, or room 1's closed front door. A
-    // doored wall has real thickness — its faces sit at the reveal's edges,
-    // so the reveal ends flush with them instead of finning into the room.
-    // Each face spans ITS room's wall, not the wider of the two: a shared
-    // span would overhang the narrower room's corners on both faces, and the
-    // overhang can knife straight through whatever third room the plan has
-    // put beyond that corner.
-    const ow = front ? MU_FRONT_W : MU_DOOR_W;
-    const oh = front ? MU_FRONT_H : MU_DOOR_H;
-    const nlen = front ? 0 :
-      (w.id === "e" || w.id === "w" ? geoms[i + 1].D : geoms[i + 1].W);
-    // Where the next room's centre sits along this wall, in the wrap's own x
-    // (the face turned to that room flips x, so its span flips with it) — a
-    // room slid to dodge an earlier one carries its wall along.
-    const [ax, az] = muWallAxis(w.rot);
-    const eo = front ? 0 : (geoms[i + 1].entryOff || 0) * (ax + az);
+    if (d.kind === "exit") {
+      // The chain's shared passage. A doored wall has real thickness — its
+      // faces sit at the reveal's edges, so the reveal ends flush with them
+      // instead of finning into the room. Each face spans ITS room's wall,
+      // not the wider of the two: a shared span would overhang the narrower
+      // room's corners on both faces, and the overhang can knife straight
+      // through whatever third room the plan has put beyond that corner.
+      const nlen = w.id === "e" || w.id === "w" ? geoms[i + 1].D : geoms[i + 1].W;
+      // Where the next room's centre sits along this wall, in the wrap's own
+      // x (the face turned to that room flips x, so its span flips with it)
+      // — a room slid to dodge an earlier one carries its wall along.
+      const [ax, az] = muWallAxis(w.rot);
+      const eo = (geoms[i + 1].entryOff || 0) * (ax + az);
+      const wrap = document.createElement("div");
+      wrap.className = "mu-doorg";
+      // The wrap lives at stage level, not in the room: the wall it draws is
+      // two rooms' wall at once, and it must survive either room's culling.
+      // Each face's wall rises to ITS room's ceiling and wears ITS room's
+      // paint: a tall red hall next to a standard grey room shares the
+      // doorway, not the height or the colour.
+      wrap.style.transform =
+        "translate3d(" + (g.cx + w.cx) + "px,0px," + (g.cz + w.cz) + "px) rotateY(" +
+        w.rot + "deg)";
+      muDoorway(wrap, d.ow, d.oh, [0, 180], null, [w.len, nlen], [0, eo],
+        [H, geoms[i + 1].H], [g.color, geoms[i + 1].color], w.cls);
+      world.appendChild(wrap);
+      MU.wraps.push({ el: wrap, a: i, b: i + 1, floor: g.floor || 0 });
+      return;
+    }
+    // A door of the room's own: the front's gilded leaves, a stairway up or
+    // down, or an extra door — a passage when paired, shut when not. These
+    // face only their own room (the far side is elsewhere), so the assembly
+    // lives inside the room and culls with it.
+    const leaf = d.kind === "front" ? "mu-entry-door"
+      : d.kind === "pass" ? (d.closed ? "mu-shut-door" : "mu-pass-door")
+      : "mu-stair-door " + (d.kind === "stairup" ? "mu-stair-up" : "mu-stair-dn") +
+        (d.closed ? " mu-shut-door" : "");
     const wrap = document.createElement("div");
     wrap.className = "mu-doorg";
-    // The wrap lives at stage level, not in the room: the wall it draws is
-    // two rooms' wall at once, and it must survive either room's culling.
-    wrap.style.transform =
-      "translate3d(" + (g.cx + w.cx) + "px,0px," + (g.cz + w.cz) + "px) rotateY(" +
-      w.rot + "deg)";
-    // The front door faces the room alone (its far side is the outside
-    // world); a passage is dressed on both faces.
-    // Each face's wall rises to ITS room's ceiling and wears ITS room's
-    // paint: a tall red hall next to a standard grey room shares the
-    // doorway, not the height or the colour.
-    muDoorway(wrap, ow, oh, front ? [0] : [0, 180], front ? "mu-entry-door" : null,
-      front ? [w.len] : [w.len, nlen], front ? [0] : [0, eo],
-      front ? [H] : [H, geoms[i + 1].H],
-      front ? [g.color] : [g.color, geoms[i + 1].color], w.cls);
-    world.appendChild(wrap);
-    MU.wraps.push({ el: wrap, a: i, b: front ? i : i + 1 });
+    wrap.style.transform = muT(w.cx, 0, w.cz, rot);
+    muDoorway(wrap, d.ow, d.oh, [0], leaf, [w.len], [0], [H], [g.color], w.cls);
+    if (d.kind !== "front") {
+      // The stair's sign over the casing, and the leaf as the portal's
+      // clickable face.
+      const sign = d.kind === "stairup" ? "UPSTAIRS"
+        : d.kind === "stairdown" ? "DOWNSTAIRS" : "";
+      if (sign) {
+        const sg = muEl("mu-stair-sign", 120, 20,
+          muT(0, -(d.oh + MU_CASE_W + 26), MU_REVEAL / 2 + 2.4, ""));
+        sg.textContent = sign + (d.closed ? " · CLOSED" : "");
+        wrap.appendChild(sg);
+      }
+      const lf = wrap.querySelector(".mu-door-leaf");
+      if (lf && !d.closed && d.pi != null) {
+        lf.dataset.portal = d.pi;
+        lf.dataset.end = d.end;
+        // Where the traveller stands and faces at this end of the portal.
+        const rad = w.rot * Math.PI / 180;
+        const nx = Math.sin(rad), nz = Math.cos(rad);
+        MU.portalPts[d.pi] = MU.portalPts[d.pi] || {};
+        MU.portalPts[d.pi][d.end] = {
+          floor: g.floor || 0, ri: i,
+          dx: g.cx + w.cx, dz: g.cz + w.cz,
+          x: g.cx + w.cx + nx * 130, z: g.cz + w.cz + nz * 130,
+          yaw: Math.atan2(nx, -nz),
+        };
+      }
+    }
+    room.appendChild(wrap);
   });
   muTrimRoom(room, i, g);
   world.appendChild(room);
@@ -4217,19 +4571,21 @@ function muBuild(museum) {
   MU.wraps = [];
   MU.arts = [];
   MU.targets = [];
+  MU.portalPts = [];
+  MU.floor = 0;
   const rooms = museum.rooms.filter((r) => r.works.length);
   // Each room's works, in hang order — the walk a room hands the viewer when a
   // painting is opened: the room browses like a collection.
   MU.roomWorks = rooms.map((r) => r.works);
+  // The whole building read once: storeys, chains, and every door — the
+  // compass absolute, every room's north facing the same way.
+  const FP = muFloorPlan(rooms);
+  MU.floors = FP.floors;
   const geoms = [];
-  // The compass is absolute: every room's north faces the same way. Each
-  // room names the wall its onward door sits on; its entry is simply the
-  // opposite of the room before's exit, and the two may never coincide.
-  // Room 1's entry is the museum's own front door, on its south wall.
-  let entry = "s";
   rooms.forEach((room, i) => {
+    const p = FP.plan[i];
     const breeze = room.layout === "breezeway";
-    const doorsNS = entry === "n" || entry === "s";
+    const doorsNS = (p.entry || "s") === "n" || (p.entry || "s") === "s";
     // A breezeway's works may only sit on its long sides: a wall pin left
     // over from another layout (or another entry direction) lapses to auto
     // rather than aiming a painting at a wall that hangs nothing.
@@ -4238,26 +4594,22 @@ function muBuild(museum) {
       const ok = doorsNS ? { e: 1, w: 1 } : { n: 1, s: 1 };
       walls = {};
       Object.keys(room.walls).forEach((k) => {
-        if (ok[room.walls[k]]) walls[k] = room.walls[k];
+        if (ok[(room.walls[k] || "")[0]]) walls[k] = (room.walls[k] || "")[0];
       });
     }
     const slots = muSlots(room.works, room.layout, walls);
-    // Doors are settled before sizing: the geometry weighs each wall
-    // knowing which of them carry a doorway.
-    let ex = room.exit;
-    if (breeze) ex = MU_OPP[entry];      // a passage passes straight through
-    else if (!MU_OPP[ex] || ex === entry) ex = ["n", "e", "s", "w"].find((w) => w !== entry);
-    const exit = i < rooms.length - 1 ? ex : null;
-    const ent = i > 0 ? entry : null;    // room 1 draws its own south wall
-    const g = muRoomGeom(slots, room.layout, exit, ent, i === 0, doorsNS);
+    // Doors were settled by the plan: the geometry weighs each wall knowing
+    // every opening it carries.
+    const g = muRoomGeom(slots, room.layout, p.doors, doorsNS);
     g.slots = slots;
     g.layout = room.layout;
     g.name = room.name || "";
     g.color = room.color || "";
-    g.exit = exit;
-    g.entry = ent;
-    g.front = i === 0;
-    entry = MU_OPP[ex];
+    g.exit = p.exit;
+    g.entry = p.entry;
+    g.front = p.front;
+    g.floor = p.floor;
+    g.doors = p.doors;
     // Corners are sacred: if any wall's group would poke past one — the
     // proportional shares can fragment awkwardly — the room grows until
     // every wall holds its whole group inside its own margins. A breezeway
@@ -4297,11 +4649,16 @@ function muBuild(museum) {
   // (g.entryOff, door minus room centre) for everything built against it.
   // Placement runs first for the whole chain: a doored wall is dressed on
   // both faces, so building room i needs room i+1's slide already known.
+  // Each storey lays its own plan from its own origin: floors never see each
+  // other's footprints (they overlap in plan the way real storeys do), and
+  // only one storey is ever shown at a time.
   const DIRW = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] };
   let cx = 0, cz = 0;
   geoms.forEach((g, i) => {
     g.entryOff = 0;
-    if (i > 0) {
+    const fresh = i === 0 || geoms[i - 1].floor !== g.floor;
+    if (fresh) { cx = 0; cz = 0; }
+    if (!fresh) {
       const p = geoms[i - 1];
       const u = DIRW[p.exit];
       const ePrev = (u[0] ? p.W : p.D) / 2;
@@ -4313,6 +4670,7 @@ function muBuild(museum) {
       const lim = (latX ? g.W : g.D) / 2 -
                   (MU_DOOR_W / 2 + MU_PLINTH + MU_CORNER + 20);
       const hits = (s) => geoms.slice(0, i).some((o) =>
+        o.floor === g.floor &&
         Math.abs((latX ? cx + s : cx) - o.cx) < g.W / 2 + o.W / 2 - 1 &&
         Math.abs((latX ? cz : cz + s) - o.cz) < g.D / 2 + o.D / 2 - 1);
       let s = 0;
@@ -4336,7 +4694,8 @@ function muBuild(museum) {
     muHangRoom(g, el, i);
     MU.place = null;
     MU.rooms.push({ cx: g.cx, cz: g.cz, hx: g.W / 2, hz: g.D / 2,
-                    doors: [], layout: g.layout, name: g.name, el: el });
+                    doors: [], layout: g.layout, name: g.name, el: el,
+                    floor: g.floor || 0 });
     if (g.door) {
       const door = g.door;
       const edge = Math.abs(door.u[1]) > 0.5 ? "z" : "x";
@@ -4410,10 +4769,13 @@ function muTravel(to) {
 function muMapBuild() {
   MU.map = null;
   const host = document.getElementById("mu-map");
-  if (!host || !MU.rooms.length) return;
+  if (!host) return;
+  const f = MU.floor || 0;
+  const mine = MU.rooms.filter((r) => r.floor === f);
+  if (!mine.length) { host.innerHTML = ""; return; }
   const PAD = 30;
   let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  MU.rooms.forEach((r) => {
+  mine.forEach((r) => {
     x0 = Math.min(x0, r.cx - r.hx); x1 = Math.max(x1, r.cx + r.hx);
     z0 = Math.min(z0, r.cz - r.hz); z1 = Math.max(z1, r.cz + r.hz);
   });
@@ -4423,6 +4785,7 @@ function muMapBuild() {
   const u = (px) => +(px / s).toFixed(1);    // a size meant in screen px, in cm
   const rects = [], doors = [], nums = [];
   MU.rooms.forEach((r, i) => {
+    if (r.floor !== f) return;
     rects.push('<rect class="mm-room" data-ri="' + i + '" x="' + (r.cx - r.hx) +
       '" y="' + (r.cz - r.hz) + '" width="' + 2 * r.hx + '" height="' + 2 * r.hz +
       '"><title>' + esc(r.name || "Room " + (i + 1)) + "</title></rect>");
@@ -4438,6 +4801,17 @@ function muMapBuild() {
           '" width="' + 2 * hw + '" height="' + 2 * hd + '"/>'
         : '<rect class="mm-door" x="' + (d.at - hd) + '" y="' + (d.c - hw) +
           '" width="' + 2 * hd + '" height="' + 2 * hw + '"/>');
+    });
+  });
+  // The stairs on the plan: a wedge at each portal mouth on this storey.
+  MU.portalPts.forEach((pts) => {
+    ["a", "b"].forEach((end) => {
+      const p2 = pts && pts[end];
+      if (!p2 || p2.floor !== f) return;
+      nums.push('<text class="mm-num mm-stair" x="' + p2.x + '" y="' + p2.z +
+        '" font-size="' + u(9) + '">' +
+        ((pts[end === "a" ? "b" : "a"] || {}).floor > p2.floor ? "▲" : "▼") +
+        "</text>");
     });
   });
   host.innerHTML =
@@ -4489,15 +4863,17 @@ function muMapSync() {
     " rotate(" + (MU.cam.yaw * 180 / Math.PI).toFixed(1) + ")");
   if (m.ri !== MU.ri) {
     m.ri = MU.ri;
-    m.rects.forEach((r, i) => r.classList.toggle("on", i === MU.ri));
+    m.rects.forEach((r) => r.classList.toggle("on", +r.dataset.ri === MU.ri));
   }
 }
 
 /* Only the room you're in and its neighbours render; a museum of twenty rooms
-   is still only ever three rooms of planes for the compositor. */
+   is still only ever three rooms of planes for the compositor. Other storeys
+   render not at all: a storey is its own world until its stairs are taken. */
 function muCull() {
+  const f = MU.floor || 0;
   MU.rooms.forEach((r, i) =>
-    r.el.classList.toggle("mu-hidden", Math.abs(i - MU.ri) > 1));
+    r.el.classList.toggle("mu-hidden", r.floor !== f || Math.abs(i - MU.ri) > 1));
   // Phones go further: the neighbours keep their architecture — the view
   // through a doorway — but hang their art only once you arrive. Every
   // painting, frame and placard is a composited texture, and the phone's
@@ -4508,18 +4884,49 @@ function muCull() {
   // A doored wall serves two rooms: it stays up while either is near, or a
   // visible room's far wall would vanish with its culled neighbour.
   MU.wraps.forEach((w) =>
-    w.el.classList.toggle("mu-hidden", MU.ri < w.a - 1 || MU.ri > w.b + 1));
+    w.el.classList.toggle("mu-hidden",
+      w.floor !== f || MU.ri < w.a - 1 || MU.ri > w.b + 1));
   // A destination you can't walk to from here isn't offered.
   MU.targets.forEach((t) => t.el.classList.toggle("mu-hidden", t.ri !== MU.ri));
 }
 
-/* The room's signage: its given name, or its number while it has none. The
-   hang style is the arrange screen's vocabulary, not the museum's. */
+/* The room's signage: its given name, or its number while it has none — and
+   the storey, once there's more than one. The hang style is the arrange
+   screen's vocabulary, not the museum's. */
 function muRoomLabel() {
   const el = document.getElementById("mu-room");
   if (!el || !MU.rooms.length) return;
   const r = MU.rooms[MU.ri];
-  el.textContent = r.name || "Room " + (MU.ri + 1) + " of " + MU.rooms.length;
+  el.textContent = (r.name || "Room " + (MU.ri + 1) + " of " + MU.rooms.length) +
+    (MU.floors > 1 ? " · Floor " + (r.floor + 1) : "");
+}
+
+/* Taking the stairs (or a paired extra door): the lights dip, and you come
+   out of the partner door — the storeys swap, the map redraws, the walk goes
+   on. A breath of cooldown so arriving beside a stair doesn't bounce you
+   straight back through it. */
+function muPortalJump(pi, end) {
+  const pts = MU.portalPts[pi];
+  const to = pts && pts[end === "a" ? "b" : "a"];
+  if (!to || !MU.fade) return;
+  MU.portalCool = Infinity;
+  MU.fade.classList.add("on");
+  setTimeout(() => {
+    MU.glide = null;
+    MU.vel.f = MU.vel.t = 0;
+    MU.cam.x = to.x;
+    MU.cam.z = to.z;
+    MU.cam.yaw = to.yaw;
+    MU.floor = to.floor;
+    MU.ri = to.ri;
+    muRoomLabel();
+    muCull();
+    muMapBuild();
+    muApply();
+    MU.portalCool = performance.now();
+    muWake();
+    setTimeout(() => MU.fade.classList.remove("on"), 60);
+  }, 240);
 }
 
 /* Walls stop you, doorways don't: crossing any of the room's four sides is
@@ -4589,6 +4996,7 @@ function muNearest(ts) {
   const fx = Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
   let best = null, bestScore = 0;
   for (const a of MU.arts) {
+    if (MU.rooms[a.ri] && MU.rooms[a.ri].floor !== MU.floor) continue;
     const dx = a.x - cam.x, dz = a.z - cam.z;
     const dist = Math.hypot(dx, dz) || 1;
     if (dist > 470) continue;
@@ -4685,6 +5093,27 @@ function muFrame(ts) {
     if (Math.abs(MU.vel.f) > 0.4) {
       muMove(Math.sin(MU.cam.yaw) * MU.vel.f * dt,
              -Math.cos(MU.cam.yaw) * MU.vel.f * dt);
+    }
+  }
+  // Walk up to a stairway (or a paired extra door) facing it, and it takes
+  // you: through the dark, out the partner. A breath of cooldown after each
+  // crossing so the arrival doesn't bounce straight back.
+  if (MU.portalPts && MU.portalPts.length &&
+      ts - (MU.portalCool || 0) > 1600) {
+    const fx = Math.sin(MU.cam.yaw), fz = -Math.cos(MU.cam.yaw);
+    outer:
+    for (let pi = 0; pi < MU.portalPts.length; pi++) {
+      const pts = MU.portalPts[pi];
+      for (const end of ["a", "b"]) {
+        const p2 = pts && pts[end];
+        if (!p2 || p2.floor !== MU.floor || !pts[end === "a" ? "b" : "a"]) continue;
+        const dx = p2.dx - MU.cam.x, dz = p2.dz - MU.cam.z;
+        const d = Math.hypot(dx, dz) || 1;
+        if (d < 80 && (dx * fx + dz * fz) / d > 0.55) {
+          muPortalJump(pi, end);
+          break outer;
+        }
+      }
     }
   }
   const wrote = muApply();
@@ -4799,6 +5228,28 @@ function muTap(el) {
   if (!el || !el.closest) return;
   const mark = el.closest(".mu-target");
   if (mark) { muTravel(+mark.dataset.to); return; }
+  // A stairway or paired extra door: stroll to its mouth; the walk-up
+  // trigger in the frame loop carries you through.
+  const portal = el.closest("[data-portal]");
+  if (portal) {
+    const pts = MU.portalPts[+portal.dataset.portal];
+    const p2 = pts && pts[portal.dataset.end];
+    if (!p2) return;
+    const from = { x: MU.cam.x, z: MU.cam.z, yaw: MU.cam.yaw };
+    let dy = Math.atan2(p2.dx - from.x, -(p2.dz - from.z)) - from.yaw;
+    while (dy > Math.PI) dy -= 2 * Math.PI;
+    while (dy < -Math.PI) dy += 2 * Math.PI;
+    MU.portalCool = 0;                 // an invited crossing needs no cooldown
+    // Aim just short of the opening — inside the walk-up trigger's reach.
+    const gx = p2.dx + (p2.x - p2.dx) * 0.42;
+    const gz = p2.dz + (p2.z - p2.dz) * 0.42;
+    MU.glide = { from: from,
+                 to: { x: gx, z: gz, yaw: from.yaw + dy }, t0: null,
+                 dur: Math.max(500, Math.min(1600,
+                   Math.hypot(gx - from.x, gz - from.z) * 1.8)) };
+    muWake();
+    return;
+  }
   const hit = el.closest(".mu-art");
   if (!hit) return;
   const art = MU.arts.find((a) => a.el === hit);
@@ -4833,6 +5284,8 @@ function muTeardown() {
   MU.wraps = [];
   MU.arts = [];
   MU.targets = [];
+  MU.portalPts = [];
+  MU.fade = null;
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (screen.orientation && screen.orientation.unlock) {
     try { screen.orientation.unlock(); } catch (err) { /* not locked */ }
@@ -4904,11 +5357,14 @@ function muOpenWalk(museum, o) {
         (touch || !o.map ? "" : '<div class="mu-map" id="mu-map" aria-label="Museum plan"></div>') +
       "</div>" +
       '<div class="mu-rotate">⟳&nbsp; Turn your phone sideways — the museum is a landscape.</div>' +
+      '<div class="mu-fade" id="mu-fade" aria-hidden="true"></div>' +
     "</div>";
 
   MU.vp = $("#mu-vp");
   MU.world = $("#mu-world");
   MU.clip = $("#mu-clip");
+  MU.fade = $("#mu-fade");
+  MU.portalCool = 0;
   MU.touch = touch;
   MU.exit = o.exit;
   MU.active = true;
