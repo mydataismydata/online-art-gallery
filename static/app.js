@@ -4349,15 +4349,23 @@ function muBuildRoom(g, i, geoms, world) {
     // down, or an extra door — a passage when paired, shut when not. These
     // face only their own room (the far side is elsewhere), so the assembly
     // lives inside the room and culls with it.
+    // An OPEN stairway draws no painted leaf: its leaf turns invisible and
+    // serves only as the portal's clickable face, with a real 3-D flight
+    // built behind it. A shut stair (and every other door) keeps its leaf.
     const leaf = d.kind === "front" ? "mu-entry-door"
       : d.kind === "pass" ? (d.closed ? "mu-shut-door" : "mu-pass-door")
       : "mu-stair-door " + (d.kind === "stairup" ? "mu-stair-up" : "mu-stair-dn") +
-        (d.closed ? " mu-shut-door" : "");
+        (d.closed ? " mu-shut-door" : " mu-stair-open");
     const wrap = document.createElement("div");
     wrap.className = "mu-doorg";
     wrap.style.transform = muT(w.cx, 0, w.cz, rot);
     muDoorway(wrap, d.ow, d.oh, [0], leaf, [w.len], [0], [H], [g.color], w.cls);
     if (d.kind !== "front") {
+      // The real flight behind an open stairway — treads and risers in world
+      // space, so the fixed-height camera foreshortens them as you approach.
+      if ((d.kind === "stairup" || d.kind === "stairdown") && !d.closed) {
+        muStairwell(wrap, d.kind === "stairup" ? "up" : "dn", d.ow, d.oh);
+      }
       // The stair's sign over the casing, and the leaf as the portal's
       // clickable face.
       const sign = d.kind === "stairup" ? "UPSTAIRS"
@@ -4389,6 +4397,58 @@ function muBuildRoom(g, i, geoms, world) {
   muTrimRoom(room, i, g);
   world.appendChild(room);
   return room;
+}
+
+/* The real flight behind an open stairway's reveal: horizontal treads and
+   vertical risers laid out in world space so the room's own camera supplies
+   the foreshortening — the amount of each tread you see changes as you move,
+   the way the old flat leaf never could. The up flight climbs out of sight
+   with no ceiling or landing; the down flight drops below the floor into a
+   dark void. Not one CSS filter touches any of it: a filter on a preserve-3d
+   node flattens it out of the depth sort, and the treads collapse behind the
+   risers into flat "shutters". The group stays pointer-transparent (its CSS),
+   so a tap falls through to the invisible leaf that carries the portal. */
+function muStairwell(wrap, kind, ow, oh) {
+  const g = document.createElement("div");
+  g.className = "mu-stairwell " + (kind === "up" ? "mu-stairwell-up" : "mu-stairwell-down");
+  const innerW = ow - 10;
+  const nearZ = -(MU_REVEAL + 2);
+  const rise = 17, run = 25;
+  const count = kind === "up" ? 18 : 16;      // more than can be seen — it just runs on
+  const depth = count * run + 90;
+  const add = (cls, w, h, x, y, z, rot) =>
+    g.appendChild(muEl("mu-stair-part " + cls, w, h, muT(x, y, z, rot || "")));
+  if (kind === "up") {
+    // Tall side walls only — no horizontal ceiling — so the flight is open.
+    const wallTop = -355, wallBottom = 25;
+    const wallH = wallBottom - wallTop, wallY = (wallTop + wallBottom) / 2;
+    const wallZ = nearZ - depth / 2;
+    add("mu-stair-side mu-stair-side-left", depth, wallH, -innerW / 2, wallY, wallZ, " rotateY(90deg)");
+    add("mu-stair-side mu-stair-side-right", depth, wallH, innerW / 2, wallY, wallZ, " rotateY(-90deg)");
+    for (let i = 0; i < count; i++) {
+      const frontZ = nearZ - i * run, topY = -(i + 1) * rise;
+      add("mu-stair-riser", innerW, rise, 0, topY + rise / 2, frontZ, "");
+      add("mu-stair-tread", innerW, run, 0, topY, frontZ - run / 2, " rotateX(90deg)");
+      add("mu-stair-nosing", innerW, 3, 0, topY + 1.5, frontZ - 1, "");
+    }
+  } else {
+    // The first tread is level with the floor; each drops below it, so a
+    // distant eye sees mostly dark and a near one looks down onto the steps.
+    const wallTop = -oh, wallBottom = count * rise + 45;
+    const wallH = wallBottom - wallTop, wallY = (wallTop + wallBottom) / 2;
+    const wallZ = nearZ - depth / 2;
+    add("mu-stair-side mu-stair-side-left", depth, wallH, -innerW / 2, wallY, wallZ, " rotateY(90deg)");
+    add("mu-stair-side mu-stair-side-right", depth, wallH, innerW / 2, wallY, wallZ, " rotateY(-90deg)");
+    for (let i = 0; i < count; i++) {
+      const frontZ = nearZ - i * run, treadY = i * rise;
+      add("mu-stair-tread", innerW, run, 0, treadY, frontZ - run / 2, " rotateX(90deg)");
+      add("mu-stair-nosing", innerW, 3, 0, treadY + 1.5, frontZ - run + 1, "");
+      add("mu-stair-riser", innerW, rise, 0, treadY + rise / 2, frontZ - run, "");
+    }
+    add("mu-stair-void", innerW, wallH, 0, wallY, nearZ - count * run - 35, "");
+  }
+  wrap.appendChild(g);
+  return g;
 }
 
 /* One doorway, one object: a deep reveal through the wall's thickness, and

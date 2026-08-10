@@ -797,10 +797,18 @@
     inset 0 0 0 2px rgba(31, 26, 21, 0.30);
 }
 
-/* A stairway through a doorway: darkness with treads reading up (lit from
-   the landing) or down (falling away into shadow), behind the reveal. */
+/* An OPEN stairway shows the real 3-D flight built behind the reveal (see
+   below); its leaf is only the invisible clickable face of the portal. */
 
-.mu-door-leaf.mu-stair-door {
+.mu-door-leaf.mu-stair-open {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* A SHUT stairway has no well behind it — it keeps a flat, dark flight
+   painted on the leaf, and loses the glow of a landing. */
+
+.mu-door-leaf.mu-stair-door.mu-shut-door {
   background-color: #1d1a17;
   background-image:
     linear-gradient(180deg, rgba(0, 0, 0, .5) 0, rgba(0, 0, 0, 0) 40px),
@@ -813,7 +821,7 @@
               inset 0 -30px 40px -20px rgba(0, 0, 0, 0.6);
 }
 
-.mu-door-leaf.mu-stair-door.mu-stair-dn {
+.mu-door-leaf.mu-stair-door.mu-stair-dn.mu-shut-door {
   background-image:
     linear-gradient(180deg, rgba(0, 0, 0, .18) 0, rgba(0, 0, 0, .62) 100%),
     repeating-linear-gradient(
@@ -821,6 +829,99 @@
       #3a352f 0, #3a352f 2px,
       #211e1a 2px, #211e1a 34px
     );
+}
+
+/* The real stair flight behind an open stairway. These are actual horizontal
+   treads and vertical risers in world space, projected by the room's camera —
+   NOT a picture on the leaf — so their foreshortening changes as the visitor
+   moves. 17 cm rise, 25 cm run. Pointer-transparent, so a tap on the flight
+   falls through to the invisible leaf that carries the portal. No filter may
+   go on the group or a step: a filter on a preserve-3d node flattens it out of
+   the depth sort and the treads collapse behind the risers into "shutters". */
+
+.mu-stairwell,
+.mu-stair-part {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+
+.mu-stairwell { width: 0; height: 0; }
+
+.mu-stair-riser {
+  background:
+    linear-gradient(180deg,
+      rgba(255, 255, 255, .08) 0,
+      rgba(255, 255, 255, .015) 22%,
+      rgba(0, 0, 0, .20) 100%),
+    #625d54;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, .08),
+    inset 0 -3px 5px rgba(20, 17, 14, .34);
+  backface-visibility: visible;
+}
+
+.mu-stair-tread {
+  background:
+    linear-gradient(180deg, #918a7b 0, #777064 12%, #625c52 100%);
+  box-shadow:
+    inset 0 2px rgba(218, 210, 194, .38),
+    inset 0 -5px 8px rgba(27, 23, 19, .34);
+  backface-visibility: visible;
+}
+
+/* A narrow contrasting nosing makes the depth of each tread readable. */
+.mu-stair-nosing {
+  background: linear-gradient(180deg, #aaa393, #686157);
+  box-shadow:
+    0 2px 4px rgba(14, 12, 10, .48),
+    inset 0 1px rgba(255, 255, 255, .22);
+  backface-visibility: visible;
+}
+
+/* Side walls run alongside the flights but do not close them overhead. */
+.mu-stair-side {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, 0) 32%),
+    linear-gradient(90deg, #5c5851, #35312c 72%, #211e1a);
+  box-shadow: inset 0 0 18px rgba(17, 14, 12, .34);
+  backface-visibility: visible;
+}
+
+.mu-stair-side-right {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 32%),
+    linear-gradient(270deg, #5c5851, #35312c 72%, #211e1a);
+}
+
+/* The lower stairwell gets progressively darker with depth. */
+.mu-stairwell-down .mu-stair-tread {
+  background:
+    linear-gradient(180deg, #7b7569 0, #625c52 14%, #464139 100%);
+}
+
+.mu-stairwell-down .mu-stair-riser {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(0, 0, 0, .30)),
+    #4e4941;
+}
+
+.mu-stairwell-down .mu-stair-nosing {
+  background: linear-gradient(180deg, #918a7c, #514b43);
+}
+
+/* Darkness beyond the last visible step of a descent — not a landing. */
+.mu-stair-void {
+  background:
+    radial-gradient(75% 40% at 50% 8%,
+      rgba(153, 126, 91, .12),
+      rgba(29, 25, 21, .18) 40%,
+      rgba(5, 4, 4, .96) 100%),
+    #080706;
+  box-shadow: inset 0 0 55px 18px rgba(0, 0, 0, .82);
+  backface-visibility: visible;
 }
 
 /* A paired extra door: an open passage into the dark — you can't see where
