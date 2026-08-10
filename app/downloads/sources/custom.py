@@ -13,7 +13,7 @@ from ...names import name_match, parse_year, slugify
 from ..util import session, fetch_json, download_to_tmp, job_hooks
 
 # ids that a custom source may not claim (would shadow a built-in)
-RESERVED_IDS = {"gac", "met", "aic", "cma", "rijks", "wikidata", "vam"}
+RESERVED_IDS = {"gac", "met", "aic", "cma", "rijks", "wikidata", "wikiart", "vam"}
 
 FIELD_KEYS = ("title", "artist", "date", "year", "medium", "style", "image", "id")
 
