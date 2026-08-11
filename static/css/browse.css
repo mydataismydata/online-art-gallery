@@ -25,3 +25,7 @@
 .chip .n { font-size: 10.5px; color: var(--off); }
 .chip.active .n { color: var(--gold); }
 .chip-summary { font: italic 400 13px var(--serif); color: var(--faint); margin-left: 4px; }
+
+/* The "Search artwork" tab replaces the chip row with a field; let it stretch
+   to hold the long placeholder instead of the artists page's fixed width. */
+.chips .browse-search { flex: 1 1 340px; max-width: 560px; }

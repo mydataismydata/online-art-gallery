@@ -316,8 +316,35 @@ def _matches(value, wanted):
     return have == wanted.strip().casefold()
 
 
+# The catalogue metadata a text search reads — everything a wall label carries
+# except the description prose. A search may opt the description back in.
+_SEARCH_FIELDS = ("title", "artist", "date", "medium", "style",
+                  "genre", "school", "type", "era")
+
+
+def search_blob(w, include_desc=False):
+    """One folded string of a work's searchable text: case- and accent-flattened,
+    so 'Edouard' finds 'Édouard' and vice versa. Descriptions are left out unless
+    asked for — the artists page searches the label, Browse's artwork search the
+    whole record."""
+    parts = [w.get(k) for k in _SEARCH_FIELDS]
+    if include_desc:
+        parts.append(w.get("description"))
+    return fold(" ".join(str(p) for p in parts if p))
+
+
+def _q_match(w, q, include_desc=False):
+    """Every whitespace-separated term of the query must appear somewhere in the
+    work's searchable text — so 'vermeer marine' finds a Vermeer filed under the
+    marine genre, whatever order the fields happen to fall in."""
+    if not q:
+        return True
+    hay = search_blob(w, include_desc)
+    return all(term in hay for term in fold(q).split())
+
+
 def query_works(artist=None, era=None, medium=None, style=None, genre=None,
-                school=None, q=None):
+                school=None, q=None, include_desc=False):
     out = []
     for w in all_works():
         if artist is not None and fold(w["artist"]) != fold(artist):
@@ -332,9 +359,7 @@ def query_works(artist=None, era=None, medium=None, style=None, genre=None,
             continue
         if not _matches(w["school"], school):
             continue
-        # Fold both sides: someone typing "Theo" or "Gericault" without reaching for
-        # the accents is still looking for Géricault.
-        if q and fold(q) not in fold(w["title"] + " " + w["artist"]):
+        if not _q_match(w, q, include_desc):
             continue
         out.append(w)
     return out
@@ -351,20 +376,26 @@ def cover_id(name, ws):
     return ws[0]["id"]
 
 
-def artists():
+def artists(search=False):
     groups = OrderedDict()
     for w in all_works():
         groups.setdefault(w["artist"], []).append(w)
     out = []
     for name, ws in groups.items():
         years = [w["year"] for w in ws if w["year"]]
-        out.append({
+        a = {
             "name": name,
             "count": len(ws),
             "cover": cover_id(name, ws),
             "year_min": min(years) if years else None,
             "year_max": max(years) if years else None,
-        })
+        }
+        if search:
+            # A folded index of every work's wall-label metadata (no descriptions),
+            # so the artists page can surface a painter by their paintings — a
+            # title, date, medium, style, genre or school — not only by their name.
+            a["search"] = " ".join(search_blob(w) for w in ws)
+        out.append(a)
     # plain A-Z on the displayed name ("Arthur Streeton" under A, not S)
     out.sort(key=lambda a: strip_diacritics(a["name"]).casefold())
     return out

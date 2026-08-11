@@ -412,7 +412,9 @@ def api_museum_unhang():
 @bp.get("/api/artists")
 @auth.require_view
 def api_artists():
-    arts = library.artists()
+    # ?search=1 adds a folded metadata index per artist so the artists page can
+    # match a query against each painter's works, not just their name.
+    arts = library.artists(search=request.args.get("search") == "1")
     return jsonify({
         "artists": arts,
         "total_works": len(library.all_works()),
@@ -431,6 +433,9 @@ def api_works():
         genre=request.args.get("genre"),
         school=request.args.get("school"),
         q=request.args.get("q"),
+        # Browse's "Search artwork" reads the whole record, descriptions and all;
+        # the label-only search everywhere else leaves the prose out.
+        include_desc=request.args.get("desc") == "1",
     )
     out = {"works": works}
     # An artist's gallery hangs in the owner's hand order when there is one —

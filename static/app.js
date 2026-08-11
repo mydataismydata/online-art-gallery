@@ -886,7 +886,7 @@ async function homeView() {
   setNav("home");
   try {
     const [d, feat] = await Promise.all([
-      api("/api/artists"),
+      api("/api/artists?search=1"),
       api("/api/featured").catch(() => ({ work: null })),
     ]);
     if (!d.artists.length) {
@@ -912,8 +912,8 @@ async function homeView() {
       '<p class="sub" id="acount"></p></div>' +
       '<div class="headact">' +
       '<label class="searchbox"><span class="mag" aria-hidden="true">⌕</span>' +
-      '<input id="asearch" type="search" placeholder="Search artists…" autocomplete="off" ' +
-      'aria-label="Search artists"></label>' +
+      '<input id="asearch" type="search" placeholder="Search artists & works…" autocomplete="off" ' +
+      'aria-label="Search artists and works"></label>' +
       '<select class="sortctl" id="asort" aria-label="Sort artists">' + sortOpts + "</select>" +
       "</div></div>" +
       '<div class="artist-grid" id="agrid"></div>');
@@ -929,11 +929,18 @@ async function homeView() {
 
     const search = $("#asearch"), sort = $("#asort"), grid = $("#agrid"), count = $("#acount");
     const paint = () => {
-      const q = fold(search.value.trim());
-      const list = (q ? d.artists.filter((a) => fold(a.name).includes(q)) : d.artists)
+      // Every term must land, in the name or in the works' folded label metadata
+      // (titles, dates, media, styles, genres, schools — never descriptions), so
+      // a painter surfaces by their paintings too, accents or none.
+      const terms = fold(search.value.trim()).split(/\s+/).filter(Boolean);
+      const hit = (a) => {
+        const hay = fold(a.name) + " " + (a.search || "");
+        return terms.every((t) => hay.includes(t));
+      };
+      const list = (terms.length ? d.artists.filter(hit) : d.artists)
         .slice().sort(SORTS[sort.value][1]);
-      grid.innerHTML = list.map(artistCardHtml).join("") + (q ? "" : addCard);
-      count.textContent = q
+      grid.innerHTML = list.map(artistCardHtml).join("") + (terms.length ? "" : addCard);
+      count.textContent = terms.length
         ? list.length + (list.length === 1 ? " painter" : " painters") + " matching “" + search.value.trim() + "”"
         : d.artists.length + " painters · " + d.total_works + " works";
     };
@@ -1475,7 +1482,10 @@ function wireRepoint(name) {
 /* ============================== browse ============================== */
 
 const FACETS = [["era", "Era"], ["medium", "Medium"], ["style", "Style"],
-                ["genre", "Genre"], ["school", "School"]];
+                ["genre", "Genre"], ["school", "School"],
+                // The last tab is a free-text search over every work — all the
+                // metadata the other tabs bucket by, and the descriptions too.
+                ["search", "Search artwork"]];
 
 /* ============================== connections ============================== */
 
@@ -1511,6 +1521,7 @@ function typeVars(t) {
 async function browseView(facet, value) {
   setNav("browse");
   if (!FACETS.some((f) => f[0] === facet)) facet = "era";
+  const searching = facet === "search";
   try {
     const [facets, arts] = await Promise.all([
       api("/api/facets"),
@@ -1519,20 +1530,66 @@ async function browseView(facet, value) {
     const tabs = FACETS.map((f) =>
       '<a href="#/browse/' + f[0] + '" class="' + (f[0] === facet ? "active" : "") + '">' + f[1] + "</a>"
     ).join("");
-    const chips = (facets[facet] || []).map((v) =>
-      '<a class="chip' + (value && v.value.toLowerCase() === value.toLowerCase() ? " active" : "") +
-      '" href="#/browse/' + facet + "/" + encodeURIComponent(v.value) + '">' +
-      esc(v.value) + ' <span class="n">' + v.count + "</span></a>"
-    ).join("");
     const sub = arts.total_works != null
       ? arts.total_works + " works across the collection" : "";
+    // The controls row is chips for a facet, a search field for the search tab.
+    const controls = searching
+      ? '<label class="searchbox browse-search"><span class="mag" aria-hidden="true">⌕</span>' +
+        '<input id="wsearch" type="search" autocomplete="off" aria-label="Search artworks" ' +
+        'placeholder="Search every work — title, date, medium, style, genre, school, description…">' +
+        "</label>"
+      : (facets[facet] || []).map((v) =>
+          '<a class="chip' + (value && v.value.toLowerCase() === value.toLowerCase() ? " active" : "") +
+          '" href="#/browse/' + facet + "/" + encodeURIComponent(v.value) + '">' +
+          esc(v.value) + ' <span class="n">' + v.count + "</span></a>"
+        ).join("");
     app.innerHTML = page(
       '<div class="pagehead"><div><h1>Browse</h1>' +
       (sub ? '<p class="sub">' + esc(sub) + "</p>" : "") + "</div></div>" +
       '<div class="facet-tabs">' + tabs + "</div>" +
-      '<div class="chips">' + chips + '<span class="chip-summary" id="browse-sum"></span></div>' +
+      '<div class="chips">' + controls + '<span class="chip-summary" id="browse-sum"></span></div>' +
       "<div id='browse-body'></div>");
-    const body = $("#browse-body");
+    const body = $("#browse-body"), sum = $("#browse-sum");
+
+    // The search tab: a free-text query over the whole record, descriptions and
+    // all, run live as you type against /api/works?desc=1.
+    if (searching) {
+      const input = $("#wsearch");
+      input.value = value || "";
+      let timer = null, seq = 0;
+      const run = async () => {
+        const q = input.value.trim();
+        // Keep the URL shareable without a hashchange — that would rebuild the
+        // whole view and pull focus out of the field mid-type.
+        history.replaceState(null, "", "#/browse/search" +
+          (q ? "/" + encodeURIComponent(q) : ""));
+        if (!q) {
+          sum.textContent = "";
+          body.innerHTML = '<div class="emptybox">Search every work in the collection — ' +
+            "titles, dates, media, styles, genres, schools, and descriptions.</div>";
+          return;
+        }
+        const mine = ++seq;
+        try {
+          const d = await api("/api/works?desc=1&q=" + encodeURIComponent(q));
+          if (mine !== seq) return;            // a later keystroke already answered
+          const works = d.works;
+          sum.textContent = works.length
+            ? works.length + (works.length === 1 ? " work" : " works") + " matching “" + q + "”"
+            : "";
+          body.innerHTML = works.length
+            ? worksSection(works, true, browseCtx())
+            : '<div class="emptybox">No works match “' + esc(q) + "”.</div>";
+          if (works.length)
+            bindWorks(works, true, () => browseView("search", input.value.trim()), browseCtx());
+        } catch (e) { if (mine === seq) errbox(e); }
+      };
+      input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 180); });
+      input.focus();
+      run();
+      return;
+    }
+
     if (!value) {
       body.innerHTML = '<div class="emptybox">Pick a ' + esc(facet) + " above to see its works.</div>";
       return;
@@ -1541,7 +1598,7 @@ async function browseView(facet, value) {
     const works = d.works;
     // The chip already names the filter; the summary line says how much of the
     // collection it turned out to be.
-    $("#browse-sum").textContent = works.length
+    sum.textContent = works.length
       ? esc(value) + " — " + works.length + (works.length === 1 ? " work" : " works")
       : "";
     body.innerHTML = works.length
