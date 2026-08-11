@@ -401,6 +401,53 @@ def artists(search=False):
     return out
 
 
+def browse_order(works):
+    """Order a Browse result the way the collection should present itself:
+      1. what's hung in the museum,
+      2. then what's gathered into a collection,
+      3. then each painter's thumbnail,
+      4. then the remainder, ranked by how many works their painter hangs in the
+         museum (the busiest painters first).
+    Within a tier the incoming order (artist, then year, then title) is kept, so
+    the ranking only ever promotes — it never scrambles a settled sort."""
+    from . import museum, collections   # local imports dodge an import cycle
+
+    hung = set(museum.hung_ids())
+    collected = set()
+    for rec in collections.all_records():
+        collected.update(w for w in (rec.get("work_ids") or []) if w)
+
+    groups = OrderedDict()
+    for w in all_works():
+        groups.setdefault(w["artist"], []).append(w)
+    # Each painter's thumbnail — computed only for painters in this result.
+    result_artists = {w["artist"] for w in works}
+    covers = {cover_id(name, groups[name])
+              for name in result_artists if name in groups}
+
+    # How strongly each painter shows in the museum, for the trailing tier.
+    art_of = {w["id"]: w["artist"] for w in all_works()}
+    hung_by_artist = Counter(art_of[i] for i in hung if i in art_of)
+
+    def key(pair):
+        i, w = pair
+        wid = w["id"]
+        if wid in hung:
+            tier = 0
+        elif wid in collected:
+            tier = 1
+        elif wid in covers:
+            tier = 2
+        else:
+            tier = 3
+        # Only the trailing tier is reordered — by its painter's museum tally,
+        # descending; the others keep their incoming order via the index tie-break.
+        rank = -hung_by_artist[w["artist"]] if tier == 3 else 0
+        return (tier, rank, i)
+
+    return [w for _, w in sorted(enumerate(works), key=key)]
+
+
 def stats():
     """Totals for the Settings screen: artist/image counts, the total bytes of the
     stored images, and free/total space on the library's filesystem."""

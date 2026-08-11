@@ -440,8 +440,13 @@ def api_works():
     out = {"works": works}
     # An artist's gallery hangs in the owner's hand order when there is one —
     # for everyone, on both boxes; the arrangement is curation, not preference.
+    # A Browse result (facet or search — no artist) is ordered instead by what
+    # the collection puts forward: museum hangs, then collected works, then
+    # artist thumbnails, then the rest by their painter's museum presence.
     if artist is not None:
         out["works"], out["arranged"] = artistinfo.apply_order(artist, works)
+    else:
+        out["works"] = library.browse_order(works)
     return jsonify(out)
 
 
