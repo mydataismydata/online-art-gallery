@@ -899,8 +899,10 @@ async function homeView() {
           : "Ask an Owner to add some artworks.") + "</div>");
       return;
     }
+    // The page opens on "Most works" — the fullest painters lead.
     const sortOpts = Object.keys(SORTS).map((k) =>
-      '<option value="' + k + '">' + esc(SORTS[k][0]) + "</option>").join("");
+      '<option value="' + k + '"' + (k === "works" ? " selected" : "") + ">" +
+      esc(SORTS[k][0]) + "</option>").join("");
     const addCard = isOwner()
       ? '<a class="artist-card add-card" href="#/add">' +
         '<span class="cover"><span>+</span></span>' +
