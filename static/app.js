@@ -5817,7 +5817,26 @@ function bulkPanelHtml() {
       "here (renames move files; do them in the placard editor), and the source " +
       "columns ride along for reference only. Fields: date, medium, " +
       "height_cm, length_cm, style, genre, school, description. Without an id, a " +
-      "painting the museum holds twice is brought up to the record on both copies."));
+      "painting the museum holds twice is brought up to the record on both copies.") +
+    walkExportBoxHtml());
+}
+
+/* One-way, unlike the two boxes above: the hang is arranged in Walk the Museum,
+   not pasted back — so this box exports and stops there. */
+function walkExportBoxHtml() {
+  return (
+    '<div class="bulkbox bulkbox-export">' +
+    '<div class="bulkhead"><p class="aside-label">Museum walk</p>' +
+    '<span class="bulkacts">' +
+    '<button type="button" class="linkbtn" id="export-walk">Export walk</button>' +
+    '<span class="formmsg" data-walkmsg></span>' +
+    "</span></div>" +
+    '<p class="tiny">Every work hung in <b>Walk the Museum</b>, written out in walk ' +
+    "order — each tagged with its floor, room number, room name and the wall it " +
+    "hangs on, with a rooms index up top. A read-only snapshot for reference or " +
+    "safekeeping; there's no load back, since the hang is arranged in the walk itself." +
+    "</p></div>"
+  );
 }
 
 function one0(kind) { return kind === "artists" ? "artist" : "work"; }
@@ -5853,10 +5872,40 @@ function bulkSummaryHtml(kind, r) {
   return html;
 }
 
+/* The museum-walk export: a plain GET the server hands back as an attachment.
+   Downloaded raw so the server's pretty-printing survives, dated like the metadata
+   exports beside it. */
+function wireWalkExport() {
+  const btn = document.getElementById("export-walk");
+  if (!btn) return;
+  const msg = btn.parentNode.querySelector("[data-walkmsg]");
+  btn.addEventListener("click", async () => {
+    msg.className = "formmsg";
+    msg.textContent = "Exporting…";
+    try {
+      const r = await fetch("/api/museum/export");
+      if (!r.ok) {
+        let m = "Export failed.";
+        try { m = (await r.json()).error || m; } catch (e) { /* html error page */ }
+        throw new Error(m);
+      }
+      const text = await r.text();
+      const stamp = new Date().toISOString().slice(0, 10);
+      downloadText("museum-walk-" + stamp + ".json", text);
+      msg.textContent = "";
+      const n = JSON.parse(text).work_count;
+      toast(n ? "Exported " + n + " " + (n === 1 ? "work" : "works") + "."
+              : "The museum is empty — nothing hung yet.");
+    } catch (e) { msg.className = "formmsg err"; msg.textContent = e.message; }
+  });
+}
+
 function wireBulkMeta() {
+  wireWalkExport();
   document.querySelectorAll(".bulkbox").forEach((box) => {
     const kind = box.dataset.kind;
     const ta = box.querySelector("textarea");
+    if (!ta) return;   // export-only boxes (the museum walk) have no round-trip controls
     const msg = box.querySelector("[data-msg]");
     const out = box.querySelector("[data-out]");
     const btn = box.querySelector("[data-preview]");

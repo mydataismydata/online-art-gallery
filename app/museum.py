@@ -314,6 +314,65 @@ def export_rooms():
     return _rooms(rec)
 
 
+def walk_export():
+    """The walk as a flat catalogue: every hung work in walk order, each tagged
+    with the room it's in. A `rooms` index (number, floor, name, layout, count)
+    and a `works` list ordered the way you'd meet them on the walk — every work
+    carrying its floor, its room number (counted within its floor, as the walk
+    reads it), the room's name and, when pinned, its wall. Rooms are numbered as
+    the walk chains them: an empty room keeps its number — you'd walk through it —
+    it just contributes no works. Built on detail(), so a work whose file has gone
+    is absent here exactly as it is on the wall."""
+    d = detail()
+    rooms_out, works_out = [], []
+    seq = 0
+    per_floor = {}   # floor (0-based) -> running room number within that floor
+    for gi, r in enumerate(d.get("rooms") or [], 1):
+        floor0 = r.get("floor", 0)
+        room_n = per_floor.get(floor0, 0) + 1
+        per_floor[floor0] = room_n
+        name = r.get("name") or None
+        works = r.get("works") or []
+        walls = r.get("walls") or {}
+        rooms_out.append({
+            "global": gi,            # position in the whole walk, 1-based
+            "floor": floor0 + 1,     # storey as signed in the walk (Floor 1 = ground)
+            "room": room_n,          # number within its floor, 1-based
+            "name": name,
+            "layout": r.get("layout"),
+            "work_count": len(works),
+        })
+        for w in works:
+            seq += 1
+            works_out.append({
+                "seq": seq,           # order across the whole walk, 1-based
+                "floor": floor0 + 1,
+                "room": room_n,
+                "room_name": name,
+                "wall": walls.get(w.get("id")) or None,
+                "id": w.get("id"),
+                "title": w.get("title"),
+                "artist": w.get("artist"),
+                "date": w.get("date") or (str(w["year"]) if w.get("year") else ""),
+                "year": w.get("year"),
+                "medium": w.get("medium"),
+                "height_cm": w.get("height_cm"),
+                "length_cm": w.get("length_cm"),
+                "style": w.get("style"),
+                "genre": w.get("genre"),
+                "school": w.get("school"),
+            })
+    return {
+        "exported": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "museum_updated": d.get("updated"),
+        "floors": len(per_floor),
+        "room_count": len(rooms_out),
+        "work_count": seq,
+        "rooms": rooms_out,
+        "works": works_out,
+    }
+
+
 def remap_works(id_map):
     """Follow works whose id changed because their file moved (an artist rename
     or a repoint) — the museum's copy of collections.remap_works, for the same

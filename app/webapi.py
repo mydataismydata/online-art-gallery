@@ -407,6 +407,18 @@ def api_museum_unhang():
     return jsonify({"removed": museum.unhang([str(i) for i in ids])})
 
 
+# The hang as a flat JSON catalogue — every hung work in walk order, tagged with
+# floor, room number, room name and wall. Read-only: there's no import back, the
+# hang is arranged in Walk the Museum itself. Owner-only like the metadata export,
+# but not private-only — a public box's owner curates (and may export) their own.
+@bp.get("/api/museum/export")
+@auth.require_role("owner")
+def api_museum_export():
+    body = json.dumps(museum.walk_export(), ensure_ascii=False, indent=1) + "\n"
+    return Response(body, mimetype="application/json", headers={
+        "Content-Disposition": "attachment; filename=museum-walk.json"})
+
+
 # ==================== library (browse — any signed-in user) ====================
 
 @bp.get("/api/artists")
