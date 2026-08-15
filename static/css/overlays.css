@@ -20,6 +20,11 @@
   width: 100%; max-width: 440px; background: var(--panel);
   border: 1px solid var(--hair-strong); padding: 28px;
   box-shadow: 0 24px 70px rgba(0,0,0,.65);
+  /* Never taller than the screen: the backdrop keeps 10vh above and 20px below,
+     so cap to that and scroll within when a long editor would run off the bottom.
+     overflow-x stays hidden so the pinned footer's edge-to-edge bleed (below)
+     can't trip a stray sideways scrollbar. */
+  max-height: calc(90vh - 40px); overflow: hidden auto;
 }
 .modal h2 { font: 400 22px var(--serif); color: var(--display2); margin: 0 0 16px; }
 /* the tile "i" popup: the placard brings its own card, so drop the modal chrome */
@@ -35,6 +40,19 @@
 .rp-sub { font: 400 13px/1.6 var(--sans); color: var(--dim); margin: 0 0 16px; }
 .rp-search { margin-bottom: 14px; }
 .modal-actions { display: flex; align-items: center; gap: 18px; margin-top: 16px; }
+
+/* Keep Save / cancel reachable when a form editor outgrows the screen: the modal
+   scrolls (see .modal) and its action row rides the bottom of the scrollport,
+   bled edge-to-edge over the 28px padding so scrolling text passes cleanly behind
+   it. Scoped to .modal so the in-page .bf-actions rows (settings, bulk) stay put. */
+.modal .bf-actions {
+  position: sticky; bottom: 0; z-index: 1;
+  margin: 22px -28px 0; padding: 14px 28px 0;
+  background: var(--panel); border-top: 1px solid var(--hair);
+  /* The bar pins to the content-box bottom, 28px (the modal's bottom padding)
+     above its inner edge. Paint that strip so scrolled text can't peek beneath. */
+  box-shadow: 0 28px 0 var(--panel);
+}
 
 /* ---------- toast ---------- */
 #toast {
