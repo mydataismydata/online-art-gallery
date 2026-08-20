@@ -7,8 +7,11 @@ full-resolution original from Wikimedia Commons. No API key, and coverage is eno
 and dates vary in polish. Docs: https://query.wikidata.org/"""
 import re
 import time
+import urllib.parse
 
-from ... import library, artistinfo
+from PIL import Image
+
+from ... import config, library, artistinfo
 from ...names import parse_year
 from ..util import session, fetch_json, download_to_tmp, job_hooks
 from . import tuning
@@ -22,10 +25,17 @@ HINT = ("Looks the artist up on Wikidata, then downloads the full-resolution pub
 PLACEHOLDER = "Artist name, e.g. Claude Monet"
 
 WDQS = "https://query.wikidata.org/sparql"
+COMMONS = "https://commons.wikimedia.org/w/api.php"
 _LIMIT = 500  # per-artist cap on works pulled from SPARQL
 
-ENDPOINTS = (("SPARQL endpoint", WDQS),)
+ENDPOINTS = (("SPARQL endpoint", WDQS), ("Commons API", COMMONS))
 CONFIG = [
+    {"key": "min_px", "label": "Minimum pixels on the long side", "type": "int",
+     "default": config.VIEW_MAX, "min": 0, "max": 30000,
+     "help": "A painting whose Commons image is no bigger than this on its long side is "
+             "reported and skipped rather than saved small. Defaults to the viewer's own "
+             "size (GALLERY_VIEW_MAX), the point below which a painting is being blown up "
+             "to hang. Set 0 to keep every image regardless of size."},
     {"key": "max_works", "label": "Max works per artist", "type": "int", "default": 500, "min": 10, "max": 2000,
      "help": "Upper bound on how many of an artist's paintings the SPARQL query returns."},
 ]
@@ -51,11 +61,52 @@ def _val(row, key):
     return (row.get(key) or {}).get("value")
 
 
+def _file_of(url):
+    """A P18 Commons Special:FilePath URL -> the file's page title, as imageinfo
+    returns it (spaces, not underscores) so the two line up."""
+    return urllib.parse.unquote(url.rsplit("/", 1)[-1]).replace("_", " ")
+
+
+def _sizes(sess, files, **hooks):
+    """{file title: (w, h)} from the Commons imageinfo API, so a painting that only
+    exists small is ruled out before a byte of it is fetched. 40 titles a call keeps
+    the rate limiter quiet; a file it can't measure simply doesn't appear here and is
+    judged after download instead."""
+    out = {}
+    files = sorted(set(files))
+    for i in range(0, len(files), 40):
+        chunk = files[i:i + 40]
+        try:
+            r = fetch_json(sess, COMMONS,
+                           {"action": "query", "prop": "imageinfo", "iiprop": "size|mime",
+                            "titles": "|".join("File:" + f for f in chunk),
+                            "format": "json", "formatversion": "2"},
+                           timeout=60, max_wait=60, **hooks)
+        except Exception:
+            continue
+        for p in (r.get("query") or {}).get("pages") or []:
+            ii = (p.get("imageinfo") or [{}])[0]
+            if ii.get("width"):
+                out[p["title"].split(":", 1)[1]] = (ii["width"], ii["height"])
+    return out
+
+
+def _long_side(path):
+    """The downloaded file's longer edge — the backstop for a P18 whose size Commons
+    didn't hand back in the batch above."""
+    try:
+        with Image.open(str(path)) as im:
+            return max(im.size)
+    except Exception:
+        return 0
+
+
 def run(job):
     sess = session()
     hooks = job_hooks(job, "Wikimedia")
     cfg = tuning.effective(ID, CONFIG)
     limit = cfg["max_works"]
+    min_px = job.opts.get("min_px") or cfg["min_px"]
     job.log("Identifying \"%s\" on Wikidata…" % job.query)
     qid, label = artistinfo.resolve_qid(job.query)
     if not qid:
@@ -71,6 +122,15 @@ def run(job):
             % (len(rows), "" if len(rows) == 1 else "s",
                " (capped)" if len(rows) >= limit else ""))
 
+    # Measure every candidate in a couple of batched calls, so a painting that only
+    # exists small is dropped before it's downloaded rather than after.
+    sizes = {}
+    if min_px:
+        job.log("Skipping anything %d px or smaller on the long side." % min_px)
+        files = [_file_of(img) for img in (_val(r, "image") for r in rows) if img]
+        sizes = _sizes(sess, files, **hooks)
+
+    small = []
     max_items = job.opts.get("max_items")
     for row in rows:
         if job.cancelled:
@@ -88,6 +148,15 @@ def run(job):
         if library.source_exists(ID, source_id):
             job.skipped += 1
             continue
+
+        # Judge the size Commons reports before spending the download on it.
+        if min_px:
+            wh = sizes.get(_file_of(image))
+            if wh and max(wh) <= min_px:
+                job.log("TOO SMALL \"%s\": best is %dx%d." % (title, wh[0], wh[1]))
+                small.append(title)
+                job.failed += 1
+                continue
 
         date_text = (_val(row, "date") or "")[:10] or None  # trim SPARQL datetime
         meta = {
@@ -108,6 +177,21 @@ def run(job):
             job.failed += 1
             job.log("FAILED \"%s\": %s" % (title, e))
             continue
+
+        # Backstop for a file Commons didn't measure in the batch above: check the
+        # bytes we actually got, and drop a small one rather than hang it blown up.
+        if min_px:
+            got = _long_side(tmp)
+            if got and got <= min_px:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                job.log("TOO SMALL \"%s\": %d px on the long side." % (title, got))
+                small.append(title)
+                job.failed += 1
+                continue
+
         path = library.save_work(artist, meta, tmp, job)
         job.saved += 1
         job.log("Saved: %s" % path.name)
@@ -115,3 +199,7 @@ def run(job):
             job.log("Reached the requested maximum of %d works." % max_items)
             return
         time.sleep(0.4)
+
+    if small:
+        job.log("Not available above %d px (%d): %s"
+                % (min_px, len(small), "; ".join(small)[:400]))
