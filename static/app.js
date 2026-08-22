@@ -7828,6 +7828,11 @@ function replaceWork(oldId, fresh) {
   });
 }
 
+/* `hiResFor` is the work id whose full original is currently in #vimg. Browsing
+   stays on the fast screen-sized copy; a deliberate zoom pulls the original in
+   (see hiRes), and every new painting starts back on the copy. */
+let hiResFor = null, hiResReq = 0;
+
 function showWork(i) {
   const n = V.list.length;
   V.i = ((i % n) + n) % n;
@@ -7835,6 +7840,7 @@ function showWork(i) {
   viewer.classList.add("loading");
   setFit(true);
   vzReset(false);        // a new painting arrives framed, not where the last one was left
+  hiResFor = null;       // back to the fast copy; the original re-loads only on zoom
   vimg.src = viewSrc(w);
   vcap.innerHTML = caption(w);
   syncPlacard();
@@ -8027,6 +8033,40 @@ viewer.addEventListener("pointermove", wake);
    stage, not the image, so a click while zoomed in still zooms back out even
    though panning has the pointer captured on the stage (which would otherwise
    swallow the image's click). */
+/* Swap the fast screen-sized copy in #vimg for the work's full original, so a zoom
+   is 1:1 with the file and not with the 2560px proxy. Lazy — nothing pulls the heavy
+   original until a real zoom asks for it — and idempotent per painting. The proxy
+   stays on screen (dimmed) while the original downloads, then swaps in from cache
+   without a blank frame; `then` runs once #vimg is carrying it. On the public box the
+   original is itself the reduced copy the publish step ships, so this is a no-op there.
+   `quiet` skips the loading dim, for a pinch that shouldn't flicker mid-gesture. */
+function hiRes(then, quiet) {
+  const w = V.list[V.i];
+  if (!w) return;
+  if (hiResFor === w.id) { if (then) then(); return; }   // already the original
+  const want = w.id, ticket = ++hiResReq;
+  const stale = () => ticket !== hiResReq || !V.list[V.i] || V.list[V.i].id !== want;
+  if (!quiet) viewer.classList.add("loading");
+  const pre = new Image();
+  pre.onload = () => {
+    if (stale()) return;
+    hiResFor = want;
+    const run = () => {
+      vimg.removeEventListener("load", run);
+      viewer.classList.remove("loading");
+      if (!stale() && then) then();
+    };
+    vimg.addEventListener("load", run);   // wait for the (cached) swap so sizes are right
+    vimg.src = pre.src;
+  };
+  pre.onerror = () => {                    // original wouldn't load — zoom the proxy instead
+    if (stale()) return;
+    viewer.classList.remove("loading");
+    if (then) then();
+  };
+  pre.src = origSrc(w);
+}
+
 vstage.addEventListener("click", (e) => {
   if (lastPointerType !== "mouse") return;   // a finger zooms by pinching, not tapping
   if (dragMoved) { dragMoved = false; return; }
@@ -8038,10 +8078,13 @@ vstage.addEventListener("click", (e) => {
     const ox = r.left + (r.width - dw) / 2, oy = r.top + (r.height - dh) / 2;
     const fx = Math.max(0, Math.min(1, (e.clientX - ox) / dw));
     const fy = Math.max(0, Math.min(1, (e.clientY - oy) / dh));
-    setFit(false);
-    requestAnimationFrame(() => {
-      vstage.scrollLeft = fx * vimg.clientWidth - vstage.clientWidth / 2;
-      vstage.scrollTop = fy * vimg.clientHeight - vstage.clientHeight / 2;
+    // Pull the original in first, then zoom to 1:1 with the point that was clicked.
+    hiRes(() => {
+      setFit(false);
+      requestAnimationFrame(() => {
+        vstage.scrollLeft = fx * vimg.clientWidth - vstage.clientWidth / 2;
+        vstage.scrollTop = fy * vimg.clientHeight - vstage.clientHeight / 2;
+      });
     });
   } else {
     setFit(true);   // zoomed in → any click zooms back out
@@ -8132,6 +8175,10 @@ vstage.addEventListener("pointerdown", (e) => {
   if (vpoints.size === 2) {
     const [a, b] = [...vpoints.values()];
     gesture = { kind: "pinch", d: Math.hypot(a.x - b.x, a.y - b.y), z: VZ.z };
+    // A pinch is a real look: quietly swap the full original in so it can go past
+    // the proxy's 1:1. object-fit keeps the on-screen size identical through the
+    // swap, so nothing jumps — the picture just sharpens and can zoom further.
+    hiRes(null, true);
   } else if (vpoints.size === 1) {
     // Undecided until it moves: a drag on an unzoomed painting is a walk to the
     // next one, but only once it proves it's going sideways.
