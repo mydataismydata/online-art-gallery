@@ -24,12 +24,17 @@
 .mu-floor,
 .mu-floor-shadow,
 .mu-ceil,
+.mu-well,
+.mu-laylight,
+.mu-cove,
+.mu-threshold,
 .mu-wall,
 .mu-jamb-reveal,
 .mu-jamb-reveal-soffit,
 .mu-jamb-soffit,
 .mu-door-leaf,
 .mu-door-casing,
+.mu-door-return,
 .mu-door-wallshade,
 .mu-door-plinth,
 .mu-trim,
@@ -57,6 +62,7 @@
 .mu-floor-shadow,
 .mu-door-leaf,
 .mu-door-casing,
+.mu-door-return,
 .mu-door-wallshade,
 .mu-door-plinth,
 .mu-door-panel,
@@ -107,31 +113,79 @@
   --mu-reveal-middle: #908d87;
   --mu-reveal-back: #74716b;
 
-  --mu-reveal-head-front: #66635e;
-  --mu-reveal-head-middle: #54514d;
-  --mu-reveal-head-back: #44413e;
+  --mu-reveal-head-front: #86837d;
+  --mu-reveal-head-middle: #78756f;
+  --mu-reveal-head-back: #66635e;
 
   --mu-trim-face: #aaa8a2;
   --mu-shadow-rgb: 45, 38, 32;
+
+  /* The architrave's width: keep equal to MU_CASE_W in app.js (the mitres
+     are cut at it). */
+  --mu-case-w: 26px;
+
+  /* Ceiling plaster, and the ambient shade a concave corner gathers. */
+  --mu-plaster: #d9d5cc;
+  --mu-ao-0: rgba(var(--mu-shadow-rgb), 0.15);
+  --mu-ao-1: rgba(var(--mu-shadow-rgb), 0.07);
+  --mu-ao-2: rgba(var(--mu-shadow-rgb), 0.025);
+  --mu-ao-3: rgba(var(--mu-shadow-rgb), 0);
 }
 
 /* =========================================================================
    FLOOR
    ========================================================================= */
 
-/* Herringbone oak parquet. The inset shadow supplies only a slight room-scale
-   reduction. Local contact shadows use separate horizontal planes. */
+/* Herringbone oak parquet: 10 x 59 cm boards at 45°, the rows running
+   east-west. The tile (img/parquet.jpg, 672 px for 168 cm) repeats without
+   a seam and muBuildRoom offsets it by the room's corner, so the pattern
+   runs on unbroken from room to room. Over it, a faint pool of light under
+   the laylight, and the dimming a floor takes on toward its walls. */
 
 .mu-floor {
-  background:
-    #eab069
-    url("../img/parquet.png")
-    repeat;
+  background-color: #b98f5f;
 
-  background-size: 180px 180px;
+  background-image:
+    radial-gradient(
+      ellipse 62% 62% at 50% 50%,
+      rgba(255, 246, 228, 0.10) 0,
+      rgba(255, 246, 228, 0) 100%
+    ),
+    url("../img/parquet.jpg");
+
+  background-size: 100% 100%, 168px 168px;
+  background-repeat: no-repeat, repeat;
 
   box-shadow:
-    inset 0 0 24px 2px rgba(62, 47, 34, 0.10);
+    inset 0 0 80px 10px rgba(52, 36, 20, 0.20),
+    inset 0 0 16px 1px rgba(52, 36, 20, 0.14);
+}
+
+/* A threshold board where two floors meet in a doorway: one oak board
+   across the opening, its grain running with it. */
+
+.mu-threshold {
+  background-color: #a97f52;
+
+  background-image:
+    linear-gradient(
+      180deg,
+      rgba(40, 26, 12, 0.45) 0 1px,
+      rgba(255, 240, 215, 0.12) 1px 3px,
+      transparent 3px calc(100% - 3px),
+      rgba(255, 240, 215, 0.08) calc(100% - 3px) calc(100% - 1px),
+      rgba(40, 26, 12, 0.45) calc(100% - 1px) 100%
+    ),
+    repeating-linear-gradient(
+      180deg,
+      rgba(90, 60, 30, 0.10) 0 1px,
+      transparent 1px 4px,
+      rgba(90, 60, 30, 0.06) 4px 5px,
+      transparent 5px 9px
+    ),
+    linear-gradient(90deg, #b48a5c, #a57b4e 40%, #b0875a 70%, #a67c50);
+
+  pointer-events: none;
 }
 
 /* =========================================================================
@@ -257,41 +311,130 @@
 }
 
 /* =========================================================================
-   CEILING AND SKYLIGHT
+   CEILING AND LAYLIGHT
+
+   A plaster border (.mu-ceil, four strips) around a frosted laylight lying
+   up in a shallow well (.mu-well, four sides). The glass is the brightest
+   surface in the room — it is the light. The plaster only sees bounce
+   light, so it sits darker than the glass and gathers shade into the
+   corners it makes with the walls: each strip darkens toward its own wall,
+   and the north and south strips toward the side walls too, so the corners
+   close up where the strips butt.
    ========================================================================= */
 
 .mu-ceil {
-  background:
-    repeating-linear-gradient(
-      90deg,
-      #c6bfae 0 5px,
-      transparent 5px 95px
-    ),
-    repeating-linear-gradient(
-      0deg,
-      #c6bfae 0 5px,
-      transparent 5px 95px
-    ),
+  background-color: var(--mu-plaster);
+}
+
+/* Each strip's wall edge. The strips face down (rotateX(-90deg)), which
+   turns north to the element's bottom and south to its top. */
+
+.mu-ceil-n,
+.mu-ceil-s {
+  --mu-ceil-side:
     linear-gradient(
       90deg,
-      #faf8f0,
-      #f2efe3
+      var(--mu-ao-0) 0,
+      var(--mu-ao-1) 12px,
+      var(--mu-ao-2) 36px,
+      var(--mu-ao-3) 70px,
+      var(--mu-ao-3) calc(100% - 70px),
+      var(--mu-ao-2) calc(100% - 36px),
+      var(--mu-ao-1) calc(100% - 12px),
+      var(--mu-ao-0) 100%
+    );
+}
+
+.mu-ceil-n {
+  background-image:
+    linear-gradient(0deg, var(--mu-ao-0) 0, var(--mu-ao-1) 12px, var(--mu-ao-2) 36px, var(--mu-ao-3) 70px),
+    var(--mu-ceil-side);
+}
+
+.mu-ceil-s {
+  background-image:
+    linear-gradient(180deg, var(--mu-ao-0) 0, var(--mu-ao-1) 12px, var(--mu-ao-2) 36px, var(--mu-ao-3) 70px),
+    var(--mu-ceil-side);
+}
+
+.mu-ceil-w {
+  background-image:
+    linear-gradient(90deg, var(--mu-ao-0) 0, var(--mu-ao-1) 12px, var(--mu-ao-2) 36px, var(--mu-ao-3) 70px);
+}
+
+.mu-ceil-e {
+  background-image:
+    linear-gradient(270deg, var(--mu-ao-0) 0, var(--mu-ao-1) 12px, var(--mu-ao-2) 36px, var(--mu-ao-3) 70px);
+}
+
+/* The well's sides: plaster washed by the glass above, brightest where they
+   meet it, with a thin arris of light at the lip below. */
+
+.mu-well {
+  background-image:
+    linear-gradient(
+      180deg,
+      #d4d1c9 0,
+      #e2dfd8 12%,
+      #d9d6ce 55%,
+      #cbc7be calc(100% - 2px),
+      #e6e3dc calc(100% - 2px) 100%
+    );
+}
+
+/* The glass: frosted, lit from above, divided by slim steel glazing bars
+   and a heavier bar every third pane. The grid is centred on the room. */
+
+.mu-laylight {
+  background-color: #f1f3ef;
+
+  background-image:
+    linear-gradient(90deg, #a9a8a1 0 6px, transparent 6px),
+    linear-gradient(0deg, #a9a8a1 0 6px, transparent 6px),
+    linear-gradient(90deg, #c2c1ba 0 3px, transparent 3px),
+    linear-gradient(0deg, #c2c1ba 0 3px, transparent 3px),
+    radial-gradient(
+      ellipse 70% 70% at 50% 50%,
+      #fdfdfb 0,
+      #f5f6f3 55%,
+      #e7e9e4 100%
     );
 
-  border: 60px solid #e9e4d6;
+  background-size:
+    186px 100%,
+    100% 186px,
+    62px 100%,
+    100% 62px,
+    100% 100%;
+
+  background-position:
+    calc(50% - 3px) 0,
+    0 calc(50% - 3px),
+    calc(50% - 1.5px) 0,
+    0 calc(50% - 1.5px),
+    0 0;
+
+  background-repeat: repeat-x, repeat-y, repeat-x, repeat-y, no-repeat;
 
   box-shadow:
-    inset 0 0 26px 4px rgba(112, 104, 90, 0.38);
+    inset 0 0 0 7px #a6a59e,
+    inset 0 0 36px 6px rgba(118, 116, 106, 0.22);
 }
 
 /* =========================================================================
    WALLS
+
+   A soft fall of light down the wall, and in each corner the shade two
+   walls throw into one another (.mu-ao-l / .mu-ao-r mark which ends of a
+   wall plane meet a corner; a doorway's shoulder meets one at its far end
+   only).
    ========================================================================= */
 
 .mu-wall {
   background-color: var(--mu-wall-front-mid);
 
   background-image:
+    var(--mu-ao, none),
     linear-gradient(
       180deg,
       var(--mu-wall-front-top) 0,
@@ -305,12 +448,50 @@
   background-color: var(--mu-wall-side-mid);
 
   background-image:
+    var(--mu-ao, none),
     linear-gradient(
       180deg,
       var(--mu-wall-side-top) 0,
       var(--mu-wall-side-high) 110px,
       var(--mu-wall-side-mid) 270px,
       var(--mu-wall-side-bottom) 100%
+    );
+}
+
+.mu-ao-l {
+  --mu-ao:
+    linear-gradient(
+      90deg,
+      var(--mu-ao-0) 0,
+      var(--mu-ao-1) 12px,
+      var(--mu-ao-2) 40px,
+      var(--mu-ao-3) 80px
+    );
+}
+
+.mu-ao-r {
+  --mu-ao:
+    linear-gradient(
+      270deg,
+      var(--mu-ao-0) 0,
+      var(--mu-ao-1) 12px,
+      var(--mu-ao-2) 40px,
+      var(--mu-ao-3) 80px
+    );
+}
+
+.mu-ao-l.mu-ao-r {
+  --mu-ao:
+    linear-gradient(
+      90deg,
+      var(--mu-ao-0) 0,
+      var(--mu-ao-1) 12px,
+      var(--mu-ao-2) 40px,
+      var(--mu-ao-3) 80px,
+      var(--mu-ao-3) calc(100% - 80px),
+      var(--mu-ao-2) calc(100% - 40px),
+      var(--mu-ao-1) calc(100% - 12px),
+      var(--mu-ao-0) 100%
     );
 }
 
@@ -411,162 +592,155 @@
 
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.025),
-    inset 0 -3px 5px rgba(24, 22, 20, 0.34),
-    0 4px 8px -6px rgba(24, 22, 20, 0.38);
+    inset 0 -3px 5px rgba(24, 22, 20, 0.22);
+}
+
+/* A passage between two rooms is lit from both ends: its jambs and soffit
+   are lightest at either mouth and dip toward the middle of the wall. */
+
+.mu-jamb-reveal-left.mu-jamb-through,
+.mu-jamb-reveal-right.mu-jamb-through {
+  background-image:
+    linear-gradient(
+      180deg,
+      rgba(39, 37, 34, 0.34) 0,
+      rgba(39, 37, 34, 0.22) 7px,
+      rgba(39, 37, 34, 0.12) 18px,
+      rgba(39, 37, 34, 0.04) 36px,
+      rgba(39, 37, 34, 0) 54px
+    ),
+    linear-gradient(
+      90deg,
+      var(--mu-reveal-front) 0%,
+      #9a9791 18%,
+      var(--mu-reveal-middle) 50%,
+      #9a9791 82%,
+      var(--mu-reveal-front) 100%
+    );
+
+  box-shadow: none;
+}
+
+.mu-jamb-reveal-head.mu-jamb-through {
+  background:
+    linear-gradient(
+      180deg,
+      var(--mu-reveal-head-front) 0%,
+      var(--mu-reveal-head-middle) 30%,
+      var(--mu-reveal-head-back) 50%,
+      var(--mu-reveal-head-middle) 70%,
+      var(--mu-reveal-head-front) 100%
+    ) !important;
+
+  box-shadow: none;
 }
 
 /* =========================================================================
    DOORWAY CASING
 
-   Three pieces of the same moulding, mitred at 45°. The head carries the
-   identical profile to the sides — outer edge to opening — so every ridge
-   meets its counterpart across the mitre line.
-
-   The outermost step is the lightest band, near enough the wall colour to
-   melt into it; its own cast shadow sits just inward of it (below on the
-   head, toward the opening on the sides). Under the overhead light the
-   head's under-shadow is darker than anything down the sides — the wall
-   around the trim carries only a faint ring of shade (.mu-door-wallshade),
-   and the trim's innermost edge is the darkest thing here save the soffit.
+   A gallery architrave, three pieces mitred at 45°. Across its width, from
+   the outer edge in: a raised backband with a lit arris, the backband's
+   shadow on the step below it, an outer fascia, a small bead, and a broad
+   inner fascia that dims toward the opening and ends in a dark quirk where
+   it meets the jamb. The head carries the identical profile turned to run
+   top-to-bottom, so every ridge meets its counterpart across the mitre;
+   under the overhead light its downward-facing steps are the darker ones.
+   The whole architrave stands MU_CASE_D proud of the wall on real returns
+   (.mu-door-return), which give it its thickness as you walk past.
    ========================================================================= */
 
 .mu-door-casing {
   background-color: var(--mu-door-face);
   background-repeat: no-repeat;
+
+  --mu-case-profile:
+    #bebbb5 0,
+    #bebbb5 1px,
+
+    #b0aea8 1px,
+    #b0aea8 6px,
+
+    #8b8882 6px,
+    #8b8882 7px,
+
+    #9b9892 7px,
+    #a4a19b 8.5px,
+
+    #aaa8a2 8.5px,
+    #aaa8a2 14.5px,
+
+    #b6b4ae 14.5px,
+    #b6b4ae 15.2px,
+
+    #93908a 15.2px,
+    #93908a 16px,
+
+    #a7a59f 16px,
+    #9d9a94 calc(100% - 2px),
+
+    var(--mu-door-edge-dark) calc(100% - 2px),
+    var(--mu-door-edge-dark) 100%;
 }
 
-/* Left casing: the profile across its width, outer edge at 0. No head-shadow
-   bleed — the mitred head sits flush, nothing overhangs the joint. */
-
 .mu-door-casing-left {
-  background-image:
-    linear-gradient(
-      90deg,
-
-      #b2afa9 0,
-      #b2afa9 5px,
-
-      #8d8a84 5px,
-      #8d8a84 6px,
-
-      #9b9892 6px,
-      #9b9892 7px,
-
-      #a4a19b 7px,
-      #a4a19b 8px,
-
-      #aaa8a2 8px,
-      #aaa8a2 72%,
-
-      #a09d97 72%,
-      #a09d97 86%,
-
-      #928f89 86%,
-      #928f89 calc(100% - 2px),
-
-      var(--mu-door-edge-dark) calc(100% - 2px),
-      var(--mu-door-edge-dark) 100%
-    );
-
+  background-image: linear-gradient(90deg, var(--mu-case-profile));
   clip-path:
     polygon(
       0 0,
-      18px 18px,
-      18px 100%,
+      var(--mu-case-w) var(--mu-case-w),
+      var(--mu-case-w) 100%,
       0 100%
     );
 }
-
-/* Right casing: the same profile mirrored, outer edge at 100%. */
 
 .mu-door-casing-right {
-  background-image:
-    linear-gradient(
-      270deg,
-
-      #b2afa9 0,
-      #b2afa9 5px,
-
-      #8d8a84 5px,
-      #8d8a84 6px,
-
-      #9b9892 6px,
-      #9b9892 7px,
-
-      #a4a19b 7px,
-      #a4a19b 8px,
-
-      #aaa8a2 8px,
-      #aaa8a2 72%,
-
-      #a09d97 72%,
-      #a09d97 86%,
-
-      #928f89 86%,
-      #928f89 calc(100% - 2px),
-
-      var(--mu-door-edge-dark) calc(100% - 2px),
-      var(--mu-door-edge-dark) 100%
-    );
-
+  background-image: linear-gradient(270deg, var(--mu-case-profile));
   clip-path:
     polygon(
-      0 18px,
-      18px 0,
-      18px 100%,
+      0 var(--mu-case-w),
+      var(--mu-case-w) 0,
+      var(--mu-case-w) 100%,
       0 100%
     );
 }
 
-/* Horizontal head casing
-
-   The sides' profile exactly, turned to run top-to-bottom — outer edge at
-   the top, opening at the bottom — so each band lands on its counterpart
-   at the mitre. Its under-shadow — a narrow contact line and a soft
-   penumbra — is deliberately darker than anything the sides throw: the
-   light is overhead, and this is the one horizontal member. */
+/* The head: the same profile, its downward steps a little deeper in shade. */
 
 .mu-door-casing-head {
   background-image:
     linear-gradient(
       180deg,
-
-      #b2afa9 0,
-      #b2afa9 5px,
-
-      #8d8a84 5px,
-      #8d8a84 6px,
-
-      #9b9892 6px,
-      #9b9892 7px,
-
-      #a4a19b 7px,
-      #a4a19b 8px,
-
-      #aaa8a2 8px,
-      #aaa8a2 72%,
-
-      #a09d97 72%,
-      #a09d97 86%,
-
-      #928f89 86%,
-      #928f89 calc(100% - 2px),
-
-      var(--mu-door-edge-dark) calc(100% - 2px),
-      var(--mu-door-edge-dark) 100%
-    );
-
+      transparent 0 6px,
+      rgba(40, 36, 32, 0.10) 6px 8.5px,
+      transparent 8.5px 15.2px,
+      rgba(40, 36, 32, 0.08) 15.2px 16px,
+      transparent 16px
+    ),
+    linear-gradient(180deg, var(--mu-case-profile));
   clip-path:
     polygon(
       0 0,
       100% 0,
-      calc(100% - 18px) 100%,
-      18px 100%
+      calc(100% - var(--mu-case-w)) 100%,
+      var(--mu-case-w) 100%
     );
+}
 
-  filter:
-    drop-shadow(0 3px 2px rgba(31, 28, 25, 0.30))
-    drop-shadow(0 9px 6px rgba(31, 28, 25, 0.18));
+/* The casing's outer edges, running back to the wall: sideways-facing, so a
+   step darker than the face, and darkest where they meet the wall. The
+   element's x runs from the wall (0) to the casing face (100%) on the left
+   return, and the other way on the right. */
+
+.mu-door-return {
+  background-color: #9c9993;
+}
+
+.mu-door-return-left {
+  background-image: linear-gradient(90deg, #7f7c76 0, #96938d 45%, #a3a09a 100%);
+}
+
+.mu-door-return-right {
+  background-image: linear-gradient(270deg, #7f7c76 0, #96938d 45%, #a3a09a 100%);
 }
 
 /* The faint feathered shade the trim lays on the wall around it: darkest
@@ -653,35 +827,45 @@
 
 /* =========================================================================
    DOORWAY PLINTHS
+
+   A block at each casing foot, a lip wider and deeper than the casing and
+   a hand taller than the baseboard, which dies into its outer side. A lit
+   chamfer runs along its top, a shadowed one along its foot.
    ========================================================================= */
 
 .mu-door-plinth {
-  background-color: #a4a19b;
+  background-color: #a6a49e;
 
   background-image:
     linear-gradient(
       180deg,
 
-      #b8b6b0 0,
-      #b8b6b0 1px,
+      #c1bfb9 0,
+      #c1bfb9 1px,
 
-      #a9a7a1 1px,
-      #a9a7a1 18%,
+      #a19f99 1px,
+      #a19f99 3px,
 
-      #a3a09a 18%,
-      #a3a09a 82%,
+      #b0aea8 3px,
+      #aba9a3 6px,
 
-      #918e88 82%,
-      #918e88 calc(100% - 2px),
+      #a7a59f 6px,
+      #a19f99 calc(100% - 3px),
 
-      #77746e calc(100% - 2px),
-      #77746e 100%
+      #85827c calc(100% - 3px),
+      #75726c 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.05),
+      transparent 25%,
+      transparent 75%,
+      rgba(40, 36, 32, 0.06)
     );
 
   box-shadow:
     inset 1px 0 rgba(255, 255, 255, 0.08),
-    inset -1px 0 rgba(53, 49, 45, 0.08),
-    0 3px 5px -5px rgba(36, 32, 28, 0.25);
+    inset -1px 0 rgba(53, 49, 45, 0.10);
 }
 
 /* =========================================================================
@@ -1008,34 +1192,47 @@
 }
 
 /* =========================================================================
-   CROWN MOULDING
+   CORNICE
 
-   The crown is horizontal, so its lower profile and wall shadow are darker
-   than the shadows beside vertical doorway casing.
+   A narrow bed moulding on the wall (.mu-crown) and above it a plaster cove
+   (.mu-cove) sloping up and out to the ceiling. The bed is horizontal
+   woodwork under an overhead light, so it throws a soft shadow down the
+   wall. The cove leans toward the laylight and catches more light than the
+   flat ceiling beside it; it closes into shade where it meets the ceiling,
+   a concave corner, and where it sits on the bed.
    ========================================================================= */
 
 .mu-trim.mu-crown {
-  background-color: #999690;
+  background-color: #c9c5bc;
 
   background-image:
     linear-gradient(
       180deg,
-
-      #8c8983 0%,
-      #a09d97 8%,
-      #b0aea8 19%,
-      #a6a39d 34%,
-      #999690 51%,
-      #898680 67%,
-      #74716b 83%,
-      #5b5853 100%
+      #d6d3cb 0,
+      #cdc9c0 40%,
+      #b9b5ab 80%,
+      #a09c92 100%
     );
 
   box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.10),
-    inset 0 -2px 2px rgba(35, 32, 29, 0.24),
-    0 4px 5px -3px rgba(35, 32, 29, 0.28),
-    0 12px 18px -11px rgba(35, 32, 29, 0.34);
+    0 2px 3px -1px rgba(35, 32, 29, 0.24),
+    0 10px 18px -9px rgba(35, 32, 29, 0.26);
+}
+
+/* The cove's top edge is the ceiling side (see muTrimRoom). */
+
+.mu-cove {
+  background-color: #dcd8d0;
+
+  background-image:
+    linear-gradient(
+      180deg,
+      #c6c2b9 0,
+      #d6d2ca 18%,
+      #e1ded6 55%,
+      #dad6ce 85%,
+      #c9c5bc 100%
+    );
 }
 
 /* =========================================================================
