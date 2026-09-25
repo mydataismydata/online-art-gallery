@@ -4352,8 +4352,22 @@ function muPaint(el, color) {
     set("top", mix(base, 0.11, 255));
     set("high", mix(base, 0.05, 255));
     set("mid", mix(base, 0, 255));
-    set("bottom", mix(base, 0.03, 0));
+    set("bottom", mix(base, 0.085, 0));
   });
+}
+
+/* A wall plane that knows where it sits in its whole wall: `span` is the
+   wall's full length, `at` how far along it this piece begins, and `full`
+   the wall's full height (every piece hangs from the ceiling). The lighting
+   laid across a wall — the fall toward the floor, the corners' shade, the
+   brighter middle nearest the laylight — is painted to the whole wall and
+   offset, so a wall cut in pieces around a doorway reads as one surface. */
+function muWallEl(cls, w, h, t, span, at, full) {
+  const el = muEl("mu-wall " + cls, w, h, t);
+  el.style.setProperty("--mu-span", span.toFixed(1) + "px");
+  el.style.setProperty("--mu-h", full.toFixed(1) + "px");
+  el.style.setProperty("--mu-at", (-at).toFixed(1) + "px");
+  return el;
 }
 
 /* The ceiling: a laylight. A frosted-glass panel of the room's own shape
@@ -4391,8 +4405,8 @@ function muBuildRoom(g, i, geoms, world) {
   const floor = muEl("mu-floor", W, D, muT(0, 0, 0, " rotateX(90deg)"));
   // The parquet is laid once for the whole storey: each room's floor picks up
   // the pattern where its corner falls, so the boards run on through a door.
-  floor.style.backgroundPosition = "0 0, " + (-(g.cx - W / 2)).toFixed(1) + "px " +
-    (-(g.cz - D / 2)).toFixed(1) + "px";
+  floor.style.setProperty("--mu-floor-at", (-(g.cx - W / 2)).toFixed(1) + "px " +
+    (-(g.cz - D / 2)).toFixed(1) + "px");
   room.appendChild(floor);
   muCeiling(room, W, D, H);
 
@@ -4407,9 +4421,7 @@ function muBuildRoom(g, i, geoms, world) {
     if (d && d.kind === "entry") return;
     const rot = " rotateY(" + w.rot + "deg)";
     if (!d) {
-      // both ends meet a corner, and carry its shade
-      room.appendChild(muEl("mu-wall mu-ao-l mu-ao-r " + w.cls, w.len, H,
-        muT(w.cx, -H / 2, w.cz, rot)));
+      room.appendChild(muWallEl(w.cls, w.len, H, muT(w.cx, -H / 2, w.cz, rot), w.len, 0, H));
       return;
     }
     if (d.kind === "exit") {
@@ -4581,6 +4593,9 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, cs, wallCls) {
   }
   const ch = oh + CW;                      // side casings rise past the opening by their width
   const PH = MU_BASE + 10, PD = CD + 1.5;  // plinth block: over the baseboard, proud of the casing
+  // The side casings and their returns stand on the plinth blocks rather
+  // than running down through them, so the block's top is a clean ledge.
+  const sh = ch - PH, sy = -(PH + sh / 2);
   const pxc = ow / 2 + MU_CORNER / 2;      // its inner edge flush with the opening
   faces.forEach((deg, fi) => {
     // This face's wall runs [off − span/2, off + span/2] in face-local x —
@@ -4593,33 +4608,34 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, cs, wallCls) {
     f.className = "mu-doorg";
     muPaint(f, cs[fi]);                  // and wears its own room's paint
     f.style.transform = "rotateY(" + deg + "deg)";
-    // this face's wall, flush with the reveal's edge; each shoulder's far
-    // end is the room's corner
+    // this face's wall, flush with the reveal's edge, each piece told where
+    // it sits along the whole wall so the wall's light runs across all three
+    const span = spans[fi];
     if (L > 0)
-      f.appendChild(muEl("mu-wall mu-ao-l " + wallCls, L, H,
-        muT(-(ow / 2 + L / 2), -H / 2, FZ, "")));
+      f.appendChild(muWallEl(wallCls, L, H,
+        muT(-(ow / 2 + L / 2), -H / 2, FZ, ""), span, 0, H));
     if (R > 0)
-      f.appendChild(muEl("mu-wall mu-ao-r " + wallCls, R, H,
-        muT(ow / 2 + R / 2, -H / 2, FZ, "")));
+      f.appendChild(muWallEl(wallCls, R, H,
+        muT(ow / 2 + R / 2, -H / 2, FZ, ""), span, L + ow, H));
     // A hair wider than the opening: it laps the side pieces so their meeting
     // line can't show as a seam (same colour, so the overlap is invisible).
-    f.appendChild(muEl("mu-wall " + wallCls, ow + 4, H - oh,
-      muT(0, -(oh + (H - oh) / 2), FZ, "")));
+    f.appendChild(muWallEl(wallCls, ow + 4, H - oh,
+      muT(0, -(oh + (H - oh) / 2), FZ, ""), span, L - 2, H));
     // The architrave: sides rising past the opening by the casing's own
     // width, the head spanning the full outer width, meeting on a 45° cut
     // (the clip-paths in museum-room.css).
     f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-left",
-      CW, ch, muT(-cx2, -ch / 2, CZ, "")));
+      CW, sh, muT(-cx2, sy, CZ, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-right",
-      CW, ch, muT(cx2, -ch / 2, CZ, "")));
+      CW, sh, muT(cx2, sy, CZ, "")));
     f.appendChild(muEl("mu-door-casing mu-door-casing-head",
       ow + 2 * CW, CW, muT(0, -(oh + CW / 2), CZ, "")));
     // Its outer edges, back to the wall. (The head's top edge would need an
     // eye above the door to be seen.)
-    f.appendChild(muEl("mu-door-return mu-door-return-left", CD, ch,
-      muT(-(ow / 2 + CW), -ch / 2, FZ + CD / 2, " rotateY(-90deg)")));
-    f.appendChild(muEl("mu-door-return mu-door-return-right", CD, ch,
-      muT(ow / 2 + CW, -ch / 2, FZ + CD / 2, " rotateY(90deg)")));
+    f.appendChild(muEl("mu-door-return mu-door-return-left", CD, sh,
+      muT(-(ow / 2 + CW), sy, FZ + CD / 2, " rotateY(-90deg)")));
+    f.appendChild(muEl("mu-door-return mu-door-return-right", CD, sh,
+      muT(ow / 2 + CW, sy, FZ + CD / 2, " rotateY(90deg)")));
     // The casing's shade on the wall around it, between wall and casing
     // planes: a strip abutting each outer edge, and the faintest one above
     // the head — wide enough to cap the side strips, whose upward fade
@@ -4633,6 +4649,9 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, cs, wallCls) {
     [-1, 1].forEach((s) => {
       const side = s < 0 ? "left" : "right";
       f.appendChild(muEl("mu-door-plinth", MU_CORNER, PH, muT(s * pxc, -PH / 2, FZ + PD, "")));
+      // its top, facing the laylight: the brightest face on the doorway
+      f.appendChild(muEl("mu-door-plinth-top", MU_CORNER, PD,
+        muT(s * pxc, -PH, FZ + PD / 2, " rotateX(90deg)")));
       f.appendChild(muEl("mu-door-return mu-plinth-return mu-door-return-" + side, PD, PH,
         muT(s * (ow / 2 + MU_CORNER), -PH / 2, FZ + PD / 2,
           " rotateY(" + (s < 0 ? -90 : 90) + "deg)")));
@@ -4653,7 +4672,15 @@ function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, cs, wallCls) {
    plinth block. Every baseboard segment brings its own floor-contact shadow — a
    horizontal plane lying just above the parquet, fading into the room —
    because a box-shadow on a vertical board can't turn the corner onto the
-   floor. Segment and shadow are a pair: shorten one, shorten both. */
+   floor. Segment and shadow are a pair: shorten one, shorten both.
+
+   The woodwork has thickness (MU_TRIM_T). Boards meeting in a corner stop on
+   each other's face instead of running through to the wall — an end that ran
+   on would stand up behind its neighbour, plainly visible from above — and
+   the thickness shows where the light finds it: the baseboard's top edge,
+   facing the laylight, and the bed moulding's underside, facing the floor.
+   Both are mitred at the corners like the coves. */
+const MU_TRIM_T = 2.4;
 const MU_FS_NAME = { n: "north", s: "south", e: "east", w: "west" };
 function muTrimRoom(room, i, g) {
   const H = g.H;
@@ -4671,21 +4698,50 @@ function muTrimRoom(room, i, g) {
   const offOf = (id) => (dbw[id] ? MU_REVEAL / 2 : 0) + 2.4;
   // the walls at each end of a wall, in its element's own left-to-right
   const ENDS = { n: ["w", "e"], s: ["e", "w"], w: ["s", "n"], e: ["n", "s"] };
+  const T = MU_TRIM_T;
+  const px = (v) => v.toFixed(1) + "px";
   muWalls(g).forEach((w) => {
     const d = dbw[w.id];
     const off = offOf(w.id);
     const [nx, nz] = [Math.sin(w.rot * Math.PI / 180), Math.cos(w.rot * Math.PI / 180)];
-    const cx = w.cx + nx * off, cz = w.cz + nz * off;
+    const [ax, az] = muWallAxis(w.rot);
     const rot = " rotateY(" + w.rot + "deg)";
     const horiz = w.id === "n" || w.id === "s";
-    const base = (len, bx, bz) => {
+    // a point `o` along the wall and `dz` out from its line, in room space
+    const at = (o, dz) => [w.cx + ax * o + nx * dz, w.cz + az * o + nz * dz];
+    // where this wall's trim meets its neighbours' faces at the two corners
+    const [ol, or] = ENDS[w.id].map(offOf);
+    const c0 = -w.len / 2 + ol, c1 = w.len / 2 - or;
+    // A thickness face of a run from t0 to t1: horizontal, T deep, lying
+    // between the wall and the trim's face. At a corner end its wall-side
+    // edge runs on T further, and the clip cuts the mitre. `up` faces it
+    // to the ceiling (a top), otherwise to the floor (an underside); the
+    // room-side edge is the element's bottom edge for a top, its top edge
+    // for an underside.
+    const edge = (cls, t0, t1, y, cl, cr, up) => {
+      const e0 = cl ? T : 0, e1 = cr ? T : 0;
+      const len = t1 - t0 + e0 + e1, o = (t0 + t1) / 2 + (e1 - e0) / 2;
+      const [x, z] = at(o, off - T / 2);
+      const el = muEl(cls, len, T, muT(x, y, z, rot + (up ? " rotateX(90deg)" : " rotateX(-90deg)")));
+      const room0 = up ? "100%" : "0", wall0 = up ? "0" : "100%";
+      el.style.clipPath = "polygon(0 " + wall0 + ", 100% " + wall0 + ", calc(100% - " +
+        px(e1) + ") " + room0 + ", " + px(e0) + " " + room0 + ")";
+      room.appendChild(el);
+    };
+    const base = (t0, t1, cl, cr) => {
+      const len = t1 - t0, o = (t0 + t1) / 2;
+      if (len <= 0) return;
+      const [bx, bz] = at(o, off);
       room.appendChild(muEl("mu-trim mu-base", len, MU_BASE, muT(bx, yB, bz, rot)));
+      edge("mu-trim-edge mu-base-top", t0, t1, -MU_BASE, cl, cr, true);
       // its floor shadow: 10 cm deep, from the trim face into the room
       room.appendChild(muEl("mu-floor-shadow mu-floor-shadow-" + MU_FS_NAME[w.id],
         horiz ? len : 10, horiz ? 10 : len,
         muT(bx + nx * 5, -0.15, bz + nz * 5, " rotateX(90deg)")));
     };
-    room.appendChild(muEl("mu-trim mu-crown", w.len, BED, muT(cx, yC, cz, rot)));
+    const [bx, bz] = at((c0 + c1) / 2, off);
+    room.appendChild(muEl("mu-trim mu-crown", c1 - c0, BED, muT(bx, yC, bz, rot)));
+    edge("mu-trim-edge mu-crown-under", c0, c1, -(H - MU_CROWN), true, true, false);
     const co = off + MU_COVE / 2;
     const cove = muEl("mu-cove", w.len, coveH,
       muT(w.cx + nx * co, -(H - RISE / 2), w.cz + nz * co, rot + tilt));
@@ -4693,26 +4749,19 @@ function muTrimRoom(room, i, g) {
     // wall's cove: the bottom edge as far from that wall as the next cove
     // stands off it, the top edge a cove's reach further. (A doored wall's
     // cove stands 12 cm further out, so its neighbours stop short for it.)
-    const [ol, or] = ENDS[w.id].map(offOf);
-    const px = (v) => v.toFixed(1) + "px";
     cove.style.clipPath = "polygon(" + px(ol + MU_COVE) + " 0, calc(100% - " +
       px(or + MU_COVE) + ") 0, calc(100% - " + px(or) + ") 100%, " + px(ol) + " 100%)";
     room.appendChild(cove);
     if (!d) {
-      base(w.len, cx, cz);
+      base(c0, c1, true, true);
       return;
     }
-    const ow = d.ow;
-    const [ax, az] = muWallAxis(w.rot);
     // baseboards break where the casing lands — around the doorway wherever
     // the room's dodge left it (only an entry door ever sits off-centre)
+    const ow = d.ow;
     const dt = d.kind === "entry" ? (g.entryOff || 0) * (ax + az) : 0;
-    [[-w.len / 2, dt - ow / 2 - MU_PLINTH],
-     [dt + ow / 2 + MU_PLINTH, w.len / 2]].forEach(([t0, t1]) => {
-      const sl = t1 - t0, o = (t0 + t1) / 2;
-      if (sl <= 0) return;
-      base(sl, cx + ax * o, cz + az * o);
-    });
+    base(c0, dt - ow / 2 - MU_PLINTH, true, false);
+    base(dt + ow / 2 + MU_PLINTH, c1, false, true);
   });
 }
 
