@@ -515,7 +515,7 @@ const PROFILES = [
 ];
 
 /* The frame's face is the photograph of a real gilt frame (static/img/
-   frame1.png, frame2.png — the walk's two frames since the beginning),
+   frame1.webp, frame2.webp — the walk's two frames since the beginning),
    mapped the way a CSS border-image slices it: each side takes its edge strip
    of the picture, the corners keep their carving at its own scale, the long
    runs stretch. The moulding underneath gives it depth and silhouette, and

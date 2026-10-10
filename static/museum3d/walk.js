@@ -73,7 +73,7 @@ export function createWalk(host, opts) {
     fn(t);
     requestRender();
   });
-  ["/static/img/frame1.png", "/static/img/frame2.png"].forEach((url, k) => loadShared(url, (t) => {
+  ["/static/img/frame1.webp", "/static/img/frame2.webp"].forEach((url, k) => loadShared(url, (t) => {
     frameTex[k] = t;
     frameMats.forEach((m) => { if (m.userData.frame === k) m.map = t; });
   }));

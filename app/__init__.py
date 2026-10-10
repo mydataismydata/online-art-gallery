@@ -42,6 +42,10 @@ def create_app():
     from .webapi import bp
     app.register_blueprint(bp)
 
+    # scripts, styles and JSON go out gzipped to any browser that takes it
+    from . import compress
+    compress.init_app(app)
+
     @app.route("/")
     def index():
         return send_from_directory(str(config.STATIC_DIR), "index.html")
