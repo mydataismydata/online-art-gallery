@@ -4,9 +4,9 @@
    wall height — with its doorways and its paintings. This module dresses it
    the way the galleries of the Centro Cultural de Cascais are dressed:
 
-   - thick walls of warm white plaster, every passage between rooms a round
-     arch cut deep through the wall, every other door (the front door, the
-     stairs, a closed door) a rectangular opening in a limestone surround;
+   - thick walls of warm white plaster, and every doorway — from room to
+     room, the front door, the stairs, a closed door — a squared opening cut
+     deep through the wall and framed in a limestone surround;
    - a vault over the room: a run of groin vaults (two barrels crossing, so
      each bay draws an arch on the side walls), a single barrel with a
      frosted half-round window in each free end wall, or — for the largest
@@ -65,8 +65,9 @@ function roomFrame(room) {
     const c = wc[d.wall];
     const px = c[0] + w.a[0] * (d.at || 0), pz = c[1] + w.a[2] * (d.at || 0);
     const uc = (px - w.O[0]) * w.a[0] + (pz - w.O[2]) * w.a[2];
-    const arch = d.kind === "entry" || d.kind === "exit" || (d.kind === "pass" && !d.closed);
-    w.doors.push(Object.assign({}, d, { uc: uc, arch: arch, stone: !arch }));
+    // every doorway squared and dressed in limestone, like the front door and
+    // the stairs (a door given arch: true would still get its round head)
+    w.doors.push(Object.assign({}, d, { uc: uc, arch: false, stone: true }));
   });
   return { x0, x1, z0, z1, walls, xc: (x0 + x1) / 2, zc: (z0 + z1) / 2 };
 }
@@ -696,7 +697,8 @@ export function buildRoom(room, opts) {
       buildDoorFill(w, d, room, plain, out);
       // exit signs over the ways back toward the entrance (and the front door)
       if (d.kind === "entry" || d.kind === "front" || d.kind === "stairup" || d.kind === "stairdown") {
-        const sy = d.oh + (d.stone ? STONE_W : 0) + 26;
+        // close over a surround, so it still fits under the lowest springing
+        const sy = d.oh + (d.stone ? STONE_W + 16 : 26);
         if (sy + 12 < w.top(d.uc)) {
           out.signs.push({ p: comb(w.O, w.a, d.uc, UP, sy, w.n, 2.6), a: w.a, n: w.n });
         }
@@ -903,7 +905,7 @@ function buildDoorFill(w, d, room, plain, out) {
     g.tinted = true;
     const gf = new Geo();
     gf.tinted = true;
-    const D2 = 300, rr = d.ow / 2, hj = d.oh - rr;
+    const D2 = 300, rr = d.ow / 2, hj = d.arch ? d.oh - rr : d.oh;
     const fade = (dd) => { const k = 0.78 * Math.pow(Math.max(0, 1 - dd / D2), 1.7); return [k, k, k * 0.97]; };
     const at = (u, v, dd) => comb(w.O, w.a, d.uc + u, UP, v, back, T + dd);
     const steps = 10;
@@ -920,6 +922,13 @@ function buildDoorFill(w, d, room, plain, out) {
         const q = [[0, d0], [hj, d0], [hj, d1], [0, d1]].map(([v, dd]) => g.v(at(u, v, dd), nrm, [0, 0], null, fade(dd)));
         g.quad(q[0], q[1], q[2], q[3]);
       });
+      if (!d.arch) {
+        // a squared corridor: a flat ceiling at the lintel
+        const q = [[-rr, d0], [rr, d0], [rr, d1], [-rr, d1]].map(([u, dd]) =>
+          g.v(at(u, hj, dd), DOWN, [0, 0], null, fade(dd)));
+        g.quad(q[0], q[1], q[2], q[3]);
+        continue;
+      }
       // the arch's vault
       const n = 16;
       for (let j = 0; j < n; j++) {

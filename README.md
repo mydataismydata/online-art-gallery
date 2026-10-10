@@ -73,10 +73,9 @@ Every collection is **visible to everyone** who can sign in; only its creating C
 **Walk the Museum** in the top bar opens a first-person walk through rooms of your art,
 built like the galleries of an old palace: thick walls of white plaster under
 groin vaults, barrel vaults with frosted half-round windows, or — for the
-largest rooms — a tall skylit hall; round arches cut deep through the walls
-from room to room; strip-oak floors with a slim oak skirting; limestone
-surrounds on the front door and the stairs; green exit signs over the ways
-back out. Each painting hangs to scale in a gilt frame, lit by its own
+largest rooms — a tall skylit hall; every doorway cut deep through the wall
+and framed in limestone; strip-oak floors with a slim oak skirting; green exit
+signs over the ways back out. Each painting hangs to scale in a gilt frame, lit by its own
 spotlight, with a small placard beside it, and between storeys a real oak
 staircase climbs a two-storey stair hall.
 
