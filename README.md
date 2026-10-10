@@ -70,18 +70,32 @@ Every collection is **visible to everyone** who can sign in; only its creating C
 
 ## The Museum — a walkable 3-D gallery
 
-**Walk the Museum** in the top bar opens a first-person walk through rooms of your art:
-warm light-charcoal walls under a frosted-glass skylight, herringbone oak
-parquet, canvases hung to scale in gilded frames with a small placard beside
-each piece, and doorways in stepped casings leading room to room. No plugins or
-WebGL — it's plain CSS 3-D.
+**Walk the Museum** in the top bar opens a first-person walk through rooms of your art,
+built like the galleries of an old palace: thick walls of white plaster under
+groin vaults, barrel vaults with frosted half-round windows, or — for the
+largest rooms — a tall skylit hall; round arches cut deep through the walls
+from room to room; strip-oak floors with a slim oak skirting; limestone
+surrounds on the front door and the stairs; green exit signs over the ways
+back out. Each painting hangs to scale in a gilt frame, lit by its own
+spotlight, with a small placard beside it, and between storeys a real oak
+staircase climbs a two-storey stair hall.
+
+It's drawn with WebGL ([three.js](https://threejs.org), MIT, vendored in
+`static/vendor/three/` and only fetched when someone walks in). Every room's
+light is baked on the visitor's own machine when the walk opens — a small
+radiosity solve per room, in a Web Worker — so the corners, the vaults and
+the pools under the spotlights are lit the way real light lights them, and
+the floor, the gilding and the varnish reflect the room around them. The
+renderer lives in `static/museum3d/`; app.js plans the rooms and owns the
+walking.
 
 - **Walking:** you arrive just inside the museum's gilded front door, closed
   for good in the centre of room 1's south wall. The arrow keys are the whole
   interface — ↑ ↓ walk, ← → turn. The
   mouse wheel zooms in and out; clicking a painting strolls up to it, and the
   placard of whatever you stop in front of appears at the foot of the screen.
-  `Esc` leaves.
+  Walk up to a stair door and you climb (or descend) the staircase behind it,
+  round the half landing, and out on the other storey. `Esc` leaves.
 - **On a phone** the museum opens full screen, landscape only (portrait politely
   asks for the turn), with a half-transparent 4-way pad to move and pinch to zoom.
 - **Hanging (owner):** press **H** on any painting in the fullscreen viewer to

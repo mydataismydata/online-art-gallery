@@ -3160,8 +3160,8 @@ function editCollectionDialog(c, onDone) {
 /* ============================== museum (walkable 3-D hang) ============================== */
 
 /* The museum is the owner's one walkable hang: rooms of works in a fixed order,
-   walked room by room. Two screens share the data: the walk (#/museum), built
-   out of CSS 3-D planes and driven with the arrow keys, and the arrange screen
+   walked room by room. Two screens share the data: the walk (#/museum), drawn
+   with WebGL (static/museum3d/) and driven with the arrow keys, and the arrange screen
    (#/museum/arrange), where the owner drags the order, cuts rooms, and picks
    each room's fit. Works arrive via the floor-number keys (1–9) in the
    fullscreen viewer. */
@@ -3299,7 +3299,7 @@ function muPaintCtl(color) {
     '<input type="color" class="mroom-color" aria-label="Wall colour" value="' +
     esc(color || MU_WALL_DEFAULT) + '"></label>' +
     '<button class="arow-btn mroom-paint-reset" type="button" ' +
-    'title="Back to the stock museum grey">↺</button>'
+    'title="Back to the museum’s white plaster">↺</button>'
   );
 }
 
@@ -3850,63 +3850,46 @@ async function collectionRoomArrangeView(cid, keepScroll) {
 
 /* ---------- the walk ---------- */
 
-/* Built from CSS 3-D planes: a viewport with perspective, a world container
-   carrying the camera transform, and every wall, floor and painting a flat
-   rectangle placed with translate3d + rotate. One unit is one centimetre.
+/* The walk is drawn with WebGL — three.js, through static/museum3d/. This
+   file plans the building and owns the walking: rooms sized round their
+   works, doors on the walls the owner picked, every painting placed on its
+   wall, then the keys, drags, glides, collisions, stairs and the map. The
+   renderer turns the plan into vaulted, lit rooms and draws them from
+   wherever the camera stands. One unit is one centimetre.
 
-   World axes follow CSS: x right, y DOWN (the floor is y=0, the ceiling
-   negative), z toward the viewer — the museum recedes along -z, room after
-   room. The camera yaw's forward is (sin yaw, 0, -cos yaw): yaw 0 walks into
-   the museum, arrow-right turns clockwise. The world transform is
-   rotateY(yaw) translate3d(-cam), which lands the camera at the origin looking
-   down -z — exactly where the viewport's perspective projects from. */
+   World axes: x east, z south — the museum recedes along -z, room after
+   room — and heights measured up from the floor. The camera yaw's forward
+   is (sin yaw, 0, -cos yaw): yaw 0 walks into the museum, arrow-right turns
+   clockwise. */
 
 const MU_EYE = 158;                  // eye height off the floor, cm
 const MU_HANG = 150;                 // centre line the art hangs on, cm
-const MU_FRAME = 9;                  // frame width around the canvas, cm (see museum.css)
+const MU_FRAME = 9;                  // frame moulding width round the canvas, cm
 const MU_LBL_W = 22, MU_LBL_H = 14;  // the wall placard beside each piece, cm
-const MU_LBL_SCALE = 10;             // drawn 10× and scaled down, so the type stays crisp
-const MU_WALL_H = 380;               // ceiling height
-const MU_DOOR_W = 170, MU_DOOR_H = 260;
-// The doorway assembly: one coherent object per opening — a deep reveal
-// through the wall's thickness, a mitred architrave standing proud of the
-// wall on real returns, a plinth block at each casing foot, and a threshold
-// board across the floor. A gallery architrave is broad: about a sixth of
-// the opening per side.
-const MU_CASE_W = 26;                // side casing width, head casing height
-const MU_CASE_D = 4;                 // how far the casing stands off the wall
-const MU_CORNER = MU_CASE_W + 2;     // plinth block: the casing's width and a lip
-const MU_REVEAL = 24;                // the wall's thickness through the opening
-const MU_PLINTH = MU_CORNER;         // trim reach beyond the opening: the plinth's outer edge
-const MU_FRONT_W = 200, MU_FRONT_H = 285;   // the front door's gilded leaves
-const MU_BASE = 24, MU_CROWN = 15;   // the woodwork: wide baseboard, crown's drop down the wall
-const MU_COVE = 22;                  // how far the cornice's cove reaches across the ceiling
-const MU_WELL = 42;                  // depth of the laylight's well above the ceiling
-// Vertical breathing room: a frame never sits closer than 30cm of bare wall
-// to the baseboard's top, nor 20cm to the crown's underside.
-const MU_FLOOR_PAD = MU_BASE + 30;   // floor to a frame's lowest allowed edge
-const MU_CROWN_PAD = MU_CROWN + 20;  // ceiling down to its highest
+const MU_WALL_H = 380;               // walls rise at least this far before the vault springs
+// Passages between rooms are round arches, generous like a palace's: the
+// opening's width and its full height to the crown of the arch.
+const MU_DOOR_W = 190, MU_DOOR_H = 320;
+const MU_REVEAL = 40;                // the walls' thickness at a doorway (museum3d/arch.js REVEAL)
+const MU_FRONT_W = 200, MU_FRONT_H = 285;   // the front door's leaves
+// Vertical breathing room: a frame never sits closer than 54 cm to the floor
+// (the skirting and bare wall above it), nor 35 cm under the springing line.
+const MU_FLOOR_PAD = 54;
+const MU_CROWN_PAD = 35;
 const MU_MARGIN = 70;                // bare wall kept at the ends of each run
 const MU_BREEZE_PAD = 70;            // breezeway: bare wall each side of its doors
 const MU_STACK_GAP = 18;             // air between two stacked pieces
 const MU_SPEED = 310;                // walk, cm/s
 const MU_TURN = 1.75;                // turn, rad/s
 const MU_KEYSET = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1 };
-
-// The scene is authored at 1 px = 1 cm, but the compositor rasterises each
-// plane at its CSS size — so anything nearer than the perspective distance
-// was magnified on screen and went soft. The stage scales the whole scene up
-// (and the camera's strides with it): the projection is identical, but every
-// plane is drawn at MU_SS times the texel density. The crispness is paid for
-// in the VIEWER'S GPU memory — rendering is entirely client-side — and a
-// phone has none to spare: every texture ALSO multiplies by its 2-3×
-// devicePixelRatio, and past the compositor's budget the walls blank out and
-// redraw in pieces. So phones aim at ~1.5 device texels per centimetre TOTAL
-// (SS × DPR): the stage shrinks below 1:1 and the screen's own density does
-// the rest — and a long wall stays under WebKit's per-texture size cap.
-const MU_SS = (window.matchMedia && matchMedia("(pointer: coarse)").matches)
-  ? Math.min(1, 1.5 / (window.devicePixelRatio || 1))
-  : 3;
+// The stock wall paint, as the arrange screen's colour well shows it: the
+// warm white plaster the renderer uses for a room left unpainted.
+const MU_WALL_DEFAULT = "#e2e1dd";
+// A staircase between storeys (museum3d/stairs.js builds it): floor to
+// floor, risers per flight, the going of a tread, the floor before the
+// first flight, the half landing's depth, a flight's width, the well
+// between the flights.
+const MU_STAIR = { FF: 460, N: 13, T: 28, F0: 115, LD: 130, FW: 125, G: 16 };
 
 // Walking by hand: the room follows your pointer — sideways turns you, up and
 // down walks you — on a mouse exactly as on a finger.
@@ -3916,9 +3899,9 @@ const MU_TAP_SLOP = 8;               // a press that travels less than this is a
 
 const MU = {
   active: false, raf: 0, rooms: [], arts: [], ri: 0,
-  cam: { x: 0, z: 0, yaw: 0, zoom: 1 },
+  cam: { x: 0, z: 0, yaw: 0, zoom: 1, lift: 0, pitch: 0 },
   vel: { f: 0, t: 0 }, keys: {}, glide: null, place: null,
-  vp: null, world: null, baseP: 900, last: 0, nearTs: 0,
+  last: 0, nearTs: 0, gl: null, plan: null,
   pinch: null, points: new Map(),
   clip: null, drag: null, targets: [], map: null,
 };
@@ -4256,519 +4239,9 @@ function muDistribute(slots, segs, gap) {
   segs.forEach((seg) => seg.slots.sort((a, b) => a.idx - b.idx));
 }
 
-function muEl(cls, wpx, hpx, transform) {
-  const d = document.createElement("div");
-  d.className = cls;
-  d.style.width = wpx + "px";
-  d.style.height = hpx + "px";
-  d.style.marginLeft = (-wpx / 2) + "px";
-  d.style.marginTop = (-hpx / 2) + "px";
-  d.style.transform = transform;
-  return d;
-}
-
-function muT(x, y, z, rot) {
-  return "translate3d(" + x.toFixed(1) + "px," + y.toFixed(1) + "px," +
-         z.toFixed(1) + "px)" + (rot || "");
-}
-
-function muArtEl(item, x, y, z, rotY, ri) {
-  const fw = item.l + 2 * MU_FRAME, fh = item.h + 2 * MU_FRAME;
-  // The compositor rasterises a plane at its layout size, so a 60cm canvas
-  // owned ~180 texels however many pixels the derivative brought — that was
-  // the close-up ceiling. Same cure as the placards: lay the element out K
-  // times life-size and scale it back down, so the raster keeps up with a
-  // visitor's nose. K aims the long side at the /img derivative's own ceiling
-  // (~2560 texels on the supersampled desktop stage), so the raster is never
-  // the one discarding source pixels.
-  const K = Math.max(1, Math.min(16, Math.round(850 / Math.max(fw, fh))));
-  const el = muEl("mu-art", fw * K, fh * K,
-    muT(x, y, z, " rotateY(" + rotY + "deg) scale(" + (1 / K) + ")"));
-  // The border IS the frame — the gilded border-image in museum.css rides on
-  // it; without this line the picture stretches over the moulding.
-  el.style.borderWidth = (MU_FRAME * K) + "px";
-  // Which frame a work wears is its own to keep: hashed from the id, so a
-  // wall mixes frames but every painting keeps its frame visit after visit.
-  if (parseInt(item.work.id.slice(0, 6), 16) % 2) el.classList.add("mu-f2");
-  const img = new Image();
-  img.src = thumbSrc(item.work);
-  img.alt = item.work.title || "";
-  img.draggable = false;
-  el.appendChild(img);
-  el.dataset.id = item.work.id;
-  const rad = rotY * Math.PI / 180;
-  // The element lives in room-local coordinates (its group carries the
-  // room's place in the plan); the walk's own math — clicks, placards,
-  // glides — wants world ones, so the room's offset is applied here once.
-  const pl = MU.place;
-  MU.arts.push({ el: el, img: img, work: item.work, est: item.est, ri: ri,
-                 x: pl ? pl.cx + x : x, z: pl ? pl.cz + z : z, w: fw, h: fh,
-                 nx: Math.sin(rad), nz: Math.cos(rad), hi: false });
-  return el;
-}
-
-/* The wall placard beside a painting: artist, title and date, medium and size —
-   a real label, small on the wall, read by walking up to it. It's laid out at
-   ten times its size and scaled down, so the type rasterises crisp instead of
-   being hinted to mush at 2 px. */
-function muLabelEl(work, x, y, z, rotY) {
-  const el = document.createElement("div");
-  el.className = "mu-label";
-  el.style.width = (MU_LBL_W * MU_LBL_SCALE) + "px";
-  el.style.height = (MU_LBL_H * MU_LBL_SCALE) + "px";
-  el.style.marginLeft = (-MU_LBL_W * MU_LBL_SCALE / 2) + "px";
-  el.style.marginTop = (-MU_LBL_H * MU_LBL_SCALE / 2) + "px";
-  el.style.transform = muT(x, y, z,
-    " rotateY(" + rotY + "deg) scale(" + (1 / MU_LBL_SCALE) + ")");
-  const when = work.date || work.year;
-  const line3 = [work.medium, cmDims(work)].filter(Boolean).join(" · ");
-  el.innerHTML =
-    '<span class="mu-lb-a">' + esc(work.artist || "Unknown artist") + "</span>" +
-    '<span class="mu-lb-t">' + esc(work.title || "Untitled") +
-    (when ? '<span class="mu-lb-d">, ' + esc(String(when)) + "</span>" : "") + "</span>" +
-    (line3 ? '<span class="mu-lb-m">' + esc(line3) + "</span>" : "");
-  return el;
-}
-
-/* One room's planes: floor, ceiling, side walls, and the far wall — split
-   around the doorway when another room follows. The far wall is shared: its
-   planes are double-sided, so the next room's entry side is the same wall seen
-   from behind, and a doorway is simply the gap both rooms agree on. */
-/* Paint an element's walls. The picked colour becomes the whole family the
-   stock grey was: front (n/s) walls at full value, side (e/w) walls a step
-   deeper, each fading lighter at the crown and duskier at the floor in the
-   same proportions as the default (museum-room.css reads these variables).
-   The woodwork stays the museum's own white. No colour, no-op: the
-   stylesheet's greys stand. */
-const MU_WALL_DEFAULT = "#afaca6";
-function muPaint(el, color) {
-  if (!/^#[0-9a-f]{6}$/i.test(color || "")) return;
-  const c = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
-  const hx = (v) => Math.round(v).toString(16).padStart(2, "0");
-  const mix = (base, t, to) => "#" + base.map((v) => hx(v + (to - v) * t)).join("");
-  [["front", c], ["side", c.map((v) => v * 0.95)]].forEach(([face, base]) => {
-    const set = (part, val) =>
-      el.style.setProperty("--mu-wall-" + face + "-" + part, val);
-    set("top", mix(base, 0.11, 255));
-    set("high", mix(base, 0.05, 255));
-    set("mid", mix(base, 0, 255));
-    set("bottom", mix(base, 0.085, 0));
-  });
-}
-
-/* A wall plane that knows where it sits in its whole wall: `span` is the
-   wall's full length, `at` how far along it this piece begins, and `full`
-   the wall's full height (every piece hangs from the ceiling). The lighting
-   laid across a wall — the fall toward the floor, the corners' shade, the
-   brighter middle nearest the laylight — is painted to the whole wall and
-   offset, so a wall cut in pieces around a doorway reads as one surface. */
-function muWallEl(cls, w, h, t, span, at, full) {
-  const el = muEl("mu-wall " + cls, w, h, t);
-  el.style.setProperty("--mu-span", span.toFixed(1) + "px");
-  el.style.setProperty("--mu-h", full.toFixed(1) + "px");
-  el.style.setProperty("--mu-at", (-at).toFixed(1) + "px");
-  return el;
-}
-
-/* The ceiling: a laylight. A frosted-glass panel of the room's own shape
-   lies up in a shallow well, ringed by a plain plaster border — the light
-   the whole room is painted by. Built as the border's four strips, the
-   well's four sides and the glass, so the planes cover the room's footprint
-   once (the old single plane's area, and so its texture memory) plus the
-   narrow well. North and south strips run the full width, east and west
-   fill between them; every joint laps by a centimetre, since two planes
-   that merely abut leave a hairline crack onto the void above. */
-function muCeiling(room, W, D, H) {
-  const M = Math.round(Math.max(70, Math.min(130, Math.min(W, D) * 0.17)));
-  const gw = W - 2 * M, gd = D - 2 * M;
-  const flat = " rotateX(-90deg)";          // faces down, into the room
-  const add = (cls, w, h, t) => room.appendChild(muEl(cls, w, h, t));
-  add("mu-ceil mu-ceil-n", W, M, muT(0, -H, -D / 2 + M / 2, flat));
-  add("mu-ceil mu-ceil-s", W, M, muT(0, -H, D / 2 - M / 2, flat));
-  add("mu-ceil mu-ceil-w", M, gd + 2, muT(-W / 2 + M / 2, -H, 0, flat));
-  add("mu-ceil mu-ceil-e", M, gd + 2, muT(W / 2 - M / 2, -H, 0, flat));
-  // the well's sides drop a centimetre below the plaster: a small lip
-  const wh = MU_WELL + 1, wy = -(H + MU_WELL / 2) + 0.5;
-  add("mu-well", gw + 2, wh, muT(0, wy, -gd / 2, ""));
-  add("mu-well", gw + 2, wh, muT(0, wy, gd / 2, " rotateY(180deg)"));
-  add("mu-well", gd + 2, wh, muT(-gw / 2, wy, 0, " rotateY(90deg)"));
-  add("mu-well", gd + 2, wh, muT(gw / 2, wy, 0, " rotateY(-90deg)"));
-  add("mu-laylight", gw + 2, gd + 2, muT(0, -(H + MU_WELL), 0, flat));
-}
-
-function muBuildRoom(g, i, geoms, world) {
-  const room = document.createElement("div");
-  room.className = "mu-roomg";
-  muPaint(room, g.color);
-  const W = g.W, D = g.D, H = g.H;
-
-  const floor = muEl("mu-floor", W, D, muT(0, 0, 0, " rotateX(90deg)"));
-  // The parquet is laid once for the whole storey: each room's floor picks up
-  // the pattern where its corner falls, so the boards run on through a door.
-  floor.style.setProperty("--mu-floor-at", (-(g.cx - W / 2)).toFixed(1) + "px " +
-    (-(g.cz - D / 2)).toFixed(1) + "px");
-  room.appendChild(floor);
-  muCeiling(room, W, D, H);
-
-  // The room's walls, minus its entry — that one is the previous room's exit
-  // wall seen from behind (a floor's first room has no entry, so it gets all
-  // four). A wall carrying any door is built split around its opening, in a
-  // group of its own so the same assembly serves any compass wall alike.
-  const dbw = {};
-  (g.doors || []).forEach((d) => { dbw[d.wall] = d; });
-  muWalls(g).forEach((w) => {
-    const d = dbw[w.id];
-    if (d && d.kind === "entry") return;
-    const rot = " rotateY(" + w.rot + "deg)";
-    if (!d) {
-      room.appendChild(muWallEl(w.cls, w.len, H, muT(w.cx, -H / 2, w.cz, rot), w.len, 0, H));
-      return;
-    }
-    if (d.kind === "exit") {
-      // The chain's shared passage. A doored wall has real thickness — its
-      // faces sit at the reveal's edges, so the reveal ends flush with them
-      // instead of finning into the room. Each face spans ITS room's wall,
-      // not the wider of the two: a shared span would overhang the narrower
-      // room's corners on both faces, and the overhang can knife straight
-      // through whatever third room the plan has put beyond that corner.
-      const nlen = w.id === "e" || w.id === "w" ? geoms[i + 1].D : geoms[i + 1].W;
-      // Where the next room's centre sits along this wall, in the wrap's own
-      // x (the face turned to that room flips x, so its span flips with it)
-      // — a room slid to dodge an earlier one carries its wall along.
-      const [ax, az] = muWallAxis(w.rot);
-      const eo = (geoms[i + 1].entryOff || 0) * (ax + az);
-      const wrap = document.createElement("div");
-      wrap.className = "mu-doorg";
-      // The wrap lives at stage level, not in the room: the wall it draws is
-      // two rooms' wall at once, and it must survive either room's culling.
-      // Each face's wall rises to ITS room's ceiling and wears ITS room's
-      // paint: a tall red hall next to a standard grey room shares the
-      // doorway, not the height or the colour.
-      wrap.style.transform =
-        "translate3d(" + (g.cx + w.cx) + "px,0px," + (g.cz + w.cz) + "px) rotateY(" +
-        w.rot + "deg)";
-      muDoorway(wrap, d.ow, d.oh, [0, 180], null, [w.len, nlen], [0, eo],
-        [H, geoms[i + 1].H], [g.color, geoms[i + 1].color], w.cls);
-      world.appendChild(wrap);
-      MU.wraps.push({ el: wrap, a: i, b: i + 1, floor: g.floor || 0 });
-      return;
-    }
-    // A door of the room's own: the front's gilded leaves, a stairway up or
-    // down, or an extra door — a passage when paired, shut when not. These
-    // face only their own room (the far side is elsewhere), so the assembly
-    // lives inside the room and culls with it.
-    // An OPEN stairway draws no painted leaf: its leaf turns invisible and
-    // serves only as the portal's clickable face, with a real 3-D flight
-    // built behind it. A shut stair (and every other door) keeps its leaf.
-    const leaf = d.kind === "front" ? "mu-entry-door"
-      : d.kind === "pass" ? (d.closed ? "mu-shut-door" : "mu-pass-door")
-      : "mu-stair-door " + (d.kind === "stairup" ? "mu-stair-up" : "mu-stair-dn") +
-        (d.closed ? " mu-shut-door" : " mu-stair-open");
-    const wrap = document.createElement("div");
-    wrap.className = "mu-doorg";
-    wrap.style.transform = muT(w.cx, 0, w.cz, rot);
-    muDoorway(wrap, d.ow, d.oh, [0], leaf, [w.len], [0], [H], [g.color], w.cls);
-    if (d.kind !== "front") {
-      // The real flight behind an open stairway — treads and risers in world
-      // space, so the fixed-height camera foreshortens them as you approach.
-      if ((d.kind === "stairup" || d.kind === "stairdown") && !d.closed) {
-        muStairwell(wrap, d.kind === "stairup" ? "up" : "dn", d.ow, d.oh);
-      }
-      // The stair's sign over the casing, and the leaf as the portal's
-      // clickable face.
-      const sign = d.kind === "stairup" ? "UPSTAIRS"
-        : d.kind === "stairdown" ? "DOWNSTAIRS" : "";
-      if (sign) {
-        const sg = muEl("mu-stair-sign", 120, 20,
-          muT(0, -(d.oh + MU_CASE_W + 26), MU_REVEAL / 2 + 2.4, ""));
-        sg.textContent = sign + (d.closed ? " · CLOSED" : "");
-        wrap.appendChild(sg);
-      }
-      const lf = wrap.querySelector(".mu-door-leaf");
-      if (lf && !d.closed && d.pi != null) {
-        lf.dataset.portal = d.pi;
-        lf.dataset.end = d.end;
-        // Where the traveller stands and faces at this end of the portal.
-        const rad = w.rot * Math.PI / 180;
-        const nx = Math.sin(rad), nz = Math.cos(rad);
-        MU.portalPts[d.pi] = MU.portalPts[d.pi] || {};
-        MU.portalPts[d.pi][d.end] = {
-          floor: g.floor || 0, ri: i,
-          dx: g.cx + w.cx, dz: g.cz + w.cz,
-          x: g.cx + w.cx + nx * 130, z: g.cz + w.cz + nz * 130,
-          yaw: Math.atan2(nx, -nz),
-        };
-      }
-    }
-    room.appendChild(wrap);
-  });
-  muTrimRoom(room, i, g);
-  world.appendChild(room);
-  return room;
-}
-
-/* The real flight behind an open stairway's reveal: horizontal treads and
-   vertical risers laid out in world space so the room's own camera supplies
-   the foreshortening — the amount of each tread you see changes as you move,
-   the way the old flat leaf never could. The up flight climbs out of sight
-   with no ceiling or landing; the down flight drops below the floor into a
-   dark void. Not one CSS filter touches any of it: a filter on a preserve-3d
-   node flattens it out of the depth sort, and the treads collapse behind the
-   risers into flat "shutters". The group stays pointer-transparent (its CSS),
-   so a tap falls through to the invisible leaf that carries the portal. */
-function muStairwell(wrap, kind, ow, oh) {
-  const g = document.createElement("div");
-  g.className = "mu-stairwell " + (kind === "up" ? "mu-stairwell-up" : "mu-stairwell-down");
-  const innerW = ow;                        // walls flush with the jambs they continue
-  const nearZ = -MU_REVEAL / 2;             // the flight begins where the reveal ends
-  const rise = 17, run = 25;
-  const count = kind === "up" ? 18 : 16;      // more than can be seen — it just runs on
-  const depth = count * run + 90;
-  const add = (cls, w, h, x, y, z, rot) =>
-    g.appendChild(muEl("mu-stair-part " + cls, w, h, muT(x, y, z, rot || "")));
-  if (kind === "up") {
-    // Tall side walls only — no horizontal ceiling — so the flight is open.
-    const wallTop = -355, wallBottom = 25;
-    const wallH = wallBottom - wallTop, wallY = (wallTop + wallBottom) / 2;
-    const wallZ = nearZ - depth / 2;
-    add("mu-stair-side mu-stair-side-left", depth, wallH, -innerW / 2, wallY, wallZ, " rotateY(90deg)");
-    add("mu-stair-side mu-stair-side-right", depth, wallH, innerW / 2, wallY, wallZ, " rotateY(-90deg)");
-    for (let i = 0; i < count; i++) {
-      const frontZ = nearZ - i * run, topY = -(i + 1) * rise;
-      add("mu-stair-riser", innerW, rise, 0, topY + rise / 2, frontZ, "");
-      add("mu-stair-tread", innerW, run, 0, topY, frontZ - run / 2, " rotateX(90deg)");
-      add("mu-stair-nosing", innerW, 3, 0, topY + 1.5, frontZ - 1, "");
-    }
-  } else {
-    // The first tread is level with the floor; each drops below it, so a
-    // distant eye sees mostly dark and a near one looks down onto the steps.
-    const wallTop = -oh, wallBottom = count * rise + 45;
-    const wallH = wallBottom - wallTop, wallY = (wallTop + wallBottom) / 2;
-    const wallZ = nearZ - depth / 2;
-    add("mu-stair-side mu-stair-side-left", depth, wallH, -innerW / 2, wallY, wallZ, " rotateY(90deg)");
-    add("mu-stair-side mu-stair-side-right", depth, wallH, innerW / 2, wallY, wallZ, " rotateY(-90deg)");
-    for (let i = 0; i < count; i++) {
-      const frontZ = nearZ - i * run, treadY = i * rise;
-      add("mu-stair-tread", innerW, run, 0, treadY, frontZ - run / 2, " rotateX(90deg)");
-      add("mu-stair-nosing", innerW, 3, 0, treadY + 1.5, frontZ - run + 1, "");
-      add("mu-stair-riser", innerW, rise, 0, treadY + rise / 2, frontZ - run, "");
-    }
-    add("mu-stair-void", innerW, wallH, 0, wallY, nearZ - count * run - 35, "");
-  }
-  wrap.appendChild(g);
-  return g;
-}
-
-/* One doorway, one object. Through the wall runs the reveal — two jambs and
-   the soffit, lining the opening from casing face to casing face — with a
-   threshold board across the floor where the two rooms' parquet meets. On
-   each requested face stands the architrave: a side casing each side and a
-   mitred head spanning the full outer width, all MU_CASE_D proud of the wall
-   on real returns, so the casing's thickness shows as you pass it. A plinth
-   block, a lip deeper and wider still, takes each casing foot and the
-   baseboard's end. The wall plane is the wrap's local z = 0; faces are nested
-   groups turned to look at their room, so the same assembly serves every
-   wall and both sides of it. A closed doorway gets a leaf at the back of the
-   reveal (the front door's gilded leaves ride in as a class). */
-function muDoorway(wrap, ow, oh, faces, leafCls, spans, offs, hs, cs, wallCls) {
-  const CW = MU_CASE_W, CD = MU_CASE_D;
-  const cx2 = ow / 2 + CW / 2;             // casing centreline
-  const FZ = MU_REVEAL / 2;                // each face's wall sits at the reveal's edge
-  const CZ = FZ + CD;                      // and its casing stands proud of it
-  // The reveal runs out to the casing on a dressed side; a door dressed on
-  // one side only stops flush with the bare wall behind.
-  const back = faces.length > 1 ? CZ : FZ;
-  const RD = CZ + back, rz = (CZ - back) / 2;
-  const thru = faces.length > 1 ? " mu-jamb-through" : "";
-  wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-left" + thru, RD, oh,
-    muT(-ow / 2, -oh / 2, rz, " rotateY(90deg)")));
-  wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-right" + thru, RD, oh,
-    muT(ow / 2, -oh / 2, rz, " rotateY(-90deg)")));
-  wrap.appendChild(muEl("mu-jamb-reveal mu-jamb-reveal-head" + thru, ow, RD,
-    muT(0, -oh, rz, " rotateX(90deg)")));
-  wrap.appendChild(muEl("mu-threshold", ow, RD, muT(0, -0.3, rz, " rotateX(90deg)")));
-  if (leafCls) {
-    wrap.appendChild(muEl("mu-door-leaf " + leafCls, ow - 4, oh - 4,
-      muT(0, -(oh - 4) / 2, -(FZ + 0.2), "")));
-  }
-  const ch = oh + CW;                      // side casings rise past the opening by their width
-  const PH = MU_BASE + 10, PD = CD + 1.5;  // plinth block: over the baseboard, proud of the casing
-  // The side casings and their returns stand on the plinth blocks rather
-  // than running down through them, so the block's top is a clean ledge.
-  const sh = ch - PH, sy = -(PH + sh / 2);
-  const pxc = ow / 2 + MU_CORNER / 2;      // its inner edge flush with the opening
-  faces.forEach((deg, fi) => {
-    // This face's wall runs [off − span/2, off + span/2] in face-local x —
-    // off is where its room's centre sits when the room slid off the door.
-    const off = offs[fi] || 0;
-    const H = hs[fi];                    // this face rises to its own room's ceiling
-    const sw = spans[fi] / 2 - ow / 2;
-    const L = sw - off, R = sw + off;    // shoulder widths, door to wall end
-    const f = document.createElement("div");
-    f.className = "mu-doorg";
-    muPaint(f, cs[fi]);                  // and wears its own room's paint
-    f.style.transform = "rotateY(" + deg + "deg)";
-    // this face's wall, flush with the reveal's edge, each piece told where
-    // it sits along the whole wall so the wall's light runs across all three
-    const span = spans[fi];
-    if (L > 0)
-      f.appendChild(muWallEl(wallCls, L, H,
-        muT(-(ow / 2 + L / 2), -H / 2, FZ, ""), span, 0, H));
-    if (R > 0)
-      f.appendChild(muWallEl(wallCls, R, H,
-        muT(ow / 2 + R / 2, -H / 2, FZ, ""), span, L + ow, H));
-    // A hair wider than the opening: it laps the side pieces so their meeting
-    // line can't show as a seam (same colour, so the overlap is invisible).
-    f.appendChild(muWallEl(wallCls, ow + 4, H - oh,
-      muT(0, -(oh + (H - oh) / 2), FZ, ""), span, L - 2, H));
-    // The architrave: sides rising past the opening by the casing's own
-    // width, the head spanning the full outer width, meeting on a 45° cut
-    // (the clip-paths in museum-room.css).
-    f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-left",
-      CW, sh, muT(-cx2, sy, CZ, "")));
-    f.appendChild(muEl("mu-door-casing mu-door-casing-side mu-door-casing-right",
-      CW, sh, muT(cx2, sy, CZ, "")));
-    f.appendChild(muEl("mu-door-casing mu-door-casing-head",
-      ow + 2 * CW, CW, muT(0, -(oh + CW / 2), CZ, "")));
-    // Its outer edges, back to the wall. (The head's top edge would need an
-    // eye above the door to be seen.)
-    f.appendChild(muEl("mu-door-return mu-door-return-left", CD, sh,
-      muT(-(ow / 2 + CW), sy, FZ + CD / 2, " rotateY(-90deg)")));
-    f.appendChild(muEl("mu-door-return mu-door-return-right", CD, sh,
-      muT(ow / 2 + CW, sy, FZ + CD / 2, " rotateY(90deg)")));
-    // The casing's shade on the wall around it, between wall and casing
-    // planes: a strip abutting each outer edge, and the faintest one above
-    // the head — wide enough to cap the side strips, whose upward fade
-    // arrives at exactly its level (museum-room.css).
-    f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-left", 26, ch,
-      muT(-(ow / 2 + CW + 13), -ch / 2, FZ + 1, "")));
-    f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-right", 26, ch,
-      muT(ow / 2 + CW + 13, -ch / 2, FZ + 1, "")));
-    f.appendChild(muEl("mu-door-wallshade mu-door-wallshade-top",
-      ow + 2 * CW + 52, 22, muT(0, -(ch + 11), FZ + 1, "")));
-    [-1, 1].forEach((s) => {
-      const side = s < 0 ? "left" : "right";
-      f.appendChild(muEl("mu-door-plinth", MU_CORNER, PH, muT(s * pxc, -PH / 2, FZ + PD, "")));
-      // its top, facing the laylight: the brightest face on the doorway
-      f.appendChild(muEl("mu-door-plinth-top", MU_CORNER, PD,
-        muT(s * pxc, -PH, FZ + PD / 2, " rotateX(90deg)")));
-      f.appendChild(muEl("mu-door-return mu-plinth-return mu-door-return-" + side, PD, PH,
-        muT(s * (ow / 2 + MU_CORNER), -PH / 2, FZ + PD / 2,
-          " rotateY(" + (s < 0 ? -90 : 90) + "deg)")));
-      // floor contact under the block: a horizontal fade, wall at local -z
-      f.appendChild(muEl("mu-floor-shadow mu-plinth-floor-shadow mu-floor-shadow-north",
-        MU_CORNER + 2, 12, muT(s * (pxc + 1), -0.18, FZ + PD + 6, " rotateX(90deg)")));
-    });
-    wrap.appendChild(f);
-  });
-}
-
-/* The room's woodwork: a wide baseboard at the floor and a cornice at the
-   ceiling, on every face the room shows. The cornice is a narrow bed
-   moulding on the wall with a cove above it — a real sloped plane that
-   climbs MU_CROWN less the bed and reaches MU_COVE across the ceiling,
-   mitred at each corner so the four coves meet on the diagonal. It runs each
-   wall's whole width; a baseboard breaks at a doorway, stopping at the
-   plinth block. Every baseboard segment brings its own floor-contact shadow — a
-   horizontal plane lying just above the parquet, fading into the room —
-   because a box-shadow on a vertical board can't turn the corner onto the
-   floor. Segment and shadow are a pair: shorten one, shorten both.
-
-   The woodwork has thickness (MU_TRIM_T). Boards meeting in a corner stop on
-   each other's face instead of running through to the wall — an end that ran
-   on would stand up behind its neighbour, plainly visible from above — and
-   the thickness shows where the light finds it: the baseboard's top edge,
-   facing the laylight, and the bed moulding's underside, facing the floor.
-   Both are mitred at the corners like the coves. */
-const MU_TRIM_T = 2.4;
-const MU_FS_NAME = { n: "north", s: "south", e: "east", w: "west" };
-function muTrimRoom(room, i, g) {
-  const H = g.H;
-  const BED = 4, RISE = MU_CROWN - BED;
-  const yB = -MU_BASE / 2, yC = -(H - MU_CROWN + BED / 2);
-  const tilt = " rotateX(" + (-Math.atan2(MU_COVE, RISE) * 180 / Math.PI).toFixed(2) + "deg)";
-  // a centimetre longer each way along its slope, so both edges tuck in
-  // behind the ceiling and the bed instead of leaving a crack
-  const coveH = Math.hypot(MU_COVE, RISE) + 2;
-  const dbw = {};
-  (g.doors || []).forEach((d) => { dbw[d.wall] = d; });
-  // the trim sits a shade off its wall face, toward the room — and a
-  // doored wall's face (whatever the door: the chain's, a stairway, an
-  // extra door) sits at the reveal's edge
-  const offOf = (id) => (dbw[id] ? MU_REVEAL / 2 : 0) + 2.4;
-  // the walls at each end of a wall, in its element's own left-to-right
-  const ENDS = { n: ["w", "e"], s: ["e", "w"], w: ["s", "n"], e: ["n", "s"] };
-  const T = MU_TRIM_T;
-  const px = (v) => v.toFixed(1) + "px";
-  muWalls(g).forEach((w) => {
-    const d = dbw[w.id];
-    const off = offOf(w.id);
-    const [nx, nz] = [Math.sin(w.rot * Math.PI / 180), Math.cos(w.rot * Math.PI / 180)];
-    const [ax, az] = muWallAxis(w.rot);
-    const rot = " rotateY(" + w.rot + "deg)";
-    const horiz = w.id === "n" || w.id === "s";
-    // a point `o` along the wall and `dz` out from its line, in room space
-    const at = (o, dz) => [w.cx + ax * o + nx * dz, w.cz + az * o + nz * dz];
-    // where this wall's trim meets its neighbours' faces at the two corners
-    const [ol, or] = ENDS[w.id].map(offOf);
-    const c0 = -w.len / 2 + ol, c1 = w.len / 2 - or;
-    // A thickness face of a run from t0 to t1: horizontal, T deep, lying
-    // between the wall and the trim's face. At a corner end its wall-side
-    // edge runs on T further, and the clip cuts the mitre. `up` faces it
-    // to the ceiling (a top), otherwise to the floor (an underside); the
-    // room-side edge is the element's bottom edge for a top, its top edge
-    // for an underside.
-    const edge = (cls, t0, t1, y, cl, cr, up) => {
-      const e0 = cl ? T : 0, e1 = cr ? T : 0;
-      const len = t1 - t0 + e0 + e1, o = (t0 + t1) / 2 + (e1 - e0) / 2;
-      const [x, z] = at(o, off - T / 2);
-      const el = muEl(cls, len, T, muT(x, y, z, rot + (up ? " rotateX(90deg)" : " rotateX(-90deg)")));
-      const room0 = up ? "100%" : "0", wall0 = up ? "0" : "100%";
-      el.style.clipPath = "polygon(0 " + wall0 + ", 100% " + wall0 + ", calc(100% - " +
-        px(e1) + ") " + room0 + ", " + px(e0) + " " + room0 + ")";
-      room.appendChild(el);
-    };
-    const base = (t0, t1, cl, cr) => {
-      const len = t1 - t0, o = (t0 + t1) / 2;
-      if (len <= 0) return;
-      const [bx, bz] = at(o, off);
-      room.appendChild(muEl("mu-trim mu-base", len, MU_BASE, muT(bx, yB, bz, rot)));
-      edge("mu-trim-edge mu-base-top", t0, t1, -MU_BASE, cl, cr, true);
-      // its floor shadow: 10 cm deep, from the trim face into the room
-      room.appendChild(muEl("mu-floor-shadow mu-floor-shadow-" + MU_FS_NAME[w.id],
-        horiz ? len : 10, horiz ? 10 : len,
-        muT(bx + nx * 5, -0.15, bz + nz * 5, " rotateX(90deg)")));
-    };
-    const [bx, bz] = at((c0 + c1) / 2, off);
-    room.appendChild(muEl("mu-trim mu-crown", c1 - c0, BED, muT(bx, yC, bz, rot)));
-    edge("mu-trim-edge mu-crown-under", c0, c1, -(H - MU_CROWN), true, true, false);
-    const co = off + MU_COVE / 2;
-    const cove = muEl("mu-cove", w.len, coveH,
-      muT(w.cx + nx * co, -(H - RISE / 2), w.cz + nz * co, rot + tilt));
-    // Each end stops on the corner's diagonal, where it meets the next
-    // wall's cove: the bottom edge as far from that wall as the next cove
-    // stands off it, the top edge a cove's reach further. (A doored wall's
-    // cove stands 12 cm further out, so its neighbours stop short for it.)
-    cove.style.clipPath = "polygon(" + px(ol + MU_COVE) + " 0, calc(100% - " +
-      px(or + MU_COVE) + ") 0, calc(100% - " + px(or) + ") 100%, " + px(ol) + " 100%)";
-    room.appendChild(cove);
-    if (!d) {
-      base(c0, c1, true, true);
-      return;
-    }
-    // baseboards break where the casing lands — around the doorway wherever
-    // the room's dodge left it (only an entry door ever sits off-centre)
-    const ow = d.ow;
-    const dt = d.kind === "entry" ? (g.entryOff || 0) * (ax + az) : 0;
-    base(c0, dt - ow / 2 - MU_PLINTH, true, false);
-    base(dt + ow / 2 + MU_PLINTH, c1, false, true);
-  });
-}
-
 /* Hang one room: segments in walk order, each group of slots centred on its
-   wall, every canvas centred on the hang line. `off` lifts the art a shade off
-   the wall so the frame never fights the plane it hangs on. */
-function muHangRoom(g, roomEl, ri) {
+   wall, every canvas centred on the hang line, a shade off the wall face. */
+function muHangRoom(g, ri) {
   const segs = muRoomSegs(g);
   muDistribute(g.slots, segs, g.gap);
 
@@ -4787,28 +4260,25 @@ function muHangRoom(g, roomEl, ri) {
       const c = t + slot.w / 2 - seg.len / 2;        // centred local offset
       const x = seg.cx + ax * c + nx * off;
       const z = seg.cz + az * c + nz * off;
-      // Each canvas gets its wall placard just left of the frame (left as the
-      // walk reads the wall), tucked at the frame's lower corner — mid-height
-      // in a tight hang floats halfway to the neighbour and reads as nobody's.
-      const label = (it, centerUp) => {
-        const cl = c - slot.w / 2 - 6 - MU_LBL_W / 2;
-        const ly = -(centerUp - it.h / 2 - MU_FRAME + MU_LBL_H / 2);
-        roomEl.appendChild(muLabelEl(it.work,
-          seg.cx + ax * cl + nx * off, ly, seg.cz + az * cl + nz * off, seg.rot));
-      };
       // The pile shares the hang line, first work on top — and a pile too
       // tall to centre there slides up just enough to keep its padding over
-      // the baseboard, stopping short of the crown's own (the room itself
-      // has grown to make that always possible). A single work is a pile of
-      // one, so it sits exactly on the line.
+      // the floor, stopping short of the springing line's own (the room
+      // itself has grown to make that always possible). A single work is a
+      // pile of one, so it sits exactly on the line.
       const hs = slot.items.map((it) => it.h + 2 * MU_FRAME);
       const S = hs.reduce((a, b) => a + b, 0) + MU_STACK_GAP * (hs.length - 1);
       let top = Math.min(Math.max(MU_HANG, MU_FLOOR_PAD + S / 2),
                          (g.H - MU_CROWN_PAD) - S / 2) + S / 2;
+      // Each canvas gets its wall placard just left of the frame (left as the
+      // walk reads the wall), tucked at the frame's lower corner — mid-height
+      // in a tight hang floats halfway to the neighbour and reads as nobody's.
+      const cl = c - slot.w / 2 - 6 - MU_LBL_W / 2;
       slot.items.forEach((it, k) => {
         const cy = top - hs[k] / 2;
-        roomEl.appendChild(muArtEl(it, x, -cy, z, seg.rot, ri));
-        label(it, cy);
+        muArtPlace(it, x, cy, z, seg, ri, {
+          x: seg.cx + ax * cl + nx * off, z: seg.cz + az * cl + nz * off,
+          y: cy - it.h / 2 - MU_FRAME + MU_LBL_H / 2,
+        });
         top -= hs[k] + MU_STACK_GAP;
       });
       t += slot.w + g.gap;
@@ -4816,20 +4286,83 @@ function muHangRoom(g, roomEl, ri) {
   });
 }
 
+/* One framed work on its wall: its record for the walk's own math (clicks,
+   placards, glides — in world coordinates, the room's offset applied) and
+   its entry in the renderer's plan, placard text included. */
+function muArtPlace(item, x, cy, z, seg, ri, lb) {
+  const fw = item.l + 2 * MU_FRAME, fh = item.h + 2 * MU_FRAME;
+  const rad = seg.rot * Math.PI / 180;
+  const pl = MU.place;
+  const w = item.work;
+  const wx = pl.cx + x, wz = pl.cz + z;
+  MU.arts.push({ work: w, est: item.est, ri: ri, x: wx, z: wz, w: fw, h: fh,
+                 nx: Math.sin(rad), nz: Math.cos(rad) });
+  const when = w.date || w.year;
+  MU.plan.arts.push({
+    ri: ri, id: w.id, wall: seg.wall, x: wx, z: wz, cy: cy, cw: item.l, ch: item.h,
+    nx: Math.sin(rad), nz: Math.cos(rad),
+    // Which frame a work wears is its own to keep: hashed from the id, so a
+    // wall mixes frames but every painting keeps its frame visit after visit.
+    frame: parseInt(w.id.slice(0, 6), 16) % 2,
+    src: thumbSrc(w),
+    lx: pl.cx + lb.x, ly: lb.y, lz: pl.cz + lb.z,
+    label: {
+      artist: w.artist || "Unknown artist", title: w.title || "Untitled",
+      date: when ? String(when) : "",
+      line3: [w.medium, cmDims(w)].filter(Boolean).join(" · "),
+    },
+  });
+}
+
+/* A room as the renderer takes it: its box in world centimetres, its
+   storey, paint and layout, and each door on its own wall — offset along
+   the wall (walk order) when the room slid to dodge an earlier one. */
+function muRoomPlan(g, i) {
+  const walls = {};
+  muWalls(g).forEach((w) => { walls[w.id] = w; });
+  return {
+    i: i, cx: g.cx, cz: g.cz, W: g.W, D: g.D, H: g.H, floor: g.floor || 0,
+    color: g.color, layout: g.layout, name: g.name,
+    doors: (g.doors || []).map((d) => {
+      const [ax, az] = muWallAxis(walls[d.wall].rot);
+      return {
+        wall: d.wall, ow: d.ow, oh: d.oh, kind: d.kind, closed: !!d.closed,
+        at: d.kind === "entry" ? (g.entryOff || 0) * (ax + az) : 0,
+        pi: d.pi, end: d.end,
+      };
+    }),
+  };
+}
+
+/* Where the traveller stands and faces at each end of a stairway or a
+   paired extra door. */
+function muPortals(g, i) {
+  muWalls(g).forEach((w) => {
+    (g.doors || []).forEach((d) => {
+      if (d.wall !== w.id || d.closed || d.pi == null) return;
+      if (d.kind !== "stairup" && d.kind !== "stairdown" && d.kind !== "pass") return;
+      const rad = w.rot * Math.PI / 180;
+      const nx = Math.sin(rad), nz = Math.cos(rad);
+      MU.portalPts[d.pi] = MU.portalPts[d.pi] || {};
+      const [ax, az] = muWallAxis(w.rot);
+      MU.portalPts[d.pi][d.end] = {
+        floor: g.floor || 0, ri: i, kind: d.kind,
+        ax: ax, az: az, nx: nx, nz: nz,
+        dx: g.cx + w.cx, dz: g.cz + w.cz,
+        x: g.cx + w.cx + nx * 130, z: g.cz + w.cz + nz * 130,
+        yaw: Math.atan2(nx, -nz),
+      };
+    });
+  });
+}
+
 function muBuild(museum) {
-  MU.world.innerHTML = "";
-  // the supersampling stage: everything lives inside this uniform scale
-  const stage = document.createElement("div");
-  stage.className = "mu-stage";
-  stage.style.transform = "scale3d(" + MU_SS + "," + MU_SS + "," + MU_SS + ")";
-  MU.world.appendChild(stage);
-  MU.stage = stage;
   MU.rooms = [];
-  MU.wraps = [];
   MU.arts = [];
   MU.targets = [];
   MU.portalPts = [];
   MU.floor = 0;
+  MU.plan = { rooms: [], arts: [], targets: [], stair: MU_STAIR };
   const rooms = museum.rooms.filter((r) => r.works.length);
   // Each room's works, in hang order — the walk a room hands the viewer when a
   // painting is opened: the room browses like a collection.
@@ -4946,13 +4479,13 @@ function muBuild(museum) {
     g.cx = cx; g.cz = cz;
   });
   geoms.forEach((g, i) => {
-    const el = muBuildRoom(g, i, geoms, MU.stage);
-    el.style.transform = "translate3d(" + g.cx + "px,0px," + g.cz + "px)";
+    MU.plan.rooms.push(muRoomPlan(g, i));
     MU.place = { cx: g.cx, cz: g.cz };
-    muHangRoom(g, el, i);
+    muHangRoom(g, i);
     MU.place = null;
+    muPortals(g, i);
     MU.rooms.push({ cx: g.cx, cz: g.cz, hx: g.W / 2, hz: g.D / 2,
-                    doors: [], layout: g.layout, name: g.name, el: el,
+                    doors: [], layout: g.layout, name: g.name,
                     floor: g.floor || 0 });
     if (g.door) {
       const door = g.door;
@@ -4976,27 +4509,22 @@ function muBuild(museum) {
   MU.cam.z = r0 ? r0.cz + r0.hz - Math.min(150, r0.hz / 2) : 0;
   MU.cam.yaw = 0;
   MU.cam.zoom = 1;
+  MU.cam.lift = 0;
+  MU.cam.pitch = 0;
   MU.ri = 0;
+  MU.gl.build(MU.plan);
   muRoomLabel();
   muCull();
   muMapBuild();
 }
 
 /* A marker lying on the floor before a doorway — the walk's one destination,
-   the way a street view offers the next stop and nothing else. It lives at
-   stage level in world centimetres, like the doorway it belongs to, and shows
-   only while you're standing in its own room (muCull).
-   The disc is drawn flat (rotateX) and turned so its chevron points the way
-   through (rotateY): the element's own up, -z after the flattening, is swung
-   onto u. */
+   the way a street view offers the next stop and nothing else. The renderer
+   lays it flat with its chevron pointing the way through (u), and shows it
+   only while you're standing in its own room. */
 function muTargetEl(ri, to, x, z, door, u) {
-  const rot = " rotateY(" + Math.atan2(-u[0], -u[1]).toFixed(4) + "rad) rotateX(90deg)";
-  const el = muEl("mu-target", 90, 90, muT(x, -0.6, z, rot));
-  el.dataset.to = to;
-  el.setAttribute("aria-hidden", "true");
-  el.innerHTML = '<span class="mu-target-arrow"></span>';
-  MU.stage.appendChild(el);
-  MU.targets.push({ el: el, ri: ri, to: to, dx: door.x, dz: door.z, u: u });
+  MU.plan.targets.push({ ri: ri, to: to, x: x, z: z, u: u });
+  MU.targets.push({ ri: ri, to: to, dx: door.x, dz: door.z, u: u });
 }
 
 /* Tapping that marker: out to the opening, then straight on to the middle of
@@ -5084,7 +4612,10 @@ function muMapBuild() {
     rects: [...host.querySelectorAll(".mm-room")],
     ri: -1,
   };
-  host.addEventListener("click", (e) => {
+  // one handler, however often the map is redrawn (every storey change),
+  // and none while a climb is carrying you
+  host.onclick = (e) => {
+    if (MU.climb) return;
     const t = e.target.closest(".mm-room");
     if (!t) return;
     const ri = +t.dataset.ri;
@@ -5109,7 +4640,7 @@ function muMapBuild() {
     }
     muWake();                        // the parked loop resumes for the landing
     muApply();
-  });
+  };
 }
 
 /* The wedge follows the camera; the tinted room follows the walk. Called from
@@ -5125,27 +4656,12 @@ function muMapSync() {
   }
 }
 
-/* Only the room you're in and its neighbours render; a museum of twenty rooms
-   is still only ever three rooms of planes for the compositor. Other storeys
-   render not at all: a storey is its own world until its stairs are taken. */
+/* Only the storey you're on is drawn, and on it the room you're in and its
+   near neighbours — how near is the renderer's call (museum3d/walk.js), as
+   is which rooms keep their pictures loaded. A storey is its own world until
+   its stairs are taken. */
 function muCull() {
-  const f = MU.floor || 0;
-  MU.rooms.forEach((r, i) =>
-    r.el.classList.toggle("mu-hidden", r.floor !== f || Math.abs(i - MU.ri) > 1));
-  // Phones go further: the neighbours keep their architecture — the view
-  // through a doorway — but hang their art only once you arrive. Every
-  // painting, frame and placard is a composited texture, and the phone's
-  // budget buys one roomful, not three.
-  if (MU.touch) {
-    MU.rooms.forEach((r, i) => r.el.classList.toggle("mu-far", i !== MU.ri));
-  }
-  // A doored wall serves two rooms: it stays up while either is near, or a
-  // visible room's far wall would vanish with its culled neighbour.
-  MU.wraps.forEach((w) =>
-    w.el.classList.toggle("mu-hidden",
-      w.floor !== f || MU.ri < w.a - 1 || MU.ri > w.b + 1));
-  // A destination you can't walk to from here isn't offered.
-  MU.targets.forEach((t) => t.el.classList.toggle("mu-hidden", t.ri !== MU.ri));
+  if (MU.gl) MU.gl.setView(MU.floor || 0, MU.ri);
 }
 
 /* The room's signage: its given name, or its number while it has none — and
@@ -5159,7 +4675,163 @@ function muRoomLabel() {
     (MU.floors > 1 ? " · Floor " + (r.floor + 1) : "");
 }
 
-/* Taking the stairs (or a paired extra door): the lights dip, and you come
+/* Taking the stairs: walked, not faded. Behind each stair door stands the
+   same stair hall (museum3d/stairs.js), its lower floor level with the
+   room below on the "up" end and dropped a storey on the "down" end. The
+   climb is a stroll in the hall's own coordinates — through the door, up
+   the first flight, round the half landing, up the second, out of the
+   upper door — drawn in the hall of the end it started from until the
+   landing, then in the other end's hall. The hand-over happens mid-turn,
+   facing the side wall, where both halls look exactly alike, so the storeys
+   swap without a seam. A descent is the same stroll backward. */
+function muStairFrame(p) {
+  const ax = p.ax, az = p.az, hx = -p.nx, hz = -p.nz;   // hall x, hall z (into the hall)
+  return {
+    pos: (x, z) => ({ x: p.dx + ax * x + hx * (z + 2), z: p.dz + az * x + hz * (z + 2) }),
+    yaw: (h) => Math.atan2(ax * Math.sin(h) + hx * Math.cos(h), -(az * Math.sin(h) + hz * Math.cos(h))),
+    local: (wx, wz) => {
+      const rx = wx - p.dx, rz = wz - p.dz;
+      return { x: rx * ax + rz * az, z: rx * hx + rz * hz - 2 };
+    },
+    heading: (yaw) => {
+      const fx = Math.sin(yaw), fz = -Math.cos(yaw);
+      return Math.atan2(fx * ax + fz * az, fx * hx + fz * hz);
+    },
+  };
+}
+
+/* The way up, in the lower hall's coordinates (x across, z into the hall,
+   y up from its floor; h the heading, 0 facing into the hall). */
+function muStairPath() {
+  const S = MU_STAIR;
+  const r = S.FF / (2 * S.N), RUN = (S.N - 1) * S.T, YL = S.N * r;
+  const xa = -(S.FW + S.G) / 2, xb = -xa;
+  const top = S.F0 + RUN;
+  return [
+    { x: 0, z: -14, y: 0, h: 0 },
+    { x: xa, z: S.F0 - 18, y: 0, h: 0 },
+    { x: xa, z: top + 6, y: YL, h: 0 },
+    { x: xa + 12, z: top + 56, y: YL, h: 0.95 },
+    { x: 0, z: top + 70, y: YL, h: Math.PI / 2, swap: true },
+    { x: xb - 12, z: top + 56, y: YL, h: Math.PI - 0.95 },
+    { x: xb, z: top + 6, y: YL, h: Math.PI },
+    { x: xb, z: S.F0 - 6, y: S.FF, h: Math.PI },
+    { x: xb * 0.35, z: S.F0 * 0.45, y: S.FF, h: Math.PI },
+    { x: 0, z: -14, y: S.FF, h: Math.PI },
+    { x: 0, z: -132, y: S.FF, h: Math.PI },
+  ];
+}
+
+function muClimb(pi, end) {
+  const pts = MU.portalPts[pi];
+  const a = pts && pts[end], b = pts && pts[end === "a" ? "b" : "a"];
+  if (!a || !b || !MU_STAIR) return;
+  // the far end's room not lit yet (a climb in the first moments of a
+  // visit): take the stairs the old way, through the dark
+  if (!MU.gl || !MU.gl.isBuilt(b.ri)) { muPortalJump(pi, end); return; }
+  const up = a.kind === "stairup";
+  const FF = MU_STAIR.FF;
+  const FA = muStairFrame(a);
+  // the path runs upward in the lower hall; a descent runs it backward,
+  // facing the other way
+  let path = muStairPath().map((q) => Object.assign({}, q));
+  if (!up) {
+    // backward, it starts at the upper doorway (not back in the room, where
+    // an ascent ends) and carries on into the lower room as far as an
+    // ascent's arrival, so the walk neither backs off nor jumps at the end
+    path = path.reverse().map((q) => Object.assign(q, { h: q.h + Math.PI }));
+    path.shift();
+    path.push({ x: 0, z: -132, y: 0, h: Math.PI });
+  }
+  const here = FA.local(MU.cam.x, MU.cam.z);
+  path.unshift({ x: here.x, z: here.z, y: up ? 0 : FF, h: FA.heading(MU.cam.yaw) });
+  for (let i = 1; i < path.length; i++) {
+    while (path[i].h - path[i - 1].h > Math.PI) path[i].h -= 2 * Math.PI;
+    while (path[i].h - path[i - 1].h < -Math.PI) path[i].h += 2 * Math.PI;
+  }
+  // the gaze follows the stairs: down a flight you look at the steps, up
+  // one a little ahead, and level again on the landings
+  const slope = (i) => (i + 1 < path.length ? Math.sign(Math.round(path[i + 1].y - path[i].y)) : 0);
+  path.forEach((q, i) => {
+    const s0 = slope(i), s1 = slope(i + 1);
+    q.p = s0 < 0 ? -0.58 : s0 > 0 ? 0.07 : s1 < 0 ? -0.28 : 0;
+  });
+  // distance along the path paces it — steps count for more than floor,
+  // and turning takes time of its own, so the landing isn't a whirl
+  const at = [0];
+  for (let i = 1; i < path.length; i++) {
+    const p0 = path[i - 1], p1 = path[i];
+    at.push(at[i - 1] + Math.hypot(p1.x - p0.x, p1.z - p0.z, (p1.y - p0.y) * 1.6) +
+            Math.abs(p1.h - p0.h) * 70);
+  }
+  const total = at[at.length - 1];
+  const swapAt = at[path.findIndex((q) => q.swap)];
+  MU.climb = {
+    path: path, at: at, total: total, swapAt: swapAt, t0: null,
+    dur: Math.max(5200, Math.min(10000, total / 0.16)),
+    from: a, to: b, swapped: false,
+  };
+  MU.glide = null;
+  MU.vel.f = MU.vel.t = 0;
+  MU.portalCool = Infinity;
+  // the far room gets ready now, at the foot of the stairs
+  MU.gl.prepare(b.floor, b.ri);
+  muWake();
+}
+
+/* One frame of the climb: where along the path, on a Catmull-Rom curve
+   through its points, and in which end's hall. */
+function muClimbStep(ts) {
+  const c = MU.climb;
+  if (c.t0 == null) c.t0 = ts;
+  const p = Math.max(0, Math.min(1, (ts - c.t0) / c.dur));
+  const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+  const d = e * c.total;
+  let i = 1;
+  while (i < c.at.length - 1 && c.at[i] < d) i++;
+  const t = (d - c.at[i - 1]) / ((c.at[i] - c.at[i - 1]) || 1);
+  const P = c.path;
+  const q0 = P[Math.max(0, i - 2)], q1 = P[i - 1], q2 = P[i], q3 = P[Math.min(P.length - 1, i + 1)];
+  const cr = (k) => {
+    const a0 = q0[k], a1 = q1[k], a2 = q2[k], a3 = q3[k];
+    return 0.5 * ((2 * a1) + (-a0 + a2) * t + (2 * a0 - 5 * a1 + 4 * a2 - a3) * t * t +
+                  (-a0 + 3 * a1 - 3 * a2 + a3) * t * t * t);
+  };
+  const lin = (k) => q1[k] + (q2[k] - q1[k]) * t;
+  const x = cr("x"), z = cr("z"), h = cr("h");
+  MU.cam.pitch = cr("p");
+  // on a flight the eye rises with the steps, straight
+  const y = (q1.y !== q2.y) ? lin("y") : q1.y;
+  if (!c.swapped && d >= c.swapAt) {
+    c.swapped = true;
+    MU.floor = c.to.floor;
+    MU.ri = c.to.ri;
+    muRoomLabel();
+    muCull();
+    muMapBuild();
+  }
+  const endP = c.swapped ? c.to : c.from;
+  const F = muStairFrame(endP);
+  const w = F.pos(x, z);
+  MU.cam.x = w.x;
+  MU.cam.z = w.z;
+  MU.cam.yaw = F.yaw(h);
+  // the lower end's hall stands on its room's floor; the upper end's is
+  // dropped a storey, so its lift is measured down from the upper floor
+  MU.cam.lift = y - (endP.kind === "stairdown" ? MU_STAIR.FF : 0);
+  if (p >= 1) {
+    MU.climb = null;
+    MU.cam.lift = 0;
+    MU.cam.pitch = 0;
+    MU.cam.x = c.to.x;
+    MU.cam.z = c.to.z;
+    MU.cam.yaw = c.to.yaw;
+    MU.portalCool = ts;
+    MU.gl.prepare(null);
+  }
+}
+
+/* Through a paired extra door: the lights dip, and you come
    out of the partner door — the storeys swap, the map redraws, the walk goes
    on. A breath of cooldown so arriving beside a stair doesn't bounce you
    straight back through it. */
@@ -5169,7 +4841,11 @@ function muPortalJump(pi, end) {
   if (!to || !MU.fade) return;
   MU.portalCool = Infinity;
   MU.fade.classList.add("on");
+  // the walk may be closed while the lights are down
+  const token = MU.token;
+  const live = () => MU.active && MU.token === token;
   setTimeout(() => {
+    if (!live()) return;
     MU.glide = null;
     MU.vel.f = MU.vel.t = 0;
     MU.cam.x = to.x;
@@ -5183,7 +4859,7 @@ function muPortalJump(pi, end) {
     muApply();
     MU.portalCool = performance.now();
     muWake();
-    setTimeout(() => MU.fade.classList.remove("on"), 60);
+    setTimeout(() => { if (live()) MU.fade.classList.remove("on"); }, 60);
   }, 240);
 }
 
@@ -5224,21 +4900,18 @@ function muMove(dx, dz) {
 
 function muApply() {
   const cam = MU.cam;
-  // The camera hasn't moved: write nothing, so the compositor sees a still
-  // scene and the frame loop can tell stillness from motion (and park).
+  // The camera hasn't moved: draw nothing, so the frame loop can tell
+  // stillness from motion (and park).
   const a = MU.appl;
   if (a && a.x === cam.x && a.z === cam.z && a.yaw === cam.yaw &&
-      a.zoom === cam.zoom && a.p === MU.baseP) return false;
-  MU.appl = { x: cam.x, z: cam.z, yaw: cam.yaw, zoom: cam.zoom, p: MU.baseP };
-  const P = Math.round(MU.baseP * cam.zoom);
-  MU.vp.style.perspective = P + "px";
-  // The CSS eye sits at z = +P, so the world is pushed P forward first: the
-  // camera position then lands exactly at the eye, and a painting d cm away
-  // renders at size·P/d — a true pinhole.
-  MU.world.style.transform =
-    "translateZ(" + P + "px) rotateY(" + cam.yaw.toFixed(4) + "rad) " +
-    "translate3d(" + (-cam.x * MU_SS).toFixed(1) + "px," + (MU_EYE * MU_SS) +
-    "px," + (-cam.z * MU_SS).toFixed(1) + "px)";
+      a.zoom === cam.zoom && a.lift === cam.lift && a.pitch === cam.pitch) return false;
+  MU.appl = { x: cam.x, z: cam.z, yaw: cam.yaw, zoom: cam.zoom, lift: cam.lift, pitch: cam.pitch };
+  if (MU.gl) {
+    MU.gl.setCamera(cam.x, cam.z, cam.yaw, cam.zoom, cam.lift || 0, cam.pitch || 0);
+    // inside the frame loop, draw now; from an input event, on the next frame
+    if (MU.inFrame) MU.gl.render();
+    else MU.gl.requestRender();
+  }
   if (MU.map) muMapSync();
   return true;
 }
@@ -5265,18 +4938,21 @@ function muNearest(ts) {
     if (score > bestScore) { bestScore = score; best = a; }
   }
   // Desktop only: a phone never trades its thumbnail up — decoding a
-  // view-size JPEG mid-walk is exactly the memory spike its compositor
-  // can't absorb, and at phone plane sizes the thumbnail already covers.
-  if (best && !best.hi && !MU.touch && Math.hypot(best.x - cam.x, best.z - cam.z) < 480) {
-    best.hi = true;                    // walk up close and the full image loads
-    best.img.src = viewSrc(best.work);
+  // view-size JPEG mid-walk is exactly the memory spike its GPU can't
+  // absorb, and at a phone's screen size the thumbnail already covers.
+  // Asked on every tick you stand before it: the renderer ignores a repeat,
+  // and after the room has been out of reach (its pictures let go) the
+  // next visit asks again.
+  if (best && !MU.touch && MU.gl && Math.hypot(best.x - cam.x, best.z - cam.z) < 480) {
+    MU.gl.upgrade(best.work.id, viewSrc(best.work));   // walk up close and the full image loads
   }
 }
 
 /* Where the camera stands to look at a painting properly: square-on, at a
    distance where it fills the view comfortably. */
 function muGlideTarget(art) {
-  const d = Math.max(150, Math.min(520, 1.25 * Math.max(art.w, art.h * 1.4)));
+  // (the view is 58° tall at no zoom, so a painting fills it from here)
+  const d = Math.max(140, Math.min(480, 1.12 * Math.max(art.w, art.h * 1.4)));
   const r = MU.rooms[art.ri];
   // stand inside the painting's own room, whatever its size
   const x = Math.max(r.cx - r.hx + 50, Math.min(r.cx + r.hx - 50, art.x + art.nx * d));
@@ -5312,10 +4988,13 @@ function muGlideTo(art) {
 
 function muFrame(ts) {
   if (!MU.active) return;
+  MU.inFrame = true;
   const dt = Math.min(0.05, (ts - MU.last) / 1000 || 0.016);
   MU.last = ts;
   const k = MU.keys;
-  if (MU.glide) {
+  if (MU.climb) {
+    muClimbStep(ts);
+  } else if (MU.glide) {
     const gl = MU.glide;
     if (gl.t0 == null) gl.t0 = ts;
     const p = Math.max(0, Math.min(1, (ts - gl.t0) / gl.dur));
@@ -5356,7 +5035,7 @@ function muFrame(ts) {
   // Walk up to a stairway (or a paired extra door) facing it, and it takes
   // you: through the dark, out the partner. A breath of cooldown after each
   // crossing so the arrival doesn't bounce straight back.
-  if (MU.portalPts && MU.portalPts.length &&
+  if (MU.portalPts && MU.portalPts.length && !MU.climb &&
       ts - (MU.portalCool || 0) > 1600) {
     const fx = Math.sin(MU.cam.yaw), fz = -Math.cos(MU.cam.yaw);
     outer:
@@ -5368,13 +5047,15 @@ function muFrame(ts) {
         const dx = p2.dx - MU.cam.x, dz = p2.dz - MU.cam.z;
         const d = Math.hypot(dx, dz) || 1;
         if (d < 80 && (dx * fx + dz * fz) / d > 0.55) {
-          muPortalJump(pi, end);
+          if (p2.kind === "stairup" || p2.kind === "stairdown") muClimb(pi, end);
+          else muPortalJump(pi, end);
           break outer;
         }
       }
     }
   }
   const wrote = muApply();
+  MU.inFrame = false;
   muNearest(ts);
   // A still museum needs no frames. A second after the last real movement the
   // loop parks — no style writes, no wakeups, a cool phone — and any key,
@@ -5409,8 +5090,9 @@ function muKeyUp(e) { if (MU_KEYSET[e.key]) MU.keys[e.key] = false; }
 function muBlur() { MU.keys = {}; }  // a key released outside the window stays released
 
 function muResize() {
-  if (!MU.vp) return;
-  MU.baseP = Math.max(420, MU.vp.clientHeight * 1.02);
+  if (!MU.gl) return;
+  MU.gl.resize();
+  MU.appl = null;
   muApply();
 }
 
@@ -5440,7 +5122,8 @@ function muPointerDown(e) {
     MU.drag = null;                         // a pinch is not a stroll
     return;
   }
-  MU.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, el: e.target };
+  MU.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0,
+              sx: e.clientX, sy: e.clientY };
 }
 function muPointerMove(e) {
   if (!MU.points.has(e.pointerId)) return;
@@ -5457,6 +5140,7 @@ function muPointerMove(e) {
   }
   const g = MU.drag;
   if (!g || g.id !== e.pointerId) return;
+  if (MU.climb) return;                     // on the stairs the stairs lead
   const dx = e.clientX - g.x, dy = e.clientY - g.y;
   g.x = e.clientX; g.y = e.clientY;
   g.moved += Math.hypot(dx, dy);
@@ -5475,23 +5159,22 @@ function muPointerUp(e) {
   if (!g || g.id !== e.pointerId) return;
   MU.drag = null;
   if (g.moved > MU_TAP_SLOP) return;        // that was a walk, not a tap
-  muTap(g.el);
+  muTap(MU.gl ? MU.gl.pick(g.sx, g.sy) : null);
 }
 
-/* What a tap means — one tap, mouse or finger alike. The floor marker takes
-   you to the next room. A painting brings you to stand square before it, and
-   a tap once you're standing there opens it. (A press that travels is a walk,
-   never a tap, so dragging across a canvas doesn't march you anywhere.) */
-function muTap(el) {
-  if (!el || !el.closest) return;
-  const mark = el.closest(".mu-target");
-  if (mark) { muTravel(+mark.dataset.to); return; }
+/* What a tap means — one tap, mouse or finger alike, as the renderer found
+   it under the pointer. The floor marker takes you to the next room. A
+   painting brings you to stand square before it, and a tap once you're
+   standing there opens it. (A press that travels is a walk, never a tap, so
+   dragging across a canvas doesn't march you anywhere.) */
+function muTap(hit) {
+  if (!hit || MU.climb) return;
+  if (hit.kind === "target") { muTravel(hit.to); return; }
   // A stairway or paired extra door: stroll to its mouth; the walk-up
   // trigger in the frame loop carries you through.
-  const portal = el.closest("[data-portal]");
-  if (portal) {
-    const pts = MU.portalPts[+portal.dataset.portal];
-    const p2 = pts && pts[portal.dataset.end];
+  if (hit.kind === "portal") {
+    const pts = MU.portalPts[hit.pi];
+    const p2 = pts && pts[hit.end];
     if (!p2) return;
     const from = { x: MU.cam.x, z: MU.cam.z, yaw: MU.cam.yaw };
     let dy = Math.atan2(p2.dx - from.x, -(p2.dz - from.z)) - from.yaw;
@@ -5508,9 +5191,8 @@ function muTap(el) {
     muWake();
     return;
   }
-  const hit = el.closest(".mu-art");
-  if (!hit) return;
-  const art = MU.arts.find((a) => a.el === hit);
+  if (hit.kind !== "art") return;
+  const art = MU.arts.find((a) => a.work.id === hit.id);
   if (!art) return;
   // Standing there already? Then this means "open it" — the same viewer a
   // gallery or collection opens, with this room as the walk, so ← → browse
@@ -5534,12 +5216,16 @@ function muTeardown() {
   window.removeEventListener("blur", muBlur);
   window.removeEventListener("resize", muResize);
   document.body.classList.remove("mu-open");
-  MU.vp = MU.world = MU.clip = MU.glide = MU.map = null;
+  MU.token = (MU.token || 0) + 1;     // a renderer still loading arrives to nothing
+  MU.climb = null;                    // leaving mid-flight leaves the stairs too
+  MU.cam.lift = 0;
+  MU.cam.pitch = 0;
+  if (MU.gl) { MU.gl.dispose(); MU.gl = null; }
+  MU.clip = MU.glide = MU.map = null;
   MU.keys = {};
   MU.drag = MU.pinch = null;
   MU.points.clear();
   MU.rooms = [];
-  MU.wraps = [];
   MU.arts = [];
   MU.targets = [];
   MU.portalPts = [];
@@ -5594,13 +5280,14 @@ async function collectionWalkView(cid) {
 
 /* Boot the walk over resolved rooms — the museum's, or a collection's one.
    `o.exit` is where ✕ and Escape land, `o.arrange` the top-bar link (or ""),
-   and `o.map` whether the corner plan renders: one room has nothing to plot. */
+   and `o.map` whether the corner plan renders: one room has nothing to plot.
+   The renderer is fetched on first use, so three.js and the museum's own
+   modules cost nothing to anybody who never walks in. */
 function muOpenWalk(museum, o) {
   const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
   app.innerHTML =
     '<div id="museum" class="museum' + (touch ? " touch" : "") + '">' +
-      '<div class="mu-clip" id="mu-clip"><div class="mu-vp" id="mu-vp">' +
-      '<div class="mu-world" id="mu-world"></div></div></div>' +
+      '<div class="mu-clip" id="mu-clip"></div>' +
       '<div class="mu-hud">' +
         '<div class="mu-top">' +
           '<span class="eyebrow">' + esc(siteShort() || siteTitle()) + "</span>" +
@@ -5616,11 +5303,10 @@ function muOpenWalk(museum, o) {
         (touch || !o.map ? "" : '<div class="mu-map" id="mu-map" aria-label="Museum plan"></div>') +
       "</div>" +
       '<div class="mu-rotate">⟳&nbsp; Turn your phone sideways — the museum is a landscape.</div>' +
-      '<div class="mu-fade" id="mu-fade" aria-hidden="true"></div>' +
+      '<div class="mu-fade on" id="mu-fade" aria-hidden="true"></div>' +
+      '<div class="mu-loading" id="mu-loading">Opening the museum…</div>' +
     "</div>";
 
-  MU.vp = $("#mu-vp");
-  MU.world = $("#mu-world");
   MU.clip = $("#mu-clip");
   MU.fade = $("#mu-fade");
   MU.portalCool = 0;
@@ -5628,9 +5314,7 @@ function muOpenWalk(museum, o) {
   MU.exit = o.exit;
   MU.active = true;
   document.body.classList.add("mu-open");
-  muResize();
-  muBuild(museum);
-  muApply();
+  const token = MU.token = (MU.token || 0) + 1;
 
   // Capture phase, so the viewer-open gate above reads the viewer's state
   // before the viewer's own (bubble) handler acts on the same key.
@@ -5659,10 +5343,37 @@ function muOpenWalk(museum, o) {
     }).catch(() => {});
   }
 
-  MU.last = 0;
-  MU.appl = null;                    // first muFrame must write, whatever the camera says
-  MU.moveTs = performance.now();     // and the loop starts awake
-  MU.raf = requestAnimationFrame(muFrame);
+  import("/static/museum3d/walk.js").then((mod) => {
+    if (!MU.active || MU.token !== token) return;
+    MU.gl = mod.createWalk(MU.clip, { touch: touch });
+    muBuild(museum);
+    MU.last = 0;
+    MU.appl = null;
+    muApply();
+    // the veil lifts once the room you stand in has been built and lit
+    MU.gl.ready((ok) => {
+      if (!MU.active || MU.token !== token) return;
+      if (!ok) {
+        const ld = $("#mu-loading");
+        if (ld) ld.textContent = "The museum couldn’t be built in this browser. Reload the page to try again.";
+        return;
+      }
+      MU.appl = null;                // the first frame must draw, whatever the camera says
+      muApply();
+      MU.gl.render();
+      const ld = $("#mu-loading");
+      if (ld) ld.remove();
+      MU.fade.classList.remove("on");
+      MU.moveTs = performance.now();   // and the loop starts awake
+      if (!MU.raf) MU.raf = requestAnimationFrame(muFrame);
+    });
+  }).catch((err) => {
+    console.error(err);
+    if (!MU.active || MU.token !== token) return;
+    const ld = $("#mu-loading");
+    if (ld) ld.textContent = "This browser can’t draw the museum: it needs WebGL, " +
+      "which is switched off or unavailable here.";
+  });
 }
 
 /* ============================== add / downloads ============================== */
